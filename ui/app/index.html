@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>古四音乐</title>
+<link rel="icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <!-- 登录 -->
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <img src="assets/icon.png" alt="" class="login-logo">
+      <h1>古四音乐</h1>
+      <p class="login-sub">NAS 私人音乐库</p>
+      <label>用户名<input id="login-name" autocomplete="username" required></label>
+      <label>连接码<input id="login-pass" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="primary" id="login-btn">登 录</button>
+      <p id="login-err" class="login-err"></p>
+      <p class="login-hint" id="login-hint"></p>
+    </form>
+    <form id="register-form" class="login-card" hidden>
+      <img src="assets/icon.png" alt="" class="login-logo">
+      <h1>创建账户</h1>
+      <p class="login-sub">首个用户注册后自动开启服务</p>
+      <label>用户名（1-32 位字母/数字/_）<input id="reg-name" autocomplete="username" minlength="1" maxlength="32" pattern="[A-Za-z0-9_]+" required></label>
+      <label>密码（至少 6 位）<input id="reg-pass" type="password" autocomplete="new-password" minlength="6" required></label>
+      <label>确认密码<input id="reg-pass2" type="password" autocomplete="new-password" minlength="6" required></label>
+      <button type="submit" class="primary" id="reg-btn">注 册 并 登 录</button>
+      <p id="reg-err" class="login-err"></p>
+      <p class="login-hint">注册后可下载最多 1GB 网盘容量，每年 +2GB，最高 10GB</p>
+    </form>
+  </div>
+
+  <!-- 应用壳 -->
+  <div id="shell" class="shell" hidden>
+    <aside id="sidebar" class="sidebar">
+      <div class="brand"><img src="assets/icon.png" alt=""><span>古四音乐</span></div>
+      <nav class="nav">
+        <a href="#/home" data-nav="home"><svg viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.6V21h13V9.6"/><path d="M10 21v-6h4v6"/></svg>首页</a>
+        <a href="#/tracks" data-nav="tracks"><svg viewBox="0 0 24 24"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>全部歌曲</a>
+        <a href="#/albums" data-nav="albums"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.1"/><path d="M12 8.9v6.2M7.5 11.6l9 2.6M7.5 14.2l9-2.6"/></svg>专辑</a>
+        <a href="#/artists" data-nav="artists"><svg viewBox="0 0 24 24"><rect x="9.2" y="2.6" width="5.6" height="11" rx="2.8"/><path d="M4.8 11.5a7.2 7.2 0 0 0 14.4 0"/><path d="M12 18.7V22"/></svg>歌手</a>
+        <a href="#/search" data-nav="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.6"/><path d="m20.4 20.4-4.5-4.5"/></svg>搜索</a>
+        <a href="#/online" data-nav="online"><svg viewBox="0 0 24 24"><path d="M3.5 12.5a7.5 7.5 0 0 1 10.8-6.9"/><path d="M7 12.5a3.8 3.8 0 0 1 7-1.7"/><path d="M3.5 17.5h11"/><circle cx="17.8" cy="17.5" r="2.7"/><path d="M20.5 15.4a3.5 3.5 0 0 1 0 4.2"/></svg>在线</a>
+        <a href="#/downloads" data-nav="downloads"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 11 5 4 5-4"/><path d="M4 17v2.6A1.4 1.4 0 0 0 5.4 21h13.2A1.4 1.4 0 0 0 20 19.6V17"/></svg>下载</a>
+      </nav>
+      <div class="pl-head"><span>歌单</span><button id="pl-create" title="新建歌单">＋</button></div>
+      <div id="pl-list" class="pl-list"></div>
+      <div class="side-foot">
+        <span id="who"></span>
+        <span class="side-links">
+          <a href="admin/" title="管理后台"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v3.4M12 18v3.4M2.6 12H6M18 12h3.4M5.2 5.2 7.6 7.6M16.4 16.4l2.4 2.4M18.8 5.2l-2.4 2.4M7.6 16.4l-2.4 2.4"/></svg></a>
+          <button id="logout" title="退出登录"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.2 6.8a8 8 0 1 0 11.6 0"/></svg></button>
+        </span>
+      </div>
+    </aside>
+
+    <main id="main" class="main"><div id="view" class="view"></div></main>
+
+    <!-- 队列抽屉 -->
+    <div id="queue" class="queue" hidden>
+      <div class="queue-head"><b>播放队列</b><span id="queue-count"></span><button id="queue-close" title="关闭">×</button></div>
+      <div id="queue-body" class="queue-body"></div>
+    </div>
+
+    <!-- 歌词全屏 / 播放页（CD + 歌词，点击底栏封面或按 L 键打开） -->
+    <div id="lyric-full" class="lyric-full" hidden>
+      <div id="lf-bg" class="lf-bg"></div>
+      <div class="lf-head">
+        <button id="lf-close" title="返回（Esc）"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>返回</button>
+        <span id="lf-title"></span>
+        <span></span>
+      </div>
+      <div class="lf-stage">
+        <div class="lf-disc-wrap">
+          <div id="lf-disc" class="lf-disc">
+            <div class="lf-disc-inner"><img id="lf-disc-cover" alt=""></div>
+            <div class="lf-disc-label"></div>
+            <div class="lf-disc-hub"></div>
+          </div>
+        </div>
+        <div id="lf-body" class="lf-body"></div>
+      </div>
+      <!-- 播放控制条：桌面端与底栏重复显示；移动端底栏隐藏，此条是主控台 -->
+      <div class="lf-ctrls" id="lf-ctrls">
+        <div class="seek-row lf-seek">
+          <span id="lf-t-cur" class="time">0:00</span>
+          <div id="lf-seek" class="seek"><div id="lf-seek-fill" class="seek-fill"></div></div>
+          <span id="lf-t-dur" class="time">0:00</span>
+        </div>
+        <div class="lf-btns">
+          <button id="lf-mode" class="icon-btn" title="播放模式">⇄</button>
+          <button id="lf-prev" class="icon-btn" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M18 6.5 8.5 12 18 17.5z"/></svg></button>
+          <button id="lf-play" class="icon-btn play" title="播放/暂停"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8.2 5.4v13.2L19.5 12Z"/></svg></button>
+          <button id="lf-next" class="icon-btn" title="下一首"><svg viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M6 6.5 15.5 12 6 17.5z"/></svg></button>
+          <div class="vol-wrap"><button id="lf-vol-ico" class="icon-btn" title="音量"><svg viewBox="0 0 24 24"><path d="M4 9.2v5.6h3.6L12 18.8V5.2L7.6 9.2Z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6"/></svg></button><input id="lf-vol" type="range" min="0" max="100" value="80"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 播放器底栏 -->
+    <footer id="player" class="player" hidden>
+      <div class="np">
+        <div class="np-art"><img id="np-cover" class="np-cover" alt="" src=""><span class="np-eq" id="np-eq"><i></i><i></i><i></i></span></div>
+        <div class="np-meta"><div id="np-name" class="np-name">—</div><div id="np-singer" class="np-singer">—</div></div>
+        <button id="np-love" class="icon-btn" title="收藏"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 20.6s-7.9-5-7.9-10.3A4.5 4.5 0 0 1 12 7.5a4.5 4.5 0 0 1 7.9 2.8c0 5.3-7.9 10.3-7.9 10.3Z"/></svg></button>
+        <button id="np-download" class="icon-btn" title="下载当前曲目"><svg viewBox="0 0 24 24"><path d="M12 3.5v11.5"/><path d="m7.5 11 4.5 4.5L16.5 11"/><path d="M4.5 20h15"/></svg></button>
+      </div>
+      <div class="center">
+        <div class="ctrls">
+          <button id="btn-mode" class="icon-btn" title="播放模式">⇄</button>
+          <button id="btn-prev" class="icon-btn" title="上一首"><svg viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M18 6.5 8.5 12 18 17.5z"/></svg></button>
+          <button id="btn-play" class="icon-btn play" title="播放/暂停"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8.2 5.4v13.2L19.5 12Z"/></svg></button>
+          <button id="btn-next" class="icon-btn" title="下一首"><svg viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M6 6.5 15.5 12 6 17.5z"/></svg></button>
+          <button id="btn-queue" class="icon-btn" title="队列"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.6" cy="6" r="1.3"/><circle cx="3.6" cy="12" r="1.3"/><circle cx="3.6" cy="18" r="1.3"/></svg></button>
+        </div>
+        <div class="seek-row">
+          <span id="t-cur" class="time">0:00</span>
+          <div id="seek" class="seek"><div id="seek-fill" class="seek-fill"><span class="seek-knob"></span></div></div>
+          <span id="t-dur" class="time">0:00</span>
+        </div>
+      </div>
+      <div class="right">
+        <button id="btn-lyric" class="icon-btn lyric-btn" title="歌词"><svg viewBox="0 0 24 24"><path d="M6.5 5.5h11M6.5 9.5h11M6.5 13.5H13"/><path d="M15 15.5v-4.8a2.8 2.8 0 1 0 1.8 2.6"/></svg></button>
+        <span class="vol-wrap"><button id="vol-ico" class="icon-btn" title="音量"><svg viewBox="0 0 24 24"><path d="M4 9.2v5.6h3.6L12 18.8V5.2L7.6 9.2Z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6"/></svg></button><input id="vol" type="range" min="0" max="100" value="80"></span>
+      </div>
+    </footer>
+
+    <!-- 移动端顶栏 -->
+    <header id="topbar" class="topbar">
+      <button id="menu-btn" class="tb-btn"><svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16"/></svg></button>
+      <span id="top-title">古四音乐</span>
+      <a href="#/search" class="top-search tb-btn"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.6"/><path d="m20.4 20.4-4.5-4.5"/></svg></a>
+    </header>
+    <div id="mask" class="mask" hidden></div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <div id="dialog" class="dialog" hidden><div class="dialog-box"><h3 id="dlg-title"></h3><input id="dlg-input"><p id="dlg-msg" hidden></p><div class="dlg-btns"><button id="dlg-cancel">取消</button><button id="dlg-ok" class="primary">确定</button></div></div></div>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

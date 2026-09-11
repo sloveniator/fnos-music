@@ -1,0 +1,36 @@
+[
+  {
+    "stepTitle": "安装 古四音乐",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_app_port",
+        "label": "应用端口",
+        "initValue": "43000",
+        "helpText": "同步服务监听端口（局域网内洛雪音乐客户端将连接此端口）。默认 43000。",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入端口号"
+          },
+          {
+            "pattern": "^[0-9]+$",
+            "message": "端口号必须是数字"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_admin_password",
+        "label": "管理密码",
+        "initValue": "",
+        "helpText": "Web 管理后台（http://NAS地址:端口/admin/）的登录密码。留空则自动生成，安装日志中可查看。",
+        "rules": [
+          {
+            "required": false
+          }
+        ]
+      }
+    ]
+  }
+]

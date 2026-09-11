@@ -1,0 +1,662 @@
+import http from 'node:http'
+import path from 'node:path'
+import fs from 'node:fs'
+import { serveAudio } from '@/library/stream'
+import { extractCover } from '@/library/metadata'
+import { tenantGroupingSeed, listTenantTracks, getTenantTrack, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings } from '@/library/tenant'
+import {
+  tenantListAlbums, tenantListArtists, tenantAlbumTracks, tenantArtistAlbums, tenantArtistTracks,
+} from './grouping'
+import {
+  loginBlocked, loginFail, loginSuccess, createSession, verifySession, destroySession,
+} from './session'
+import {
+  createPlaylist, renamePlaylist, removePlaylists, addTrackIds, removeMusicIds,
+  clearPlaylist, toggleLove, recordPlayed, getPlayed, overwritePlaylistOrder,
+} from './playlists'
+import { getUserSpace } from '@/user'
+import { LIST_IDS } from '@/constants'
+import { lyricWithFallback } from '@/online/lyric-fallback'
+import { onlineSources, onlineSearch, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList } from '@/online'
+import { pipeHttpStream } from '@/utils/httpPipe'
+import {
+  enqueue, enqueueMany, listTasks, getTask, removeTask, retryTask, batchOperate, parsePlaylistText,
+  stats as downloadStats, subscribe as subscribeDownload, searchForDownload,
+} from '@/downloads/queue'
+import {
+  isRegisterOpen, registerUser, findRegisteredUser, verifyPassword,
+  regBlocked, regFail, regSuccess,
+} from '@/user/register'
+import { getQuota, canAcceptBytes } from '@/user/quota'
+
+// ---------------------------------------------------------------------------
+// /web/* — 消费者音乐应用 API（会话鉴权）
+//   POST /web/login|logout   GET /web/me
+//   GET  /web/api/*          曲库浏览/搜索/统计/歌单/最近播放
+//   POST /web/api/*          歌单增删改/收藏切换/播放记录
+//   GET  /web/media/*        流/封面/歌词/下载（token 可走 ?k= 供 <audio>/<img> 用）
+// ---------------------------------------------------------------------------
+
+const json = (res: http.ServerResponse, code: number, data: unknown): void => {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify(data))
+}
+const ok = (res: http.ServerResponse, data: unknown): void => json(res, 200, { code: 0, data })
+const fail = (res: http.ServerResponse, code: number, msg: string): void => json(res, code, { code: -1, msg })
+
+const readBody = (req: http.IncomingMessage): Promise<string> => new Promise((resolve, reject) => {
+  const chunks: Buffer[] = []
+  let size = 0
+  req.on('data', (chunk: Buffer) => {
+    size += chunk.length
+    if (size > 256 * 1024) {
+      reject(new Error('body too large'))
+      req.destroy()
+      return
+    }
+    chunks.push(chunk)
+  })
+  req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+  req.on('error', reject)
+})
+
+const clientIp = (req: http.IncomingMessage): string => {
+  if (global.lx.config['proxy.enabled']) {
+    const fwd = req.headers[global.lx.config['proxy.header']]
+    const ip = Array.isArray(fwd) ? fwd[0] : fwd
+    if (ip) return ip.split(',')[0].trim()
+  }
+  return req.socket.remoteAddress ?? 'unknown'
+}
+
+const parseJson = (raw: string): any => {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+/** MusicInfo → 带 NAS trackId 的 Web 视图（前端据此取封面/流） */
+const toWebMusic = (m: any) => ({
+  ...m,
+  trackId: m.source == 'local' && typeof m.id == 'string' && m.id.startsWith('local_') ? m.id.substring(6) : null,
+})
+
+const playlistSummary = async(userName: string) => {
+  const userSpace = getUserSpace(userName)
+  const data = await userSpace.listManage.getListData()
+  return [
+    { id: LIST_IDS.DEFAULT, name: '我的歌单', count: data.defaultList.length, fixed: true },
+    { id: LIST_IDS.LOVE, name: '我喜欢', count: data.loveList.length, fixed: true },
+    ...data.userList.map(l => ({ id: l.id, name: l.name, count: (l.list as unknown[]).length, fixed: false })),
+  ]
+}
+
+export const handleWebRequest = async(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> => {
+  const p = url.pathname
+  const method = req.method ?? 'GET'
+  if (!p.startsWith('/web/')) return false
+
+  // ---------------- 登录状态（无需鉴权，前端启动时调用以决定 UI 分支） ----------------
+  if (method == 'GET' && p == '/web/login-state') {
+    ok(res, { registerOpen: isRegisterOpen() })
+    return true
+  }
+
+  // ---------------- 注册（无需鉴权，仅 registerOpen 时开放） ----------------
+  if (method == 'POST' && p == '/web/register') {
+    if (!isRegisterOpen()) return fail(res, 403, '注册模式已关闭'), true
+    const ip = 'reg:' + clientIp(req)
+    if (regBlocked(ip)) return fail(res, 429, '注册失败次数过多，请 15 分钟后再试'), true
+    let body: any
+    try { body = parseJson(await readBody(req)) }
+    catch { return fail(res, 400, '请求体异常'), true }
+    const name = String(body?.name ?? '').trim()
+    const password = String(body?.password ?? '')
+    const confirm = String(body?.confirm ?? '')
+    if (password !== confirm) return fail(res, 400, '两次输入的密码不一致'), true
+    const r = await registerUser(name, password)
+    if (!r.ok) { regFail(ip); return fail(res, 400, r.reason), true }
+    regSuccess(ip)
+    // 注册成功后自动登录
+    const token = createSession(r.user.name)
+    ok(res, { token, name: r.user.name })
+    return true
+  }
+
+  // ---------------- 登录（双通道：config.users → users.json） ----------------
+  if (method == 'POST' && p == '/web/login') {
+    const ip = clientIp(req)
+    if (loginBlocked(ip)) return fail(res, 429, '失败次数过多，请 5 分钟后再试'), true
+    let body: any
+    try { body = parseJson(await readBody(req)) }
+    catch { return fail(res, 400, '请求体异常'), true }
+    const name = String(body?.name ?? '').trim()
+    const password = String(body?.password ?? '')
+    let authenticated = false
+    let authName = ''
+    // 通道 1：config.js 预置用户
+    const cfgUser = global.lx.config.users.find(u => u.name == name)
+    if (cfgUser && cfgUser.password == password) {
+      authenticated = true
+      authName = name
+    } else {
+      // 通道 2：运行时注册用户（scrypt 校验）
+      const regUser = findRegisteredUser(name)
+      if (regUser) {
+        try {
+          const good = await verifyPassword(password, regUser.salt, regUser.passwordHash)
+          if (good) { authenticated = true; authName = name }
+        } catch { /* 校验异常按失败处理 */ }
+      }
+    }
+    if (!authenticated) {
+      loginFail(ip)
+      return fail(res, 401, '用户名或连接码错误'), true
+    }
+    loginSuccess(ip)
+    const token = createSession(authName)
+    ok(res, { token, name: authName })
+    return true
+  }
+
+  // ---------------- 会话鉴权 ----------------
+  const session = verifySession(req.headers['x-web-token'] as string ?? url.searchParams.get('k'))
+  if (!session) return fail(res, 401, '未登录或会话已过期'), true
+  const userName = session.name
+
+  if (method == 'POST' && p == '/web/logout') {
+    destroySession((req.headers['x-web-token'] as string) ?? url.searchParams.get('k') ?? '')
+    ok(res, {})
+    return true
+  }
+
+  let seg: RegExpExecArray | null
+
+  // ---------------- 媒体（<audio>/<img> 用 ?k= 查询参数） ----------------
+  // 在线源代理流：解析第三方直链后由 NAS 中转（Range 透传，供 seek）
+  //   ?dl=1       走下载模式（附加 Content-Disposition: attachment，不带 Range）
+  //   ?name=...   下载文件名（可选，未提供时从上游 URL / Content-Type 推断）
+  if (method == 'GET' && (seg = /^\/web\/media\/online\/([\w-]{1,16})\/([A-Za-z0-9_]{1,48})$/.exec(p))) {
+    const [, oSource, oRid] = seg
+    if (!isOnlineSource(oSource)) return fail(res, 400, '未知的在线源：' + oSource), true
+    const asDownload = url.searchParams.get('dl') == '1'
+    const fileName = (url.searchParams.get('name') ?? '').substring(0, 180)
+    void onlineResolvePlayUrl(oSource, oRid).then(
+      (playUrl) => pipeHttpStream(req, res, playUrl, { Referer: 'http://www.kuwo.cn/' }, asDownload ? { download: true, filename: fileName } : {}),
+      (e) => fail(res, 502, (e as Error).message),
+    )
+    return true
+  }
+  // 在线源封面已在 media 段最前处理（pic 分支必须先于 online/{source} 匹配）
+  if (method == 'GET' && (seg = /^\/web\/media\/stream\/([\w-]{1,64})$/.exec(p))) {
+    const track = getTenantTrack(userName, seg[1])
+    if (!track) return fail(res, 404, '曲目不存在（可能已重新扫描）'), true
+    await serveAudio(req, res, track.filePath)
+    return true
+  }
+  if (method == 'GET' && (seg = /^\/web\/media\/download\/([\w-]{1,64})$/.exec(p))) {
+    const track = getTenantTrack(userName, seg[1])
+    if (!track) return fail(res, 404, '曲目不存在'), true
+    await serveAudio(req, res, track.filePath, { attachment: `${track.name}${path.extname(track.filePath)}` })
+    return true
+  }
+  if (method == 'GET' && (seg = /^\/web\/media\/cover\/([\w-]{1,64})$/.exec(p))) {
+    const track = getTenantTrack(userName, seg[1])
+    if (!track?.hasCover) {
+      res.writeHead(404)
+      res.end()
+      return true
+    }
+    void extractCover(track.filePath).then(pic => {
+      if (!pic) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'Content-Type': pic.mime, 'Content-Length': String(pic.data.length), 'Cache-Control': 'private, max-age=86400' })
+      res.end(pic.data)
+    }).catch(() => {
+      res.writeHead(500)
+      res.end()
+    })
+    return true
+  }
+  if (method == 'GET' && (seg = /^\/web\/media\/lyric\/([\w-]{1,64})$/.exec(p))) {
+    const track = getTenantTrack(userName, seg[1])
+    if (!track) return fail(res, 404, '曲目不存在'), true
+    // 歌词兜底：NAS 内嵌/.lrc 优先，未命中按「歌名+歌手」跨源（酷狗/QQ 免费歌词通道）检索
+    // 传入已解析的租户 track，避免跨租户查找全局曲库
+    void lyricWithFallback(seg[1], track).then(r => {
+      ok(res, { lyric: r.lyric ?? '', tlyric: null, rlyric: null, lxlyric: null, provider: r.provider })
+    }).catch(() => fail(res, 500, '歌词读取失败'))
+    return true
+  }
+
+  // ---------------- 曲库浏览 ----------------
+  if (method == 'GET' && p == '/web/me') {
+    ok(res, { name: userName, serverName: global.lx.config['serverName'] ?? '' })
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/stats') {
+    ok(res, { ...tenantLibraryStats(userName), scan: getTenantScanState(userName) })
+    return true
+  }
+  // 用户容量配额（下载中心/设置页可独立调用）
+  if (method == 'GET' && p == '/web/api/quota') {
+    ok(res, getQuota(userName))
+    return true
+  }
+  // ---------------- 下载目录（下载中心专用） ----------------
+  // 用户注册时自动分配专属目录 dataPath/library/<username>，无需手动设置
+  if (method == 'GET' && p == '/web/api/downloads/dir') {
+    const t = getTenantSettings(userName)
+    const userDir = path.join(global.lx.dataPath, 'library', userName)
+    ok(res, {
+      current: t.dirs[0] || userDir,
+      dirs: t.dirs,
+      authed: [],
+      userDir,          // 用户专属目录
+      autoAssigned: true, // 标记为自动分配
+    })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/downloads/dir') {
+    let body: any
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const dir = String(body?.dir ?? '').trim()
+    if (!dir) return fail(res, 400, '目录不能为空'), true
+    // 限制长度 & 只允许常见路径字符
+    if (dir.length > 512) return fail(res, 400, '路径过长'), true
+    if (!/^[A-Za-z]:[\\/].+$|^[\\/].+$|^~\//.test(dir)) return fail(res, 400, '路径格式非法'), true
+    // 检查可写性（尝试 mkdir）
+    try { fs.mkdirSync(dir, { recursive: true }); fs.accessSync(dir, fs.constants.W_OK) }
+    catch (e: any) { return fail(res, 400, '目录不可写：' + (e?.message || 'unknown')), true }
+    ok(res, { current: dir, settings: saveTenantSettings(userName, { dirs: [dir] }) })
+    return true
+  }
+  // ---------------- 在线源（Web 在线搜索 / 代理播放，方案 B） ----------------
+  if (method == 'GET' && p == '/web/api/online/sources') {
+    ok(res, { sources: onlineSources() })
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/online/search') {
+    const source = url.searchParams.get('source') ?? 'kw'
+    const keyword = (url.searchParams.get('q') ?? '').trim()
+    const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+    const size = Math.min(50, Math.max(1, parseInt(url.searchParams.get('size') ?? '20', 10) || 20))
+    if (!keyword || keyword.length > 100) return fail(res, 400, '请输入搜索关键词'), true
+    if (!isOnlineSource(source)) return fail(res, 400, '未知的在线源：' + source), true
+    try {
+      ok(res, await onlineSearch(source, keyword, page, size))
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
+    return true
+  }
+  // /web/api/online/url —— 直链查询（播放器换源）
+  if (method == 'GET' && p == '/web/api/online/url') {
+    const source = url.searchParams.get('source') ?? ''
+    const rid = url.searchParams.get('rid') ?? ''
+    if (!isOnlineSource(source) || !/^[A-Za-z0-9_]{1,48}$/.test(rid)) return fail(res, 400, '参数非法'), true
+    try {
+      const playUrl = await onlineResolvePlayUrl(source, rid)
+      ok(res, { url: playUrl })
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
+    return true
+  }
+  // /web/api/online/boards?source= —— 榜单目录
+  if (method == 'GET' && p == '/web/api/online/boards') {
+    const source = url.searchParams.get('source') ?? ''
+    if (!isOnlineSource(source)) return fail(res, 400, '参数非法'), true
+    ok(res, { list: onlineBoards(source) })
+    return true
+  }
+  // /web/api/online/board?source=&bid= —— 榜单曲目
+  if (method == 'GET' && p == '/web/api/online/board') {
+    const source = url.searchParams.get('source') ?? ''
+    const bid = url.searchParams.get('bid') ?? ''
+    const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50', 10) || 50, 200)
+    if (!isOnlineSource(source) || !/^[A-Za-z0-9_]{1,48}$/.test(bid)) return fail(res, 400, '参数非法'), true
+    try {
+      ok(res, await onlineBoardList(source, bid, limit))
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
+    return true
+  }
+  // /web/api/online/lyric?source=&rid= —— 在线歌词（LRC 明文；源不支持时 lyric=''）
+  if (method == 'GET' && p == '/web/api/online/lyric') {
+    const source = url.searchParams.get('source') ?? ''
+    const rid = url.searchParams.get('rid') ?? ''
+    if (!isOnlineSource(source) || !/^[A-Za-z0-9_]{1,48}$/.test(rid)) return fail(res, 400, '参数非法'), true
+    const r = await onlineLyric(source, rid)
+    ok(res, r)
+    return true
+  }
+  // ---------------- 在线下载队列（MVP，移植 daoyin 下载能力的最小内核） ----------------
+  if (method == 'GET' && p == '/web/api/downloads/stats') {
+    ok(res, downloadStats(userName))
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/downloads/tasks') {
+    const filter = url.searchParams.get('status') ?? ''
+    let list = listTasks(userName)
+    if (filter) list = list.filter(t => t.status === filter)
+    ok(res, { tasks: list, stats: downloadStats(userName) })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/downloads/enqueue') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const items = Array.isArray(body?.items) ? body.items : (body?.source && body?.id ? [body] : [])
+    if (!items.length) return fail(res, 400, 'items 缺失'), true
+    if (items.length > 50) return fail(res, 400, '批量上限 50 项'), true
+    const r = await enqueueMany(userName, items)
+    ok(res, { accepted: r.accepted, skipped: r.skipped, reasons: r.reasons })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/downloads/retry') {
+    let body: any
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const id = String(body?.id ?? '')
+    if (!/^[a-f0-9]{16}$/.test(id)) return fail(res, 400, 'id 非法'), true
+    const t = getTask(id)
+    if (!t || t.userName !== userName) return fail(res, 404, '任务不存在'), true
+    retryTask(id)
+    ok(res, { id })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/downloads/remove') {
+    let body: any
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const id = String(body?.id ?? '')
+    if (!/^[a-f0-9]{16}$/.test(id)) return fail(res, 400, 'id 非法'), true
+    const t = getTask(id)
+    if (!t || t.userName !== userName) return fail(res, 404, '任务不存在'), true
+    const ok2 = removeTask(id)
+    if (!ok2) return fail(res, 400, '下载中的任务不可删除'), true
+    ok(res, { id })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/downloads/batch') {
+    let body: any
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const ids = Array.isArray(body?.ids) ? body.ids.map(String).filter((x: string) => /^[a-f0-9]{16}$/.test(x)) : []
+    const op = String(body?.op ?? 'remove')
+    if (!op || !['remove', 'retry', 'delete-file'].includes(op)) return fail(res, 400, 'op 必须是 remove/retry/delete-file'), true
+    if (ids.length === 0) return fail(res, 400, '未选择任何任务'), true
+    if (ids.length > 100) return fail(res, 400, '一次最多 100 条'), true
+    const r = batchOperate(ids, op as any, userName)
+    ok(res, r)
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/downloads/parse-text') {
+    let body: any
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const text = String(body?.text ?? '')
+    if (!text.trim()) return fail(res, 400, '歌单文本为空'), true
+    if (text.length > 20000) return fail(res, 400, '文本过长（>20000 字符）'), true
+    const source = ['kw', 'wy', 'mg'].includes(String(body?.source)) ? String(body.source) : 'kw'
+    const maxLines = Math.min(50, Math.max(1, parseInt(String(body?.maxLines ?? '50'), 10) || 50))
+    try {
+      const r = await parsePlaylistText(userName, text, source, { maxLines })
+      ok(res, r)
+    } catch (e: any) {
+      fail(res, 502, (e?.message || '解析失败'))
+    }
+    return true
+  }
+  // SSE：实时推送下载状态
+  if (method == 'GET' && p == '/web/api/downloads/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    })
+    res.write('retry: 5000\r\n\r\n')
+    const unsubscribe = subscribeDownload(t => {
+      if (t.userName !== userName) return
+      res.write('event: task\r\ndata: ' + JSON.stringify(t) + '\r\n\r\n')
+    })
+    req.on('close', () => unsubscribe())
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/downloads/search') {
+    const source = url.searchParams.get('source') ?? 'kw'
+    const keyword = (url.searchParams.get('q') ?? '').trim()
+    const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
+    const size = Math.min(50, Math.max(1, parseInt(url.searchParams.get('size') ?? '20', 10) || 20))
+    if (!keyword || keyword.length > 100) return fail(res, 400, '请输入搜索关键词'), true
+    try {
+      ok(res, await searchForDownload(source, keyword, page, size))
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
+    return true
+  }
+
+  if (method == 'GET' && p == '/web/api/tracks') {
+    ok(res, listTenantTracks(userName, {
+      q: url.searchParams.get('q') ?? undefined,
+      page: parseInt(url.searchParams.get('page') ?? '1', 10),
+      size: parseInt(url.searchParams.get('size') ?? '50', 10),
+    }))
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/albums') {
+    const seed = tenantGroupingSeed(userName)
+    ok(res, tenantListAlbums(userName, seed.tracks, seed.scannedAt, seed.maxMtime, {
+      q: url.searchParams.get('q') ?? undefined,
+      page: parseInt(url.searchParams.get('page') ?? '1', 10),
+      size: parseInt(url.searchParams.get('size') ?? '60', 10),
+    }))
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/artists') {
+    const seed = tenantGroupingSeed(userName)
+    ok(res, tenantListArtists(userName, seed.tracks, seed.scannedAt, seed.maxMtime, {
+      q: url.searchParams.get('q') ?? undefined,
+      page: parseInt(url.searchParams.get('page') ?? '1', 10),
+      size: parseInt(url.searchParams.get('size') ?? '60', 10),
+    }))
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/album') {
+    const seed = tenantGroupingSeed(userName)
+    const singer = url.searchParams.get('singer') ?? ''
+    const album = url.searchParams.get('album') ?? ''
+    ok(res, { singer, album, tracks: tenantAlbumTracks(userName, seed.tracks, seed.scannedAt, seed.maxMtime, singer, album).map(t => ({ ...t, filePath: undefined })) })
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/artist') {
+    const seed = tenantGroupingSeed(userName)
+    const singer = url.searchParams.get('singer') ?? ''
+    ok(res, { singer, albums: tenantArtistAlbums(userName, seed.tracks, seed.scannedAt, seed.maxMtime, singer), tracks: tenantArtistTracks(userName, seed.tracks, seed.scannedAt, seed.maxMtime, singer).map(t => ({ ...t, filePath: undefined })) })
+    return true
+  }
+
+  // ---------------- 最近播放 ----------------
+  if (method == 'GET' && p == '/web/api/played') {
+    ok(res, { tracks: getPlayed(userName).map(t => ({ ...t, filePath: undefined })) })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/played') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    recordPlayed(userName, String(body?.trackId ?? ''))
+    ok(res, {})
+    return true
+  }
+
+  // ---------------- 歌单 ----------------
+  if (method == 'GET' && p == '/web/api/playlists') {
+    ok(res, { playlists: await playlistSummary(userName) })
+    return true
+  }
+  if (method == 'GET' && (seg = /^\/web\/api\/playlists\/([\w-]{1,64})$/.exec(p))) {
+    const listId = seg[1]
+    const userSpace = getUserSpace(userName)
+    const data = await userSpace.listManage.getListData()
+    let musics: any[] | null = null
+    let name = ''
+    if (listId == LIST_IDS.DEFAULT) {
+      musics = data.defaultList
+      name = '我的歌单'
+    } else if (listId == LIST_IDS.LOVE) {
+      musics = data.loveList
+      name = '我喜欢'
+    } else {
+      const target = data.userList.find(l => l.id == listId)
+      if (target) {
+        musics = target.list as any[]
+        name = target.name
+      }
+    }
+    if (!musics) return fail(res, 404, '歌单不存在'), true
+    ok(res, { id: listId, name, tracks: musics.map(toWebMusic) })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/playlists') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const name = String(body?.name ?? '').trim().substring(0, 60)
+    if (!name) return fail(res, 400, '歌单名不能为空'), true
+    try {
+      const id = await createPlaylist(userName, name)
+      ok(res, { id })
+    } catch (err: any) {
+      fail(res, 400, err?.message ?? String(err))
+    }
+    return true
+  }
+  if (method == 'POST' && (seg = /^\/web\/api\/playlists\/([\w-]{1,64})\/rename$/.exec(p))) {
+    const listId = seg[1]
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const name = String(body?.name ?? '').trim().substring(0, 60)
+    if (!name) return fail(res, 400, '歌单名不能为空'), true
+    try {
+      await renamePlaylist(userName, listId, name)
+      ok(res, {})
+    } catch (err: any) {
+      fail(res, 400, err?.message ?? String(err))
+    }
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/playlists/remove') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const ids = (Array.isArray(body?.ids) ? body.ids : []).map(String).filter((id: string) => id != LIST_IDS.DEFAULT && id != LIST_IDS.LOVE)
+    if (!ids.length) return fail(res, 400, '没有可删除的歌单'), true
+    await removePlaylists(userName, ids)
+    ok(res, {})
+    return true
+  }
+  if (method == 'POST' && (seg = /^\/web\/api\/playlists\/([\w-]{1,64})\/add$/.exec(p))) {
+    const listId = seg[1]
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const trackIds = (Array.isArray(body?.trackIds) ? body.trackIds : []).map(String).slice(0, 500)
+    if (!trackIds.length) return fail(res, 400, '请选择曲目'), true
+    try {
+      const added = await addTrackIds(userName, listId, trackIds)
+      ok(res, { added })
+    } catch (err: any) {
+      fail(res, 400, err?.message ?? String(err))
+    }
+    return true
+  }
+  if (method == 'POST' && (seg = /^\/web\/api\/playlists\/([\w-]{1,64})\/remove$/.exec(p))) {
+    const listId = seg[1]
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const musicIds = (Array.isArray(body?.musicIds) ? body.musicIds : []).map(String).slice(0, 500)
+    if (!musicIds.length) return fail(res, 400, '请选择曲目'), true
+    await removeMusicIds(userName, listId, musicIds)
+    ok(res, {})
+    return true
+  }
+  if (method == 'POST' && (seg = /^\/web\/api\/playlists\/([\w-]{1,64})\/clear$/.exec(p))) {
+    await clearPlaylist(userName, seg[1])
+    ok(res, {})
+    return true
+  }
+  // 歌单内排序（musicIds 为完整新顺序）
+  if (method == 'POST' && (seg = /^\/web\/api\/playlists\/([\w-]{1,64})\/order$/.exec(p))) {
+    const listId = seg[1]
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const musicIds = (Array.isArray(body?.musicIds) ? body.musicIds : []).map(String)
+    if (!musicIds.length) return fail(res, 400, '缺少排序数据'), true
+    try {
+      await overwritePlaylistOrder(userName, listId, musicIds)
+      ok(res, {})
+    } catch (err: any) {
+      fail(res, 400, err?.message ?? String(err))
+    }
+    return true
+  }
+
+  // ---------------- 收藏 ----------------
+  if (method == 'POST' && p == '/web/api/love/toggle') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    try {
+      const loved = await toggleLove(userName, String(body?.trackId ?? ''))
+      ok(res, { loved })
+    } catch (err: any) {
+      fail(res, 400, err?.message ?? String(err))
+    }
+    return true
+  }
+  if (method == 'GET' && p == '/web/api/love-ids') {
+    const userSpace = getUserSpace(userName)
+    const love = await userSpace.listManage.listDataManage.getListMusics(LIST_IDS.LOVE)
+    ok(res, { ids: love.map(m => m.id) })
+    return true
+  }
+
+  fail(res, 404, 'not found')
+  return true
+}

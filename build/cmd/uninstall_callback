@@ -1,0 +1,133 @@
+#!/bin/bash
+# GuSi Music — 卸载回调：按向导选择决定是否清除数据（安全删除目标校验，对齐道理鱼）
+set -u
+
+TRIM_PKGVAR="${TRIM_PKGVAR:-/tmp/gusi-music}"
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+LOG_MAX_BYTES="${GS_LOG_MAX_BYTES:-10485760}"
+LOG_KEEP_FILES="${GS_LOG_KEEP_FILES:-4}"
+PERSISTENT_LOG_ENABLED=1
+
+rotate_log_file() {
+  local target="$1"
+  local max_bytes="${LOG_MAX_BYTES}"
+  local keep_files="${LOG_KEEP_FILES}"
+  local size
+  local idx
+  local candidate
+  local suffix
+
+  [ -n "${target}" ] || return 0
+  [ -f "${target}" ] || return 0
+  case "${max_bytes}" in ''|*[!0-9]*) max_bytes="10485760" ;; esac
+  case "${keep_files}" in ''|*[!0-9]*) keep_files="4" ;; esac
+  [ "${max_bytes}" -gt 0 ] || return 0
+  [ "${keep_files}" -gt 0 ] || keep_files="1"
+  for candidate in "${target}".*; do
+    [ -e "${candidate}" ] || continue
+    suffix="${candidate#"${target}".}"
+    case "${suffix}" in ''|*[!0-9]*) continue ;; esac
+    if [ "${suffix}" -gt "${keep_files}" ]; then
+      rm -f "${candidate}" >/dev/null 2>&1 || true
+    fi
+  done
+  size="$(wc -c < "${target}" 2>/dev/null | tr -d '[:space:]')"
+  case "${size}" in ''|*[!0-9]*) return 0 ;; esac
+  [ "${size}" -lt "${max_bytes}" ] && return 0
+  idx="${keep_files}"
+  while [ "${idx}" -gt 1 ]; do
+    [ -e "${target}.$((idx - 1))" ] && mv -f "${target}.$((idx - 1))" "${target}.${idx}" >/dev/null 2>&1 || true
+    idx=$((idx - 1))
+  done
+  if cp -p "${target}" "${target}.1" >/dev/null 2>&1 || cat "${target}" > "${target}.1" 2>/dev/null; then
+    : > "${target}" 2>/dev/null || true
+  fi
+}
+
+log_msg() {
+  local stamp
+  stamp="$(date '+%Y-%m-%d %H:%M:%S')"
+  if [ "${PERSISTENT_LOG_ENABLED}" -eq 1 ] && [ -n "${TRIM_PKGVAR:-}" ]; then
+    rotate_log_file "${LOG_FILE}"
+    echo "${stamp} - $1" >> "${LOG_FILE}" 2>/dev/null || true
+  fi
+  echo "${stamp} - $1" >> "/tmp/gusi.music.uninstall.log" 2>/dev/null || true
+}
+
+resolve_volume_root() {
+  local by_env="${TRIM_APPDEST_VOL:-}"
+  by_env="${by_env%/}"
+  case "${by_env}" in
+    /vol*) printf "%s" "${by_env}"; return 0 ;;
+  esac
+  case "${TRIM_APPDEST:-}" in
+    /vol*/*) printf "/%s" "$(echo "${TRIM_APPDEST}" | cut -d/ -f2)"; return 0 ;;
+  esac
+  printf "/vol2"
+}
+
+is_safe_delete_target() {
+  local target="$1"
+  [ -n "${target}" ] || return 1
+  case "${target}" in
+    /|/vol|/vol1|/vol2|/vol3|/var|/usr|/usr/local|/etc|/tmp)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+safe_rm_rf() {
+  local target="$1"
+  [ -n "${target}" ] || return 0
+  [ -e "${target}" ] || return 0
+  if ! is_safe_delete_target "${target}"; then
+    log_msg "Skip unsafe delete target: ${target}"
+    return 0
+  fi
+  rm -rf "${target}" >/dev/null 2>&1 && log_msg "Deleted target: ${target}"
+}
+
+delete_share_if_appshare() {
+  local raw_path="$1"
+  local real_path
+  [ -n "${raw_path}" ] || return 0
+  [ -e "${raw_path}" ] || return 0
+  real_path="$(readlink -f "${raw_path}" 2>/dev/null || printf "%s" "${raw_path}")"
+  case "${real_path}" in
+    /vol*/@appshare/gusi.music|/vol*/@appshare/gusi.music/*)
+      safe_rm_rf "${real_path}"
+      ;;
+    *)
+      log_msg "Skip deleting custom share path: ${real_path}"
+      ;;
+  esac
+}
+
+ACTION="${wizard_data_action:-keep}"
+if [ "${ACTION}" != "delete" ]; then
+  log_msg "Uninstall keep-data mode (wizard_data_action=${ACTION:-keep})."
+  exit 0
+fi
+
+log_msg "Uninstall delete-data mode enabled."
+
+safe_rm_rf "${TRIM_PKGVAR}/runtime"
+safe_rm_rf "${TRIM_PKGVAR}/data"
+safe_rm_rf "${TRIM_PKGVAR}/logs"
+safe_rm_rf "${TRIM_PKGVAR}/app.pid"
+safe_rm_rf "${TRIM_PKGVAR}/app-config.env"
+safe_rm_rf "${TRIM_PKGVAR}/accessible-paths.env"
+PERSISTENT_LOG_ENABLED=0
+safe_rm_rf "${LOG_FILE}"
+
+CURRENT_VOLUME_ROOT="$(resolve_volume_root)"
+safe_rm_rf "${CURRENT_VOLUME_ROOT}/@appshare/gusi.music/install-profile.env"
+safe_rm_rf "${CURRENT_VOLUME_ROOT}/@appshare/gusi.music/runtime"
+IFS=':' read -r -a SHARE_PATHS <<< "${TRIM_DATA_SHARE_PATHS:-}"
+for p in "${SHARE_PATHS[@]}"; do
+  delete_share_if_appshare "${p}"
+done
+
+log_msg "Uninstall delete-data cleanup finished."
+exit 0

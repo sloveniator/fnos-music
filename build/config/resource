@@ -1,0 +1,12 @@
+{
+  "data-share": {
+    "shares": [
+      {
+        "name": "gusi.music"
+      }
+    ]
+  },
+  "api-scope": [
+    "trim.file.sharedAccess"
+  ]
+}

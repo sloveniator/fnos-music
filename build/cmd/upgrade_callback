@@ -1,0 +1,3 @@
+#!/bin/bash
+# GuSi Music — 升级回调：保留数据，重启服务
+exit 0

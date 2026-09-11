@@ -1,0 +1,56 @@
+{
+  "name": "lx-music-sync-server",
+  "version": "2.1.2",
+  "private": true,
+  "scripts": {
+    "build": "rimraf server && tsc --project tsconfig.json && tsc-alias -p tsconfig.json",
+    "start": "node ./index.js",
+    "dev": "nodemon",
+    "prd": "pm2 start ecosystem.config.js --env production",
+    "publish": "node publish"
+  },
+  "engines": {
+    "node": ">= 16",
+    "npm": ">= 8.5.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lyswhut/lx-music-sync-server.git"
+  },
+  "author": {
+    "name": "lyswhut",
+    "email": "lyswhut@qq.com"
+  },
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/lyswhut/lx-music-sync-server/issues"
+  },
+  "homepage": "https://github.com/lyswhut/lx-music-sync-server#readme",
+  "dependencies": {
+    "bufferutil": "^4.0.8",
+    "log4js": "^6.9.1",
+    "lru-cache": "^10.0.1",
+    "message2call": "^0.1.3",
+    "node-id3": "^0.2.9",
+    "utf-8-validate": "^6.0.3",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@tsconfig/node16": "^16.1.1",
+    "@types/ws": "8.5.4",
+    "chalk": "^4.1.2",
+    "changelog-parser": "^3.0.1",
+    "eslint-config-standard-with-typescript": "^39.1.1",
+    "nodemon": "^3.0.1",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.1",
+    "tsc-alias": "^1.8.8",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.2.2"
+  },
+  "nodemonConfig": {
+    "ext": "js,ts",
+    "ignore": [],
+    "exec": "node -r ts-node/register -r tsconfig-paths/register ./src/index.ts"
+  }
+}

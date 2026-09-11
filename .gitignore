@@ -21,3 +21,7 @@ output/
 e2e*.log
 # mobile app (not part of this repo)
 mobile/
+# FPK build artifacts (too large for git)
+packaging/out/*.fpk
+packaging/out/stage/
+packaging/*.fpk

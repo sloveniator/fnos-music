@@ -1,0 +1,12 @@
+{
+  "defaults": {
+    "run-as": "package"
+  },
+  "username": "gusi.music",
+  "groupname": "gusi.music",
+  "join-groups": [
+    "audio",
+    "video",
+    "render"
+  ]
+}

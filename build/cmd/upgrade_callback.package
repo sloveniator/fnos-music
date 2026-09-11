@@ -1,0 +1,3 @@
+#!/bin/bash
+# 升级前的包级处理（保持与 upgrade_callback 一致即可）
+exit 0
