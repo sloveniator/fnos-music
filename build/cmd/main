@@ -1,0 +1,342 @@
+#!/bin/bash
+# GuSi Music — 启动/停止/状态脚本（fnOS 生命周期入口）
+# 结构对齐道理鱼 cmd/main：包身份校验、日志轮转监督、捆绑运行时、fnOS 网关 Unix socket、
+# 授权目录快照与诊断、升级就绪标记。fnOS 传入：TRIM_PKGVAR / TRIM_APPDEST / TRIM_USERNAME /
+# TRIM_SERVICE_PORT / TRIM_DATA_SHARE_PATHS / TRIM_DATA_ACCESSIBLE_PATHS / wizard_* 变量。
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# fnOS 部分版本会以 root 身份调用生命周期脚本（道理鱼原包同款防御）：
+# 降权到包专属用户重入，避免 assert_package_identity 直接拒绝导致服务从未启动
+if [ "$(id -u 2>/dev/null || printf 1)" -eq 0 ] && [ "${GUSI_HANDOFF:-0}" != "1" ]; then
+  if [ -n "${TRIM_USERNAME:-}" ] && command -v runuser >/dev/null 2>&1; then
+    gusi_pkg_uid="$(id -u "${TRIM_USERNAME}" 2>/dev/null || true)"
+    case "${gusi_pkg_uid}" in
+      ''|0|*[!0-9]*) : ;;
+      *)
+        exec runuser -u "${TRIM_USERNAME}" -- env \
+          GUSI_HANDOFF=1 \
+          TRIM_UID="${gusi_pkg_uid}" \
+          TRIM_RUN_USERNAME="${TRIM_USERNAME}" \
+          /bin/bash "${SCRIPT_DIR}/main" "$@"
+        ;;
+    esac
+  fi
+  printf '%s\n' "root lifecycle handoff unavailable (user=${TRIM_USERNAME:-<empty>}, runuser=$(command -v runuser || echo missing))" >> "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null || true
+fi
+
+# 环境变量兜底（个别 fnOS 版本可能不注入，避免 set -u 下未定义引用中断）
+TRIM_PKGVAR="${TRIM_PKGVAR:-/tmp/gusi-music}"
+TRIM_APPDEST="${TRIM_APPDEST:-$(dirname "$(readlink -f "$0")")/..}"
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+APP_CONFIG_ENV_FILE="${TRIM_PKGVAR}/app-config.env"
+ACCESS_SNAPSHOT_FILE="${TRIM_PKGVAR}/accessible-paths.env"
+
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/runtime_bootstrap.sh"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/runtime_privilege.sh"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/runtime_data.sh"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/runtime_access.sh"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/runtime_upgrade.sh"
+
+APP_DEST="${TRIM_APPDEST}"
+
+log_msg() {
+  mkdir -p "${TRIM_PKGVAR}" >/dev/null 2>&1 || true
+  rotate_log_file "${LOG_FILE}"
+  printf "%s - %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "${LOG_FILE}" 2>/dev/null || true
+}
+
+is_valid_tcp_port() {
+  local port="$1"
+  case "${port}" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "${port}" -ge 1 ] && [ "${port}" -le 65535 ]
+}
+
+load_runtime_config() {
+  if [ -f "${APP_CONFIG_ENV_FILE}" ]; then
+    # shellcheck source=/dev/null
+    . "${APP_CONFIG_ENV_FILE}" 2>/dev/null || true
+  fi
+  if [ -f "${ACCESS_SNAPSHOT_FILE}" ]; then
+    # shellcheck source=/dev/null
+    . "${ACCESS_SNAPSHOT_FILE}" 2>/dev/null || true
+  fi
+}
+
+resolve_port() {
+  local candidate="${WIZARD_APP_PORT:-}"
+  if ! is_valid_tcp_port "${candidate}"; then
+    candidate="${TRIM_SERVICE_PORT:-}"
+  fi
+  if ! is_valid_tcp_port "${candidate}"; then
+    candidate="43000"
+  fi
+  printf "%s" "${candidate}"
+}
+
+infer_share_base_dir() {
+  local raw_paths="${TRIM_DATA_SHARE_PATHS:-}"
+  local first_path="${raw_paths%%:*}"
+  if [ -n "${first_path}" ]; then
+    printf "%s" "${first_path}"
+    return 0
+  fi
+  printf "%s/data-share/gusi.music" "${TRIM_PKGVAR}"
+}
+
+log_runtime_identity() {
+  log_msg "Runtime identity: process=$(id 2>/dev/null || true); package_user=${TRIM_USERNAME:-<empty>}; package_group=${TRIM_GROUPNAME:-<empty>}; package_uid=${TRIM_UID:-<empty>}; run_user=${TRIM_RUN_USERNAME:-<empty>}"
+}
+
+# 定位应用载荷目录（兼容 app.tgz 解压到 APPDEST/app 或 APPDEST 两种布局）
+detect_app_dir() {
+  if [ -d "${APP_DEST}/app/server" ]; then
+    APP_DIR="${APP_DEST}/app"
+  elif [ -d "${APP_DEST}/server" ]; then
+    APP_DIR="${APP_DEST}"
+  else
+    log_msg "ERROR: cannot locate app payload under ${APP_DEST}"
+    return 1
+  fi
+  return 0
+}
+
+check_process() {
+  local pid="$1"
+  local state=""
+  [ -n "${pid}" ] || return 1
+  kill -0 "${pid}" 2>/dev/null || return 1
+  if [ -r "/proc/${pid}/stat" ]; then
+    state="$(awk '{print $3}' "/proc/${pid}/stat" 2>/dev/null || true)"
+    [ "${state}" = "Z" ] && return 1
+  fi
+  return 0
+}
+
+status() {
+  if [ -f "${PID_FILE}" ]; then
+    local pid
+    pid="$(head -n 1 "${PID_FILE}" 2>/dev/null | tr -d '[:space:]')"
+    if check_process "${pid}"; then
+      return 0
+    fi
+    rm -f "${PID_FILE}" >/dev/null 2>&1 || true
+  fi
+  return 1
+}
+
+start_process() {
+  assert_package_identity || return 1
+  umask 0077
+  ensure_managed_file_writable "${LOG_FILE}" || true
+  if status; then
+    return 0
+  fi
+
+  rotate_log_file "${LOG_FILE}"
+  load_runtime_config
+  log_runtime_identity
+
+  detect_app_dir || return 1
+  OFFLINE_DIR="${APP_DIR}/server/offline"
+  RUNTIME_NODE_DIR="${TRIM_PKGVAR}/runtime/node"
+  STAMP_FILE="${TRIM_PKGVAR}/runtime/.node-stamp"
+  bootstrap_runtime || {
+    [ -n "${TRIM_TEMP_LOGFILE:-}" ] && echo "Node 运行时准备失败，请查看 ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+    return 1
+  }
+
+  local share_base_dir
+  local data_dir
+  share_base_dir="$(infer_share_base_dir)"
+  prepare_package_runtime "${share_base_dir}" || {
+    log_msg "ERROR: package runtime preparation failed."
+    return 1
+  }
+  if ! data_dir="$(prepare_runtime_data_dir "${TRIM_PKGVAR}/data" "${share_base_dir}/runtime/data")"; then
+    log_msg "ERROR: runtime data directory preparation failed."
+    [ -n "${TRIM_TEMP_LOGFILE:-}" ] && echo "运行数据目录不可访问，请查看 ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+    return 1
+  fi
+  mkdir -p "${data_dir}" "${TRIM_PKGVAR}/logs" >/dev/null 2>&1 || return 1
+
+  prepare_upgrade_start || true
+
+  local app_port
+  app_port="$(resolve_port)"
+  export PORT="${app_port}"
+  # 双栈监听（IPv4 + IPv6）：0.0.0.0 会让仅有 AAAA 记录的域名（如 slceleto.us.kg）
+  # 直连 43000 时 Connection refused。改成 :: 后 Node 同时接受 v4/v6，
+  # 局域网 v4 直连与公网 IPv6 直连都能通。
+  export BIND_IP="${BIND_IP:-::}"
+  export DATA_PATH="${data_dir}"
+  export LOG_PATH="${TRIM_PKGVAR}/logs"
+  export GS_WEB_STATIC_DIR="${APP_DIR}/ui/dist"
+  export GS_APP_STATIC_DIR="${APP_DIR}/ui/app"
+  if [ -n "${GS_ADMIN_PASSWORD:-}" ]; then
+    export GS_ADMIN_PASSWORD
+  fi
+
+  # fnOS 统一网关：/app/gusi-music 转发到这个稳定 Unix socket。
+  # TCP 监听保持独立（手机洛雪客户端局域网直连），网关 worker 为 www-data。
+  export GS_HTTP_UNIX_SOCKET="${APP_DEST}/app.sock"
+  export GS_HTTP_UNIX_SOCKET_ACL_USERS="${GS_HTTP_UNIX_SOCKET_ACL_USERS:-www-data}"
+  export GS_PUBLIC_BASE_PATH="/app/gusi-music"
+  export GS_ACCESSIBLE_PATHS="${TRIM_DATA_ACCESSIBLE_PATHS:-}"
+  # 快照文件路径：授权目录变更后 config_callback 重写此文件，服务端读取实现免重启热生效
+  export GS_ACCESSIBLE_PATHS_FILE="${ACCESS_SNAPSHOT_FILE}"
+
+  log_msg "Accessible paths from system: ${GS_ACCESSIBLE_PATHS:-<empty>}"
+  log_accessible_paths_diagnostic "${GS_ACCESSIBLE_PATHS}"
+
+  log_msg "Starting node service as fnOS package user: bin=${NODE_BIN}, port=${PORT}, data=${DATA_PATH}, static=${GS_WEB_STATIC_DIR}, socket=${GS_HTTP_UNIX_SOCKET}"
+
+  local child_pid_file
+  local supervisor_pid
+  local server_pid
+  local wait_count=0
+  child_pid_file="${TRIM_PKGVAR}/app.child.pid.$$.$RANDOM"
+
+  # 日志轮转有意 copy-truncate 接收服务输出的文件
+  # shellcheck disable=SC2094
+  (
+    cd "${APP_DIR}/server" || exit 1
+    "${NODE_BIN}" index.js &
+    local child_pid="$!"
+    local rotate_pid=""
+    local rotate_interval
+    rotate_interval="$(log_rotate_interval_seconds)"
+    (
+      local rotate_sleep_pid=""
+
+      stop_rotate_monitor() {
+        if [ -n "${rotate_sleep_pid}" ]; then
+          kill "${rotate_sleep_pid}" >/dev/null 2>&1 || true
+          wait "${rotate_sleep_pid}" >/dev/null 2>&1 || true
+          rotate_sleep_pid=""
+        fi
+      }
+
+      trap 'stop_rotate_monitor; trap - EXIT; exit 0' TERM INT
+      trap 'stop_rotate_monitor' EXIT
+      while check_process "${child_pid}"; do
+        sleep "${rotate_interval}" &
+        rotate_sleep_pid="$!"
+        wait "${rotate_sleep_pid}" >/dev/null 2>&1 || exit 0
+        rotate_sleep_pid=""
+        check_process "${child_pid}" || break
+        rotate_log_file "${LOG_FILE}"
+      done
+    ) >/dev/null 2>&1 &
+    rotate_pid="$!"
+    printf "%s" "${child_pid}" > "${child_pid_file}" 2>/dev/null || true
+    wait "${child_pid}"
+    local exit_code="$?"
+    if [ -n "${rotate_pid}" ]; then
+      kill "${rotate_pid}" >/dev/null 2>&1 || true
+      wait "${rotate_pid}" >/dev/null 2>&1 || true
+    fi
+    local current_pid=""
+    current_pid="$(head -n 1 "${PID_FILE}" 2>/dev/null | tr -d '[:space:]')"
+    if [ "${current_pid}" = "${child_pid}" ]; then
+      rm -f "${PID_FILE}" >/dev/null 2>&1 || true
+    fi
+    log_msg "Node service process exited: pid=${child_pid}, exit=${exit_code}"
+    exit "${exit_code}"
+  ) >> "${LOG_FILE}" 2>&1 &
+
+  supervisor_pid="$!"
+  while [ ! -s "${child_pid_file}" ] && check_process "${supervisor_pid}" && [ "${wait_count}" -lt 50 ]; do
+    sleep 0.1
+    wait_count=$((wait_count + 1))
+  done
+  server_pid="$(head -n 1 "${child_pid_file}" 2>/dev/null | tr -d '[:space:]')"
+  rm -f "${child_pid_file}" >/dev/null 2>&1 || true
+  if [ -z "${server_pid}" ]; then
+    log_msg "ERROR: service supervisor failed to report child pid."
+    [ -n "${TRIM_TEMP_LOGFILE:-}" ] && echo "服务启动失败，请查看 ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+    return 1
+  fi
+
+  printf "%s" "${server_pid}" > "${PID_FILE}"
+  sleep 1
+  if status; then
+    if mark_rootless_service_ready; then
+      return 0
+    fi
+    log_msg "ERROR: rootless readiness marker could not be committed."
+    return 0
+  fi
+
+  log_msg "ERROR: service exited immediately; see previous log lines."
+  [ -n "${TRIM_TEMP_LOGFILE:-}" ] && echo "服务启动失败，请查看 ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+  return 1
+}
+
+stop_process() {
+  log_msg "Stopping node service ..."
+  if [ -r "${PID_FILE}" ]; then
+    local pid
+    pid="$(head -n 1 "${PID_FILE}" 2>/dev/null | tr -d '[:space:]')"
+    if check_process "${pid}"; then
+      kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1 || true
+      local count=0
+      while check_process "${pid}" && [ "${count}" -lt 15 ]; do
+        sleep 1
+        count=$((count + 1))
+      done
+      if check_process "${pid}"; then
+        kill -KILL "${pid}" >> "${LOG_FILE}" 2>&1 || true
+        local kill_wait_count=0
+        while check_process "${pid}" && [ "${kill_wait_count}" -lt 50 ]; do
+          sleep 0.1
+          kill_wait_count=$((kill_wait_count + 1))
+        done
+        if check_process "${pid}"; then
+          log_msg "ERROR: node service process did not exit after SIGKILL: pid=${pid}"
+          return 1
+        fi
+      fi
+    fi
+    rm -f "${PID_FILE}" >/dev/null 2>&1 || true
+  else
+    # PID 文件丢失兜底：按 /proc cwd 精确匹配本应用 node 进程（node 二进制路径在 PKGVAR 下，
+    # 纯命令行 pattern 无法区分同名进程，cwd 是唯一可靠指纹）
+    detect_app_dir 2>/dev/null || true
+    local want_dir="${APP_DIR:-${APP_DEST}}/server"
+    local pid
+    for pid in $(pgrep -f 'node.*index\.js' 2>/dev/null); do
+      [ "$(readlink "/proc/${pid}/cwd" 2>/dev/null)" = "${want_dir}" ] || continue
+      log_msg "WARN: pid file missing, killing stale process ${pid} (cwd match ${want_dir})"
+      kill -TERM "${pid}" >/dev/null 2>&1 || true
+    done
+  fi
+  # 清理网关 socket，避免下次启动前网关连到死句柄
+  rm -f "${APP_DEST}/app.sock" >/dev/null 2>&1 || true
+  return 0
+}
+
+case "${1:-}" in
+  start)
+    start_process
+    ;;
+  stop)
+    stop_process
+    ;;
+  status)
+    status
+    ;;
+  *)
+    exit 1
+    ;;
+esac
