@@ -1,0 +1,7 @@
+#!/bin/bash
+# GuSi Music — 安装初始化：清除就绪标记，等待首次启动重新确认
+set -u
+TRIM_PKGVAR="${TRIM_PKGVAR:-/tmp/gusi-music}"
+mkdir -p "${TRIM_PKGVAR}" >/dev/null 2>&1 || true
+rm -f "${TRIM_PKGVAR}/runtime/rootless-ready" "${TRIM_PKGVAR}/runtime/.upgrade-pending" >/dev/null 2>&1 || true
+exit 0
