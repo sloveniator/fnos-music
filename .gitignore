@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+# server runtime
+server/data/
+server/logs/
+server/offline/
+server/publish/
+server/test-data/
+server/test-logs/
+server/test-music/
+server/build*.log
+# output
+output/
+e2e*.log
+# mobile app (not part of this repo)
+mobile/
