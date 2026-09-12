@@ -428,7 +428,7 @@ export const handleAdminRequest = async(req: http.IncomingMessage, res: http.Ser
     return true
   }
 
-  // 消费者音乐应用：/ 与 /assets/*、/favicon.ico（独立静态目录 GS_APP_STATIC_DIR）
+  // 消费者音乐应用：/ 与 /assets/*、/favicon.ico、/manifest.json（独立静态目录 GS_APP_STATIC_DIR）
   if ((p == '/' || p == '/index.html') && method == 'GET') {
     const appDir = process.env.GS_APP_STATIC_DIR
     if (appDir) {
@@ -440,10 +440,12 @@ export const handleAdminRequest = async(req: http.IncomingMessage, res: http.Ser
     res.end()
     return true
   }
-  if ((p.startsWith('/assets/') || p == '/favicon.ico') && method == 'GET') {
+  if ((p.startsWith('/assets/') || p == '/favicon.ico' || p == '/manifest.json') && method == 'GET') {
     const appDir = process.env.GS_APP_STATIC_DIR
     if (appDir) {
-      serveStatic(res, appDir, p == '/favicon.ico' ? '/assets/icon.png' : p)
+      if (p == '/favicon.ico') serveStatic(res, appDir, '/assets/icon.png')
+      else if (p == '/manifest.json') serveStatic(res, appDir, '/manifest.json')
+      else serveStatic(res, appDir, p)
       return true
     }
   }

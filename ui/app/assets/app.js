@@ -184,7 +184,7 @@
   }
 
   // ---------------- 侧栏 / 路由 ----------------
-  const TITLES = { home: '首页', tracks: '全部歌曲', albums: '专辑', artists: '歌手', search: '搜索', online: '在线', playlists: '我的歌单' }
+  const TITLES = { home: '首页', tracks: '全部歌曲', albums: '专辑', artists: '歌手', search: '搜索', online: '在线', playlists: '我的歌单', settings: '设置' }
   function setActiveNav(name) {
     document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === name))
     $('#top-title').textContent = TITLES[name] || '古四音乐'
@@ -214,12 +214,58 @@
     const hash = location.hash || '#/home'
     const [pathPart, queryPart] = hash.substring(2).split('?')
     const seg = pathPart.split('/')
-    const fn = routes[seg[0]] || routes.home
-    $('#view').innerHTML = ''
+    const fn = routes[seg[0]]
+    const view = $('#view')
+    view.innerHTML = ''
+    // 路由切换淡入动画
+    view.classList.remove('route-in')
+    void view.offsetWidth // 强制 reflow 重启动画
+    view.classList.add('route-in')
+    if (!fn) {
+      // 404：未知路由
+      view.appendChild(el('div', 'empty nf404', ''))
+      const icon = el('div', 'nf404-icon', '404')
+      view.querySelector('.nf404').appendChild(icon)
+      view.querySelector('.nf404').appendChild(el('p', 'nf404-msg', '页面不存在'))
+      const a = el('a', 'btn primary')
+      a.href = '#/home'
+      a.textContent = '回到首页'
+      a.style.display = 'inline-block'
+      a.style.marginTop = '16px'
+      view.querySelector('.nf404').appendChild(a)
+      return
+    }
     fn(seg.slice(1), queryPart || '').catch(err => {
       if (String(err.message).includes('登录')) return
-      $('#view').appendChild(el('div', 'empty', '加载失败：' + err.message))
+      view.appendChild(el('div', 'empty', '加载失败：' + err.message))
     })
+  }
+
+  // 骨架屏：在数据到达前展示占位
+  function skeletonRows(n) {
+    const wrap = el('div', 'sk-wrap')
+    for (let i = 0; i < n; i++) {
+      const row = el('div', 'sk-row')
+      row.appendChild(el('div', 'sk-cov'))
+      const lines = el('div', 'sk-lines')
+      lines.appendChild(el('div', 'sk-line'))
+      lines.appendChild(el('div', 'sk-line short'))
+      row.appendChild(lines)
+      row.appendChild(el('div', 'sk-dur'))
+      wrap.appendChild(row)
+    }
+    return wrap
+  }
+  function skeletonGrid(n) {
+    const wrap = el('div', 'grid')
+    for (let i = 0; i < n; i++) {
+      const c = el('div', 'card sk-card')
+      c.appendChild(el('div', 'sk-cov'))
+      c.appendChild(el('div', 'sk-line'))
+      c.appendChild(el('div', 'sk-line short'))
+      wrap.appendChild(c)
+    }
+    return wrap
   }
 
   // ---------------- 曲目表渲染（共享） ----------------
@@ -435,12 +481,18 @@
     const hour = new Date().getHours()
     v.appendChild(el('h2', 'page', hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'))
 
+    // 骨架屏占位
+    v.appendChild(skeletonRows(5))
+
     // 并发拉取：统计卡片 + 发现页数据 + 最近播放
     const [stats, discover, played] = await Promise.all([
       api('/api/stats'),
       api('/api/discover'),
       api('/api/played'),
     ])
+
+    // 清除骨架屏
+    v.querySelectorAll('.sk-wrap').forEach(s => s.remove())
 
     // 统计卡片（保留）
     const quick = el('div', 'grid')
@@ -584,7 +636,12 @@
       tracksPage.loading = false
     }
     more.onclick = load
+    // 首次加载骨架屏
+    const sk = skeletonRows(8)
+    sk.id = 'tracks-skeleton'
+    v.insertBefore(sk, table)
     await load()
+    sk.remove()
   }
 
   // ---------------- 视图：专辑 / 歌手 ----------------
@@ -688,10 +745,26 @@
     const shuf = shuffleBtn('随机播放')
     shuf.onclick = () => player.shufflePlay(d.tracks)
     v.appendChild(heroBlock(cover, singer, d.tracks.length + ' 首 · ' + d.albums.length + ' 专辑', () => player.play(d.tracks, 0), [shuf, addAll]))
-    if (d.albums.length) {
-      const rh = el('div', 'row-head')
-      rh.appendChild(el('h3', null, '专辑'))
-      v.appendChild(rh)
+
+    // 标签页：热门歌曲 / 专辑
+    let aTab = 'hot'
+    const tabWrap = el('div', 'tabs')
+    const tabHot = el('button', 'on', '热门歌曲')
+    const tabAlbums = el('button', '', '专辑 (' + d.albums.length + ')')
+    tabWrap.appendChild(tabHot); tabWrap.appendChild(tabAlbums)
+    v.appendChild(tabWrap)
+    const tabContent = el('div')
+    v.appendChild(tabContent)
+
+    const renderHot = () => {
+      tabContent.innerHTML = ''
+      // 热门歌曲：同曲目数排序不够（全部同歌手），改为按名称字母序取前 20 作为"热门"
+      const hot = d.tracks.slice(0, 20)
+      tabContent.appendChild(trackTable(hot, { showSinger: false, menu: true }))
+    }
+    const renderAlbums = () => {
+      tabContent.innerHTML = ''
+      if (!d.albums.length) { tabContent.appendChild(el('div', 'empty', '暂无专辑')); return }
       const grid = el('div', 'grid')
       grid.style.marginBottom = '24px'
       for (const a of d.albums) {
@@ -702,9 +775,11 @@
         c.onclick = () => { location.hash = '#/album?singer=' + encodeURIComponent(singer) + '&album=' + encodeURIComponent(a.name) }
         grid.appendChild(c)
       }
-      v.appendChild(grid)
+      tabContent.appendChild(grid)
     }
-    v.appendChild(trackTable(d.tracks, { showSinger: false, menu: true }))
+    tabHot.onclick = () => { aTab = 'hot'; tabHot.classList.add('on'); tabAlbums.classList.remove('on'); renderHot() }
+    tabAlbums.onclick = () => { aTab = 'albums'; tabAlbums.classList.add('on'); tabHot.classList.remove('on'); renderAlbums() }
+    renderHot()
   }
 
   // ---------------- 视图：歌单 ----------------
@@ -1757,6 +1832,150 @@
       } catch {}
     }
     connectDlSse()
+  }
+
+  // ---------------- 设置 ----------------
+  routes.settings = async () => {
+    setActiveNav('settings')
+    const v = $('#view')
+
+    // 标题
+    v.appendChild(el('h2', 'page', '设置'))
+
+    // 关于
+    const about = el('section', 'set-section')
+    about.appendChild(el('h3', 'set-sec-h', '关于'))
+    const aboutGrid = el('div', 'set-grid')
+    const aboutItems = [
+      ['应用名称', '古四音乐'],
+      ['定位', 'NAS 私人音乐库'],
+      ['项目', 'github.com/sloveniator/fnos-music'],
+    ]
+    for (const [k, val] of aboutItems) {
+      aboutGrid.appendChild(el('span', 'set-k', k))
+      const valEl = el('span', 'set-v', val)
+      if (val.startsWith('github.com')) {
+        valEl.innerHTML = ''
+        const a = el('a', null, val)
+        a.href = 'https://' + val
+        a.target = '_blank'
+        a.rel = 'noopener'
+        valEl.appendChild(a)
+      }
+      aboutGrid.appendChild(valEl)
+    }
+    about.appendChild(aboutGrid)
+    v.appendChild(about)
+
+    // 播放偏好
+    const pbPref = el('section', 'set-section')
+    pbPref.appendChild(el('h3', 'set-sec-h', '播放偏好'))
+    const pbGrid = el('div', 'set-grid')
+
+    // 默认音量
+    pbGrid.appendChild(el('span', 'set-k', '默认音量'))
+    const volRow = el('label', 'set-vol-row')
+    const volSlider = document.createElement('input')
+    volSlider.type = 'range'; volSlider.min = '0'; volSlider.max = '100'
+    volSlider.value = parseInt(localStorage.getItem('gusi-vol') ?? '80', 10)
+    const volLabel = el('span', 'set-vol-val', volSlider.value + '%')
+    volSlider.oninput = () => {
+      volLabel.textContent = volSlider.value + '%'
+      localStorage.setItem('gusi-vol', volSlider.value)
+      if (player.audio) { player.audio.volume = volSlider.value / 100; $('#vol').value = volSlider.value }
+    }
+    volRow.appendChild(volSlider)
+    volRow.appendChild(volLabel)
+    pbGrid.appendChild(volRow)
+
+    // 自动播放
+    pbGrid.appendChild(el('span', 'set-k', '点击即播放'))
+    const autoToggle = el('label', 'set-toggle')
+    const autoCb = document.createElement('input')
+    autoCb.type = 'checkbox'
+    autoCb.checked = localStorage.getItem('gusi-autoplay') !== 'off'
+    autoCb.onchange = () => localStorage.setItem('gusi-autoplay', autoCb.checked ? 'on' : 'off')
+    autoToggle.appendChild(autoCb)
+    autoToggle.appendChild(el('span', 'set-toggle-track'))
+    pbGrid.appendChild(autoToggle)
+
+    pbPref.appendChild(pbGrid)
+    v.appendChild(pbPref)
+
+    // 数据管理
+    const dataSec = el('section', 'set-section')
+    dataSec.appendChild(el('h3', 'set-sec-h', '数据管理'))
+    const dataGrid = el('div', 'set-grid')
+
+    dataGrid.appendChild(el('span', 'set-k', '搜索历史'))
+    const clearHist = el('button', 'btn')
+    clearHist.textContent = '清除搜索历史'
+    clearHist.onclick = () => {
+      localStorage.removeItem('gusi-lh')
+      toast('搜索历史已清除')
+    }
+    dataGrid.appendChild(el('span', 'set-v', ''))
+    dataGrid.lastChild.appendChild(clearHist)
+
+    dataGrid.appendChild(el('span', 'set-k', '播放队列'))
+    const clearQ = el('button', 'btn')
+    clearQ.textContent = '清除保存的队列'
+    clearQ.onclick = () => {
+      localStorage.removeItem('gusi-queue')
+      localStorage.removeItem('gusi-mode')
+      toast('播放队列已清除')
+    }
+    dataGrid.appendChild(el('span', 'set-v', ''))
+    dataGrid.lastChild.appendChild(clearQ)
+
+    dataSec.appendChild(dataGrid)
+    v.appendChild(dataSec)
+
+    // 账户
+    const acctSec = el('section', 'set-section')
+    acctSec.appendChild(el('h3', 'set-sec-h', '账户'))
+    const acctGrid = el('div', 'set-grid')
+    acctGrid.appendChild(el('span', 'set-k', '当前用户'))
+    acctGrid.appendChild(el('span', 'set-v', me ? me.name : '—'))
+    acctGrid.appendChild(el('span', 'set-k', '管理后台'))
+    const adminLink = el('a', 'btn')
+    adminLink.href = BASE + '/admin/'
+    adminLink.textContent = '打开管理后台 →'
+    adminLink.target = '_blank'
+    adminLink.rel = 'noopener'
+    acctGrid.appendChild(el('span', 'set-v', ''))
+    acctGrid.lastChild.appendChild(adminLink)
+    acctGrid.appendChild(el('span', 'set-k', '退出登录'))
+    const logoutBtn = el('button', 'btn danger-btn')
+    logoutBtn.textContent = '退出登录'
+    logoutBtn.onclick = async () => {
+      try { await api('/logout', { method: 'POST' }) } catch {}
+      logout()
+    }
+    acctGrid.appendChild(el('span', 'set-v', ''))
+    acctGrid.lastChild.appendChild(logoutBtn)
+    acctSec.appendChild(acctGrid)
+    v.appendChild(acctSec)
+
+    // 键盘快捷键提示
+    const kbSec = el('section', 'set-section')
+    kbSec.appendChild(el('h3', 'set-sec-h', '键盘快捷键'))
+    const kbHint = el('div', 'set-kb-hint')
+    const kbs = [
+      ['Space', '播放/暂停'], ['← →', '快退/快进 5 秒'],
+      ['↑ ↓', '音量 ±5'], ['N / P', '下一首/上一首'],
+      ['L', '歌词全屏'], ['Q', '播放队列'],
+      ['S', '播放模式'], ['M', '静音'],
+      ['D', '下载当前曲目'], ['?', '快捷键面板'],
+    ]
+    for (const [k, desc] of kbs) {
+      const r = el('div', 'set-kb-row')
+      r.appendChild(el('kbd', null, k))
+      r.appendChild(el('span', null, desc))
+      kbHint.appendChild(r)
+    }
+    kbSec.appendChild(kbHint)
+    v.appendChild(kbSec)
   }
 
   // ---------------- 播放器 ----------------

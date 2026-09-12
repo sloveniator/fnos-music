@@ -4,8 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1115">
-<title>古四音乐</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="古四音乐">
+<link rel="manifest" href="manifest.json">
 <link rel="icon" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
 <link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
@@ -46,6 +50,7 @@
         <a href="#/search" data-nav="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.6"/><path d="m20.4 20.4-4.5-4.5"/></svg>搜索</a>
         <a href="#/online" data-nav="online"><svg viewBox="0 0 24 24"><path d="M3.5 12.5a7.5 7.5 0 0 1 10.8-6.9"/><path d="M7 12.5a3.8 3.8 0 0 1 7-1.7"/><path d="M3.5 17.5h11"/><circle cx="17.8" cy="17.5" r="2.7"/><path d="M20.5 15.4a3.5 3.5 0 0 1 0 4.2"/></svg>在线</a>
         <a href="#/downloads" data-nav="downloads"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 11 5 4 5-4"/><path d="M4 17v2.6A1.4 1.4 0 0 0 5.4 21h13.2A1.4 1.4 0 0 0 20 19.6V17"/></svg>下载</a>
+        <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3.2M12 18.3v3.2M2.5 12H5.7M18.3 12h3.2M5 5l2.3 2.3M16.7 16.7 19 19M19 5l-2.3 2.3M7.3 16.7 5 19"/></svg>设置</a>
       </nav>
       <div class="pl-head"><span>歌单</span><button id="pl-create" title="新建歌单">＋</button></div>
       <div id="pl-list" class="pl-list"></div>

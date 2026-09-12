@@ -1,0 +1,19 @@
+{
+  "name": "古四音乐",
+  "short_name": "古四音乐",
+  "description": "NAS 私人音乐库",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0a0c12",
+  "theme_color": "#0f1115",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "assets/icon.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
