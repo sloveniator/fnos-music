@@ -527,6 +527,41 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
 
+  // ---------------- 猜你喜欢 ----------------
+  // 基于最近播放历史做加权推荐：同歌手曲目优先，其次同专辑，再补新曲。组内洗牌，取 16。
+  if (method == 'GET' && p == '/web/api/recommend') {
+    const seed = tenantGroupingSeed(userName)
+    const all = seed.tracks
+    const played = getPlayed(userName)
+    const playedIds = new Set(played.map(t => t.id))
+    const playedSingers = new Set<string>()
+    const playedAlbums = new Set<string>()
+    for (const t of played) {
+      if (t.singer) playedSingers.add(t.singer)
+      if (t.album) playedAlbums.add(t.album)
+    }
+    const strip = <T extends { filePath?: string }>(t: T) => ({ ...t, filePath: undefined })
+    const high: typeof all = []
+    const mid: typeof all = []
+    const low: typeof all = []
+    for (const t of all) {
+      if (playedIds.has(t.id)) continue
+      if (t.singer && playedSingers.has(t.singer)) high.push(t)
+      else if (t.album && playedAlbums.has(t.album)) mid.push(t)
+      else low.push(t)
+    }
+    const shuffle = (arr: typeof all) => {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        const tmp = arr[i]!; arr[i] = arr[j]!; arr[j] = tmp
+      }
+      return arr
+    }
+    const rec = [...shuffle(high), ...shuffle(mid), ...shuffle(low)].slice(0, 16).map(strip)
+    ok(res, { tracks: rec })
+    return true
+  }
+
   // ---------------- 最近播放 ----------------
   if (method == 'GET' && p == '/web/api/played') {
     ok(res, { tracks: getPlayed(userName).map(t => ({ ...t, filePath: undefined })) })

@@ -484,10 +484,11 @@
     // 骨架屏占位
     v.appendChild(skeletonRows(5))
 
-    // 并发拉取：统计卡片 + 发现页数据 + 最近播放
-    const [stats, discover, played] = await Promise.all([
+    // 并发拉取：统计卡片 + 发现页数据 + 猜你喜欢 + 最近播放
+    const [stats, discover, recommend, played] = await Promise.all([
       api('/api/stats'),
       api('/api/discover'),
+      api('/api/recommend'),
       api('/api/played'),
     ])
 
@@ -530,6 +531,23 @@
       rh.appendChild(btns)
       v.appendChild(rh)
       v.appendChild(trackTable(discover.dailyMix.slice(0, 10), { menu: true }))
+    }
+
+    // 猜你喜欢（基于最近播放的加权推荐）
+    if (recommend.tracks && recommend.tracks.length) {
+      const rh = el('div', 'row-head')
+      rh.appendChild(el('h3', null, '猜你喜欢'))
+      const btns = el('div', 'btns')
+      const bAll = el('button', 'btn ghost')
+      bAll.innerHTML = SVG.play + '<span>播放全部</span>'
+      bAll.onclick = () => player.play(recommend.tracks, 0)
+      const bShuf = el('button', 'btn ghost')
+      bShuf.innerHTML = SVG.shuffle + '<span>随机播放</span>'
+      bShuf.onclick = () => player.shufflePlay(recommend.tracks)
+      btns.appendChild(bAll); btns.appendChild(bShuf)
+      rh.appendChild(btns)
+      v.appendChild(rh)
+      v.appendChild(trackTable(recommend.tracks.slice(0, 10), { menu: true }))
     }
 
     // 新入库（按 mtime 倒序）
@@ -728,7 +746,13 @@
     addAll.onclick = () => { player.enqueue(d.tracks); toast('已加入 ' + d.tracks.length + ' 首') }
     const shuf = shuffleBtn('随机播放')
     shuf.onclick = () => player.shufflePlay(d.tracks)
-    v.appendChild(heroBlock(cover, album, singer + ' · ' + d.tracks.length + ' 首' + (d.tracks[0] && d.tracks[0].year ? ' · ' + d.tracks[0].year : ''), () => player.play(d.tracks, 0), [shuf, addAll]))
+    // 总时长：累加 intervalMs（毫秒，可能有缺失，跳过缺失项）
+    let durSec = 0
+    for (const t of d.tracks) if (t.intervalMs) durSec += t.intervalMs
+    const durStr = durSec ? ' · 总时长 ' + fmtDur(durSec / 1000) : ''
+    const metaParts = [singer + ' · ' + d.tracks.length + ' 首', durStr]
+    if (d.tracks[0] && d.tracks[0].year) metaParts.push(' · ' + d.tracks[0].year)
+    v.appendChild(heroBlock(cover, album, metaParts.join(''), () => player.play(d.tracks, 0), [shuf, addAll]))
     v.appendChild(trackTable(d.tracks, { showSinger: false, showAlbum: false, menu: true }))
   }
 
@@ -2152,7 +2176,7 @@
     const t = player.cur
     let url = 'assets/icon.png'
     if (t && t.kind === 'online') url = t.pic || 'assets/icon.png'
-    else if (t && (t.hasCover || t.id)) url = mediaUrl('cover', t.id)
+    else if (t && t.hasCover) url = mediaUrl('cover', t.id)
     if (bg) bg.style.backgroundImage = "url('" + url + "')"
     if (discCover) {
       discCover.src = url
@@ -2217,6 +2241,17 @@
         }).catch(e => toast(e.message, true))
       }
       $('#np-download').onclick = () => downloadCurrent()
+      // 播放页（歌词全屏）收藏/下载：与底栏共用逻辑
+      $('#lf-love').onclick = () => {
+        if (!this.cur) return
+        const t = this.cur
+        if (t.kind === 'online') { toast('在线歌曲暂不支持收藏，可到手机端添加'); return }
+        api('/api/love/toggle', { method: 'POST', body: { trackId: t.id } }).then(d => {
+          if (d.loved) loveIds.add('local_' + t.id); else loveIds.delete('local_' + t.id)
+          this.renderNp()
+        }).catch(e => toast(e.message, true))
+      }
+      $('#lf-download').onclick = () => downloadCurrent()
       // UPGRADE_0019: 点击底栏封面拉起播放页（CD 旋转 + 歌词）
       const npCover = $('#np-cover')
       if (npCover) {
@@ -2490,7 +2525,7 @@
         npDl.style.pointerEvents = canOnlineDl ? '' : 'none'
         npDl.title = canOnlineDl ? '下载当前曲目（在线）' : '在线源暂不可下载'
       } else {
-        if (t.hasCover || t.id) {
+        if (t.hasCover) {
           img.src = mediaUrl('cover', t.id)
           img.onerror = () => { img.src = 'assets/icon.png' }
         } else img.src = 'assets/icon.png'
@@ -2501,11 +2536,24 @@
       }
       const loved = loveIds.has('local_' + t.id)
       $('#np-love').style.color = loved ? 'var(--danger)' : ''
+      // 播放页同步：红心状态随底栏；在线/本地同规则显隐
+      const lfLove = $('#lf-love')
+      const lfDl = $('#lf-download')
+      if (lfLove) {
+        lfLove.style.color = loved && t.kind !== 'online' ? 'var(--danger)' : ''
+        lfLove.style.visibility = t.kind === 'online' ? 'hidden' : ''
+        lfLove.style.pointerEvents = t.kind === 'online' ? 'none' : ''
+      }
+      if (lfDl) {
+        const canDl = t.kind === 'online' ? !!t.rid : !!t.id
+        lfDl.style.visibility = canDl ? '' : 'hidden'
+        lfDl.style.pointerEvents = canDl ? '' : 'none'
+      }
       if ('mediaSession' in navigator) {
         try {
           navigator.mediaSession.metadata = new MediaMetadata({
             title: t.name, artist: t.singer || '', album: t.album || (t.kind === 'online' ? '在线音乐' : '古四音乐'),
-            artwork: [{ src: t.kind === 'online' ? (t.pic || 'assets/icon.png') : mediaUrl('cover', t.id), sizes: '256x256' }],
+            artwork: [{ src: t.kind === 'online' ? (t.pic || 'assets/icon.png') : (t.hasCover ? mediaUrl('cover', t.id) : 'assets/icon.png'), sizes: '256x256' }],
           })
         } catch {}
       }
