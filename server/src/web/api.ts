@@ -712,6 +712,16 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
 
+  // ---------------- 版本信息 ----------------
+  if (method == 'GET' && p == '/web/version') {
+    let version = 'dev'
+    try {
+      version = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).version || version
+    } catch {}
+    ok(res, { version })
+    return true
+  }
+
   // ---------------- 收藏 ----------------
   if (method == 'POST' && p == '/web/api/love/toggle') {
     let body: any

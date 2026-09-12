@@ -385,6 +385,11 @@
     const tbody = el('tbody')
     musics.forEach((t, i) => tbody.appendChild(trackRow(t, musics, i, opts)))
     table.appendChild(tbody)
+    // 当前播放曲目滚动到可见（主列表页开启；避免打断用户浏览，仅在渲染完成后一次性执行）
+    if (opts.autoScroll) {
+      const playingTr = table.querySelector('tr.playing')
+      if (playingTr) setTimeout(() => playingTr.scrollIntoView({ block: 'nearest' }), 60)
+    }
     return table
   }
 
@@ -632,7 +637,7 @@
     head.appendChild(meta); head.appendChild(btns)
     v.appendChild(head)
     tracksPage = { page: 0, size: 60, total: 0, list: [], loading: false }
-    const table = trackTable([], { menu: true })
+    const table = trackTable([], { menu: true, autoScroll: true })
     const tbody = table.querySelector('tbody')
     const more = el('button', 'load-more', '加载更多')
     v.appendChild(table)
@@ -753,7 +758,7 @@
     const metaParts = [singer + ' · ' + d.tracks.length + ' 首', durStr]
     if (d.tracks[0] && d.tracks[0].year) metaParts.push(' · ' + d.tracks[0].year)
     v.appendChild(heroBlock(cover, album, metaParts.join(''), () => player.play(d.tracks, 0), [shuf, addAll]))
-    v.appendChild(trackTable(d.tracks, { showSinger: false, showAlbum: false, menu: true }))
+    v.appendChild(trackTable(d.tracks, { showSinger: false, showAlbum: false, menu: true, autoScroll: true }))
   }
 
   routes.artist = async (args, query) => {
@@ -784,7 +789,7 @@
       tabContent.innerHTML = ''
       // 热门歌曲：同曲目数排序不够（全部同歌手），改为按名称字母序取前 20 作为"热门"
       const hot = d.tracks.slice(0, 20)
-      tabContent.appendChild(trackTable(hot, { showSinger: false, menu: true }))
+      tabContent.appendChild(trackTable(hot, { showSinger: false, menu: true, autoScroll: true }))
     }
     const renderAlbums = () => {
       tabContent.innerHTML = ''
@@ -906,7 +911,7 @@
       v.appendChild(el('div', 'empty', '歌单还是空的，去曲库添加喜欢的歌吧'))
       return
     }
-    const table = trackTable(tracks, { menu: true, order: !isFixed })
+    const table = trackTable(tracks, { menu: true, order: !isFixed, autoScroll: true })
     if (!isFixed) {
       // 歌单内支持移除
       const tbody = table.querySelector('tbody')
@@ -1135,7 +1140,7 @@
     allBtn.onclick = () => { if (ostate.list.length) player.play(ostate.list, 0) }
     hd.appendChild(allBtn)
     onlArea.appendChild(hd)
-    if (!ostate.list.length) { onlArea.appendChild(el('p', 'hint', '榜单加载中…')); return }
+    if (!ostate.list.length) { onlArea.appendChild(skeletonRows(8)); return }
     const tbl = el('table', 'tracks')
     const thead = el('thead'); onTableHead(thead); tbl.appendChild(thead)
     const tbody = el('tbody')
@@ -1158,7 +1163,7 @@
     if (ostate.view === 'search') return renderSearch()
     if (ostate.view === 'boards') {
       onlArea.innerHTML = ''
-      if (!ostate.boards.length) { onlArea.appendChild(el('p', 'hint', '榜单加载中…')); return }
+      if (!ostate.boards.length) { onlArea.appendChild(skeletonGrid(8)); return }
       const grid = el('div', 'board-grid')
       ostate.boards.forEach((b, i) => {
         const card = el('div', 'bcard')
@@ -1890,6 +1895,13 @@
     }
     about.appendChild(aboutGrid)
     v.appendChild(about)
+    // 服务端版本（异步）
+    api('/version').then(d => {
+      if (!d.version) return
+      const row = el('span', 'set-v', d.version)
+      aboutGrid.appendChild(el('span', 'set-k', '服务端版本'))
+      aboutGrid.appendChild(row)
+    }).catch(() => {})
 
     // 播放偏好
     const pbPref = el('section', 'set-section')
@@ -2695,6 +2707,10 @@
 
   // ---------------- 启动 ----------------
   async function boot() {
+    // PWA：Service Worker 注册（外部脚本，不受 CSP script-src 限制；失败静默）
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {})
+    }
     if (!token) return showLogin()
     try {
       const d = await api('/me')

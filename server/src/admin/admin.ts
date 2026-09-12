@@ -440,11 +440,12 @@ export const handleAdminRequest = async(req: http.IncomingMessage, res: http.Ser
     res.end()
     return true
   }
-  if ((p.startsWith('/assets/') || p == '/favicon.ico' || p == '/manifest.json') && method == 'GET') {
+  if ((p.startsWith('/assets/') || p == '/favicon.ico' || p == '/manifest.json' || p == '/sw.js') && method == 'GET') {
     const appDir = process.env.GS_APP_STATIC_DIR
     if (appDir) {
       if (p == '/favicon.ico') serveStatic(res, appDir, '/assets/icon.png')
       else if (p == '/manifest.json') serveStatic(res, appDir, '/manifest.json')
+      else if (p == '/sw.js') serveStatic(res, appDir, '/sw.js')
       else serveStatic(res, appDir, p)
       return true
     }
