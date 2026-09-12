@@ -152,15 +152,8 @@
         <div class="page-head"><h1>音源与代理</h1></div>
 
         <div class="card">
-          <h3>上游 API 模板（旧代理）</h3>
-          <p class="muted-note">占位符 <code>{source}</code> <code>{id}</code> <code>{quality}</code>；服务端不内置任何爬取逻辑。</p>
-          <input id="proxy-url" class="full" placeholder="https://example.com/api?source={source}&id={id}&quality={quality}">
-          <div class="chips" id="proxy-sources"></div>
-        </div>
-
-        <div class="card mt">
-          <h3>Web 在线搜索源</h3>
-          <p class="muted-note">控制 Web 播放器「在线」页可用的内置源；关闭后仍可经第三方 JS 音源解析。</p>
+          <h3>在线音乐源</h3>
+          <p class="muted-note">控制 Web 播放器在线搜索可用的内置源（酷我 / 网易云 / 咪咕）。</p>
           <div class="chips" id="online-sources"></div>
         </div>
 
@@ -170,7 +163,7 @@
             <button id="btn-script-copy" class="btn">复制</button>
             <button id="btn-script-download" class="btn primary">下载脚本</button>
           </div></div>
-          <p class="muted-note">生成的脚本导入洛雪音乐移动版「音源管理」，即可在 NAS 曲库播放 + 第三方平台代理取链。局域网直连（不经网关）。</p>
+          <p class="muted-note">生成的脚本导入洛雪音乐移动版「音源管理」，即可在 NAS 曲库播放 + 第三方平台代理取链。局域网直连（不经网关）。勾选下方平台后重新生成脚本。</p>
           <div class="chips" id="script-sources"></div>
         </div>
 

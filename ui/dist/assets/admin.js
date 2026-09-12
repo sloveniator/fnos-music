@@ -866,33 +866,34 @@ $('#btn-dl-clear').addEventListener('click', async () => {
 })
 
 // ==================== 音源与代理 ====================
-let sourceState = { proxyUrl: '', proxySources: [], onlineSources: [], scriptSources: [], userSources: [] }
+let sourceState = { proxySources: [], onlineSources: [], scriptSources: [], userSources: [] }
 
 const loadSources = async () => {
   try {
     const r = await api('/admin/api/library/settings', { method: 'GET' })
     const s = r.data || {}
-    sourceState.proxyUrl = s.proxyUrl || ''
     sourceState.proxySources = s.proxySources || []
     sourceState.onlineSources = s.onlineSources || []
-    sourceState.scriptSources = sourceState.proxySources
-    $('#proxy-url').value = sourceState.proxyUrl
-    renderChips($('#proxy-sources'), PROXY_ALL, sourceState.proxySources)
+    sourceState.scriptSources = [...sourceState.proxySources]
     renderChips($('#online-sources'), ONLINE_ALL, sourceState.onlineSources)
-    renderChips($('#script-sources'), PROXY_ALL, sourceState.scriptSources)
+    renderChips($('#script-sources'), PROXY_ALL, sourceState.scriptSources, (sel) => {
+      sourceState.proxySources = [...sel]
+      sourceState.scriptSources = [...sel]
+    })
     await loadUserSources()
   } catch (err) {
     toast('音源配置加载失败: ' + err.message)
   }
 }
 
-const renderChips = (el, all, selected) => {
+const renderChips = (el, all, selected, onToggle) => {
   el.innerHTML = all.map(k => `<span class="chip tog ${selected.includes(k) ? 'on' : ''}" data-k="${k}">${SOURCE_NAMES[k] || k}</span>`).join('')
   el.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
     const k = c.dataset.k
     const i = selected.indexOf(k)
     if (i >= 0) selected.splice(i, 1); else selected.push(k)
     c.classList.toggle('on')
+    if (onToggle) onToggle(selected)
     saveSourceConfig()
   }))
 }
@@ -903,19 +904,14 @@ const saveSourceConfig = () => {
       await api('/admin/api/library/settings', {
         method: 'POST',
         body: {
-          proxyUrl: $('#proxy-url').value.trim(),
           proxySources: [...sourceState.proxySources],
           onlineSources: [...sourceState.onlineSources],
         },
       })
-      sourceState.scriptSources = [...sourceState.proxySources]
-      renderChips($('#script-sources'), PROXY_ALL, sourceState.scriptSources)
       toast('音源配置已保存')
     } catch (err) { toast(err.message) }
   }, 500)()
 }
-
-$('#proxy-url').addEventListener('change', saveSourceConfig)
 
 // 音源脚本
 const buildScript = (download = false) => {
