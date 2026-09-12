@@ -732,3 +732,60 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .set-grid { grid-template-columns: 1fr; gap: 4px; }
   .set-k { margin-top: 8px; }
 }
+
+/* ---- 在线音乐三合一：类型 chips / 集合卡片 / 详情 / 导入 ---- */
+.type-chips { margin-bottom: 8px; }
+.type-chips .chip { font-size: 12.5px; padding: 5px 13px; }
+.coll-card .cover { position: relative; overflow: hidden; }
+.coll-card .cover svg { width: 46%; height: 46%; position: absolute; inset: 27%; color: #888; }
+.coll-card .cover img { transition: transform .35s ease; }
+.coll-card:hover .cover img { transform: scale(1.06); }
+.coll-hero { display: flex; gap: 16px; align-items: center; padding: 18px 16px; border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255,255,255,.05), rgba(255,255,255,.01)); margin-bottom: 14px; }
+.coll-hero .cover { width: 88px; height: 88px; border-radius: 12px; flex: 0 0 auto; }
+.coll-hero .cover svg { width: 40%; height: 40%; color: #888; }
+.coll-hero .cover img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; }
+.coll-meta { flex: 1; min-width: 0; }
+.coll-type { font-size: 12px; color: #888; letter-spacing: .06em; text-transform: uppercase; }
+.coll-name { font-size: 19px; font-weight: 700; margin: 3px 0 2px; }
+.coll-sub { font-size: 13px; color: #aaa; margin-bottom: 8px; }
+.sub-h { margin: 4px 0 10px; }
+.dl-import-result { margin-top: 14px; }
+.dl-import-result .coll-type { margin-top: 10px; }
+.dl-import-result .coll-name { font-size: 17px; }
+.iconbtn.dl { color: #6c8cf5; }
+.iconbtn.dl:hover { color: #8fa8ff; }
+.otabs.big { margin-bottom: 12px; }
+.otabs.big .otab { font-size: 14px; padding: 9px 20px; border-radius: 999px; }
+@media (max-width: 720px) {
+  .coll-hero { flex-direction: row; gap: 12px; padding: 12px; }
+  .coll-hero .cover { width: 72px; height: 72px; }
+  .coll-name { font-size: 16px; }
+}
+
+/* ---- 播放页打磨：背景呼吸 / CD 环境光 / 迷你条光晕 ---- */
+.lf-bg { animation: lf-bg-breathe 16s ease-in-out infinite alternate; }
+@keyframes lf-bg-breathe {
+  0% { filter: blur(70px) saturate(1.5); opacity: .30; transform: scale(1.08); }
+  100% { filter: blur(64px) saturate(1.8); opacity: .38; transform: scale(1.16); }
+}
+.lf-disc-wrap::before { content: ''; position: absolute; width: 78%; height: 78%; border-radius: 50%;
+  background: radial-gradient(circle, rgba(120,160,255,.14), transparent 62%);
+  filter: blur(18px); pointer-events: none; animation: lf-glow-pulse 5.5s ease-in-out infinite alternate; }
+@keyframes lf-glow-pulse { 0% { opacity: .55; transform: scale(.96); } 100% { opacity: 1; transform: scale(1.04); } }
+.lf-disc { transition: box-shadow .6s ease; }
+.lyric-full:hover .lf-disc { box-shadow: 0 34px 70px rgba(0,0,0,.6), inset 0 0 40px rgba(0,0,0,.7),
+  0 0 0 1px rgba(255,255,255,.06), 0 0 60px rgba(100,140,255,.08); }
+.np-cover { transition: transform .35s ease, box-shadow .35s ease, border-radius .35s ease; }
+.np-cover:hover { transform: scale(1.06); border-radius: 14px; }
+#np-cover { box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.04); }
+.np-name { letter-spacing: .02em; }
+.lf-body { scroll-behavior: smooth; }
+.lf-body p { position: relative; transition: all .3s ease; }
+.lf-body p.on::before { content: ''; position: absolute; left: -14px; top: 50%; width: 5px; height: 5px;
+  border-radius: 50%; background: #5b8cff; transform: translateY(-50%);
+  box-shadow: 0 0 10px rgba(91,140,255,.9); }
+@media (prefers-reduced-motion: reduce) {
+  .lf-bg, .lf-disc-wrap::before { animation: none; }
+  .lf-disc { animation-duration: 60s; }
+}
