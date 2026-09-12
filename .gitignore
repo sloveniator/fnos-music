@@ -1,5 +1,6 @@
 node_modules/
-dist/
+# 仅忽略根级构建产物目录；ui/dist 为管理后台源码（零构建原生三件套），需纳入版本控制
+/dist/
 *.log
 .DS_Store
 Thumbs.db

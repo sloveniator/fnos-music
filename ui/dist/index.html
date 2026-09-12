@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0c12">
+<title>古四音乐 · 管理后台</title>
+<link rel="icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+  <!-- 登录 -->
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <img src="assets/icon.png" alt="" class="login-logo">
+      <h1>古四音乐</h1>
+      <p class="login-sub">管理后台</p>
+      <label>管理密码<input id="login-pass" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="primary" id="login-btn">登 录</button>
+      <p id="login-err" class="login-err"></p>
+      <p class="login-hint" id="login-hint"></p>
+    </form>
+  </div>
+
+  <!-- 应用壳 -->
+  <div id="shell" class="shell" hidden>
+    <aside id="sidebar" class="sidebar">
+      <div class="brand"><img src="assets/icon.png" alt=""><span>古四音乐</span><em>管理</em></div>
+      <nav class="nav" id="nav">
+        <button class="tab active" data-tab="overview">概览</button>
+        <button class="tab" data-tab="users">同步用户</button>
+        <button class="tab" data-tab="library">音乐库</button>
+        <button class="tab" data-tab="tenants">用户曲库</button>
+        <button class="tab" data-tab="downloads">下载中心</button>
+        <button class="tab" data-tab="sources">音源与代理</button>
+      </nav>
+      <div class="side-foot">
+        <span id="who"></span>
+        <span class="side-links">
+          <a href="../" title="打开音乐应用">← 应用</a>
+          <button id="logout" title="退出登录">退出</button>
+        </span>
+      </div>
+    </aside>
+
+    <main id="main" class="main">
+      <!-- ============ 概览 ============ -->
+      <section id="tab-overview" class="tab-page">
+        <div class="page-head"><h1>概览</h1></div>
+        <div id="https-warn" class="warn-card" hidden></div>
+        <div class="cards" id="status-cards"></div>
+        <div class="cards" id="lib-cards"></div>
+        <div class="cards" id="scan-cards"></div>
+      </section>
+
+      <!-- ============ 同步用户 ============ -->
+      <section id="tab-users" class="tab-page" hidden>
+        <div class="page-head"><h1>同步用户</h1><div class="btns"><button id="btn-user-add" class="btn primary">＋ 新建用户</button></div></div>
+        <p class="muted-note">洛雪音乐移动版用「用户名 + 连接码（密码）」登录同步服务；连接码在此处创建与重置。</p>
+        <table class="table">
+          <thead><tr><th>用户名</th><th>设备数</th><th>配额</th><th>操作</th></tr></thead>
+          <tbody id="user-tbody"></tbody>
+        </table>
+      </section>
+
+      <!-- ============ 音乐库 ============ -->
+      <section id="tab-library" class="tab-page" hidden>
+        <div class="page-head"><h1>音乐库</h1><div class="btns">
+          <button id="btn-upload" class="btn">上传音频</button>
+          <button id="btn-export" class="btn">导出 .lxmc</button>
+          <button id="btn-scan" class="btn primary">立即扫描</button>
+        </div></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>扫描目录</h3>
+            <p class="muted-note">输入 NAS 上已存在音乐文件的目录（可用授权目录快捷填入），保存后扫描入库。</p>
+            <div class="in-row">
+              <input id="dir-input" placeholder="/volume1/music 或授权目录…">
+              <button id="btn-dir-add" class="btn primary">添加</button>
+            </div>
+            <div id="sys-dirs" class="chips" hidden></div>
+            <ul id="dir-list" class="dir-list"></ul>
+          </div>
+          <div class="card">
+            <h3>扫描状态</h3>
+            <div id="scan-info" class="scan-info">未开始</div>
+            <div class="progress"><i id="scan-bar" class="progress-i"></i></div>
+            <p class="muted-note" id="scan-meta"></p>
+            <h3 class="mt">流媒体令牌</h3>
+            <div class="in-row">
+              <input id="token-view" readonly>
+              <button id="btn-token-reset" class="btn danger">重置</button>
+            </div>
+            <p class="muted-note">重置后旧音源脚本全部失效，需重新生成。</p>
+          </div>
+        </div>
+
+        <div class="cards" id="lib-stats"></div>
+
+        <div class="card mt">
+          <div class="page-head">
+            <h3>曲目</h3>
+            <div class="btns">
+              <input id="track-q" class="search-input" placeholder="搜索歌名 / 歌手 / 专辑…">
+              <button id="btn-track-search" class="btn">搜索</button>
+            </div>
+          </div>
+          <div class="batch-bar" id="batch-bar" hidden>
+            <span id="sel-count">已选 0 项</span>
+            <button id="btn-export-sel" class="btn mini">导出所选</button>
+            <button id="btn-clear-sel" class="btn mini">清空选择</button>
+          </div>
+          <table class="table tracks">
+            <thead><tr><th class="chk"><input type="checkbox" id="chk-all"></th><th class="cov">封面</th><th>歌名</th><th>歌手</th><th>专辑</th><th>时长</th><th>操作</th></tr></thead>
+            <tbody id="track-tbody"></tbody>
+          </table>
+          <div class="pager">
+            <button id="page-prev" class="btn mini">上一页</button>
+            <span id="page-info"></span>
+            <button id="page-next" class="btn mini">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 用户曲库（0020 租户） ============ -->
+      <section id="tab-tenants" class="tab-page" hidden>
+        <div class="page-head"><h1>用户曲库</h1></div>
+        <p class="muted-note">每个 Web 用户独立曲库（独立扫描目录 / 索引 / 统计）。修改目录后需为该用户单独触发扫描。</p>
+        <div id="tenant-list"></div>
+      </section>
+
+      <!-- ============ 下载中心 ============ -->
+      <section id="tab-downloads" class="tab-page" hidden>
+        <div class="page-head"><h1>下载中心</h1><div class="btns">
+          <button id="btn-target-add" class="btn primary">＋ 新建目标</button>
+          <button id="btn-dl-refresh" class="btn">刷新</button>
+          <button id="btn-dl-clear" class="btn danger">清除已完成</button>
+        </div></div>
+        <div id="target-list"></div>
+        <div class="card mt">
+          <div class="page-head"><h3>任务</h3></div>
+          <table class="table">
+            <thead><tr><th>文件名</th><th>目标</th><th>状态</th><th>进度</th><th>操作</th></tr></thead>
+            <tbody id="dl-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 音源与代理 ============ -->
+      <section id="tab-sources" class="tab-page" hidden>
+        <div class="page-head"><h1>音源与代理</h1></div>
+
+        <div class="card">
+          <h3>上游 API 模板（旧代理）</h3>
+          <p class="muted-note">占位符 <code>{source}</code> <code>{id}</code> <code>{quality}</code>；服务端不内置任何爬取逻辑。</p>
+          <input id="proxy-url" class="full" placeholder="https://example.com/api?source={source}&id={id}&quality={quality}">
+          <div class="chips" id="proxy-sources"></div>
+        </div>
+
+        <div class="card mt">
+          <h3>Web 在线搜索源</h3>
+          <p class="muted-note">控制 Web 播放器「在线」页可用的内置源；关闭后仍可经第三方 JS 音源解析。</p>
+          <div class="chips" id="online-sources"></div>
+        </div>
+
+        <div class="card mt">
+          <div class="page-head"><h3>手机音源脚本</h3><div class="btns">
+            <button id="btn-script-preview" class="btn">预览</button>
+            <button id="btn-script-copy" class="btn">复制</button>
+            <button id="btn-script-download" class="btn primary">下载脚本</button>
+          </div></div>
+          <p class="muted-note">生成的脚本导入洛雪音乐移动版「音源管理」，即可在 NAS 曲库播放 + 第三方平台代理取链。局域网直连（不经网关）。</p>
+          <div class="chips" id="script-sources"></div>
+        </div>
+
+        <div class="card mt">
+          <div class="page-head"><h3>第三方 JS 音源（服务端执行）</h3><div class="btns">
+            <button id="btn-us-add" class="btn primary">＋ 添加脚本</button>
+          </div></div>
+          <p class="muted-note">社区音源脚本（Flower/Huibq/LX/QDY/SixYin 等）在服务端沙箱执行，Web / 移动端共用解析链。启用即后台预热。</p>
+          <table class="table">
+            <thead><tr><th>名称</th><th>能力</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="us-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 对话框 -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head"><span id="modal-title"></span><button id="modal-close" title="关闭">×</button></div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <audio id="preview-audio" hidden></audio>
+  <script src="assets/admin.js"></script>
+</body>
+</html>
