@@ -17,7 +17,7 @@ import {
 import { getUserSpace } from '@/user'
 import { LIST_IDS } from '@/constants'
 import { lyricWithFallback } from '@/online/lyric-fallback'
-import { onlineSources, onlineSearch, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList } from '@/online'
+import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList } from '@/online'
 import { pipeHttpStream } from '@/utils/httpPipe'
 import {
   enqueue, enqueueMany, listTasks, getTask, removeTask, retryTask, batchOperate, parsePlaylistText,
@@ -284,12 +284,42 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
   if (method == 'GET' && p == '/web/api/online/search') {
     const source = url.searchParams.get('source') ?? 'kw'
     const keyword = (url.searchParams.get('q') ?? '').trim()
+    const type = url.searchParams.get('type') ?? 'song'
     const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
     const size = Math.min(50, Math.max(1, parseInt(url.searchParams.get('size') ?? '20', 10) || 20))
     if (!keyword || keyword.length > 100) return fail(res, 400, '请输入搜索关键词'), true
     if (!isOnlineSource(source)) return fail(res, 400, '未知的在线源：' + source), true
     try {
-      ok(res, await onlineSearch(source, keyword, page, size))
+      if (type === 'album') ok(res, await onlineSearchAlbums(source, keyword, page, size))
+      else if (type === 'playlist') ok(res, await onlineSearchPlaylists(source, keyword, page, size))
+      else ok(res, await onlineSearch(source, keyword, page, size))
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
+    return true
+  }
+  // /web/api/online/collection?source=&type=album|playlist&id= —— 专辑/歌单曲目展开
+  if (method == 'GET' && p == '/web/api/online/collection') {
+    const source = url.searchParams.get('source') ?? ''
+    const type = url.searchParams.get('type') ?? ''
+    const id = url.searchParams.get('id') ?? ''
+    if (!isOnlineSource(source)) return fail(res, 400, '未知的在线源：' + source), true
+    if (type !== 'album' && type !== 'playlist') return fail(res, 400, 'type 必须是 album/playlist'), true
+    if (!/^[A-Za-z0-9_\-]{1,48}$/.test(id)) return fail(res, 400, 'id 非法'), true
+    try {
+      ok(res, await onlineCollection(source, type, id))
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
+    return true
+  }
+  // /web/api/online/import?url= —— 粘贴分享链接导入歌单/专辑（自动识别平台与类型）
+  if (method == 'GET' && p == '/web/api/online/import') {
+    const raw = url.searchParams.get('url') ?? ''
+    if (!raw || raw.length > 512) return fail(res, 400, '请粘贴有效的分享链接'), true
+    try {
+      const imported = await importOnlineUrl(raw)
+      ok(res, imported)
     } catch (e) {
       fail(res, 502, (e as Error).message)
     }

@@ -2,11 +2,13 @@
 // 内置在线源 registry（方案 B：服务端内置搜索客户端）
 //   供 Web 播放器搜索/试听第三方公开音源；播放统一由 NAS 中转拉流，
 //   不向浏览器暴露第三方地址，避免跨域/防盗链并统一走 Web 会话鉴权。
+//   类型搜索：song（单曲）/ album（专辑）/ playlist（歌单）按源能力返回；
+//   详情（曲目展开）能力以 capabilities 位暴露，前端据此渲染操作。
 // ---------------------------------------------------------------------------
 
-import { kwSearch, kwPlayUrl, kwParseJSON } from './kw'
-import type { OnlineItem, OnlineSearchResult } from './kw'
-import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList } from './wy'
+import { kwSearch, kwPlayUrl, kwParseJSON, kwSearchAlbums, kwSearchPlaylists } from './kw'
+import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult, OnlineCollectionDetail } from './kw'
+import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wyAlbumDetail, wyPlaylistDetail } from './wy'
 import { mgSearch, mgPlayUrl, mgLyric } from './mg'
 import { getSettings } from '@/library'
 import { resolveFromUserSources } from './user-source'
@@ -23,10 +25,22 @@ export interface OnlineSourceDef {
   boards?: () => { id: string; name: string }[]
   /** 可选：榜单曲目 */
   boardList?: (bid: string, limit: number) => Promise<OnlineSearchResult>
+  /** 可选：专辑搜索 */
+  searchAlbums?: (keyword: string, page: number, size: number) => Promise<OnlineCollectionResult>
+  /** 可选：歌单搜索 */
+  searchPlaylists?: (keyword: string, page: number, size: number) => Promise<OnlineCollectionResult>
+  /** 可选：专辑曲目详情 */
+  albumDetail?: (id: string) => Promise<OnlineCollectionDetail>
+  /** 可选：歌单曲目详情 */
+  playlistDetail?: (id: string) => Promise<OnlineCollectionDetail>
 }
 
 const REGISTRY: Record<string, OnlineSourceDef> = {
-  kw: { id: 'kw', name: '酷我音乐', search: kwSearch, resolvePlayUrl: kwPlayUrl },
+  kw: {
+    id: 'kw', name: '酷我音乐', search: kwSearch, resolvePlayUrl: kwPlayUrl,
+    searchAlbums: kwSearchAlbums, searchPlaylists: kwSearchPlaylists,
+    // 酷我详情接口受反爬限制，不注册 detail/import 能力
+  },
   wy: {
     id: 'wy',
     name: '网易云音乐',
@@ -35,6 +49,8 @@ const REGISTRY: Record<string, OnlineSourceDef> = {
     lyric: wyLyric,
     boards: () => WY_BOARDS.map((b) => ({ id: b.bangid, name: b.name })),
     boardList: (bid, limit) => wyBoardList(bid, limit),
+    searchAlbums: wySearchAlbums, searchPlaylists: wySearchPlaylists,
+    albumDetail: wyAlbumDetail, playlistDetail: wyPlaylistDetail,
   },
   mg: { id: 'mg', name: '咪咕音乐', search: mgSearch, resolvePlayUrl: mgPlayUrl, lyric: mgLyric },
 }
@@ -47,14 +63,49 @@ const enabledIds = (): string[] => {
   return on.filter((id) => !!REGISTRY[id])
 }
 
-export const onlineSources = (): { id: string; name: string; enabled: boolean; lyric: boolean; boards: boolean }[] =>
-  KNOWN_IDS.map((id) => ({ id, name: REGISTRY[id].name, enabled: enabledIds().includes(id), lyric: !!REGISTRY[id].lyric, boards: !!REGISTRY[id].boards }))
+/** 源能力位（前端据此显示搜索类型 tabs / 详情 / 导入） */
+const sourceAbilities = (def: OnlineSourceDef): string[] => {
+  const a: string[] = ['search']
+  if (def.boards && def.boardList) a.push('boards')
+  if (def.searchAlbums && def.searchPlaylists) {
+    a.push('albums', 'playlists')
+    if (def.albumDetail && def.playlistDetail) a.push('detail', 'import')
+  }
+  return a
+}
+
+export const onlineSources = (): { id: string; name: string; enabled: boolean; lyric: boolean; boards: boolean; abilities: string[] }[] =>
+  KNOWN_IDS.map((id) => ({
+    id,
+    name: REGISTRY[id].name,
+    enabled: enabledIds().includes(id),
+    lyric: !!REGISTRY[id].lyric,
+    boards: !!REGISTRY[id].boards,
+    abilities: sourceAbilities(REGISTRY[id]),
+  }))
 
 export const isOnlineSource = (source: string): boolean => enabledIds().includes(source)
 
 export const onlineSearch = async (source: string, keyword: string, page: number, size: number) => {
   if (!isOnlineSource(source)) throw new Error('在线源未启用或不存在：' + source)
   return REGISTRY[source].search(keyword, page, size)
+}
+
+export const onlineSearchAlbums = async (source: string, keyword: string, page: number, size: number) => {
+  if (!isOnlineSource(source) || !REGISTRY[source].searchAlbums) throw new Error('该源不支持专辑搜索')
+  return REGISTRY[source].searchAlbums!(keyword, page, size)
+}
+
+export const onlineSearchPlaylists = async (source: string, keyword: string, page: number, size: number) => {
+  if (!isOnlineSource(source) || !REGISTRY[source].searchPlaylists) throw new Error('该源不支持歌单搜索')
+  return REGISTRY[source].searchPlaylists!(keyword, page, size)
+}
+
+export const onlineCollection = async (source: string, type: 'album' | 'playlist', id: string): Promise<OnlineCollectionDetail> => {
+  if (!isOnlineSource(source)) throw new Error('在线源未启用或不存在：' + source)
+  const fn = type === 'album' ? REGISTRY[source].albumDetail : REGISTRY[source].playlistDetail
+  if (!fn) throw new Error('该源暂不支持展开' + (type === 'album' ? '专辑' : '歌单') + '详情')
+  return fn(id)
 }
 
 export const onlineResolvePlayUrl = async (source: string, id: string): Promise<string> => {
@@ -85,5 +136,47 @@ export const onlineBoardList = async (source: string, bid: string, limit: number
   return REGISTRY[source].boardList!(bid, limit)
 }
 
+/**
+ * 粘贴分享链接导入歌单/专辑。
+ * 自动识别平台（网易云 / 酷我 / 咪咕）与类型（playlist / album），
+ * 仅当该源提供详情能力时返回曲目列表。
+ */
+export const importOnlineUrl = async (rawUrl: string): Promise<{ source: string; type: 'album' | 'playlist'; info: any; list: OnlineItem[] }> => {
+  const url = String(rawUrl).trim()
+  const m =
+    // 网易云网页/移动
+    /(?:music\.163\.com\/(?:#\/)?|y\.music\.163\.com\/m\/)(playlist|album)\?(?:[^#]*&)?id=(\d{1,16})/i.exec(url) ||
+    /(?:music\.163\.com\/(?:#\/)?|y\.music\.163\.com\/m\/)(playlist|album)\/(\d{1,16})/i.exec(url) ||
+    // 酷我
+    /kuwo\.cn\/(playlist_detail|album_detail)\/(\d{1,16})/i.exec(url) ||
+    // 咪咕
+    /music\.migu\.cn\/v3\/music\/(playlist|album)\/(\d{1,16})/i.exec(url)
+
+  if (!m) throw new Error('无法识别的分享链接（支持网易云/酷我/咪咕的歌单或专辑链接）')
+
+  let source = 'wy'
+  let type: 'album' | 'playlist' = 'playlist'
+  let id = ''
+  if (m[1] === 'playlist' || m[1] === 'album') {
+    type = m[1] as 'album' | 'playlist'
+    id = m[2]
+  } else if (m[1] === 'playlist_detail' || m[1] === 'album_detail') {
+    source = 'kw'
+    type = m[1] === 'playlist_detail' ? 'playlist' : 'album'
+    id = m[2]
+  } else if (m[1] === 'playlist' || m[1] === 'album') {
+    source = 'mg'
+    type = m[1] as 'album' | 'playlist'
+    id = m[2]
+  }
+
+  if (!isOnlineSource(source)) throw new Error('该平台的在线源未启用（管理后台「在线音乐源」可开启）')
+  const def = REGISTRY[source]
+  const fn = type === 'album' ? def.albumDetail : def.playlistDetail
+  if (!fn) throw new Error('该平台暂不支持导入' + (type === 'album' ? '专辑' : '歌单') + '（接口受限）')
+  const detail = await fn(id)
+  return { source, type, info: detail.info, list: detail.list }
+}
+
 export { kwParseJSON }
-export type { OnlineItem }
+export type { OnlineItem, OnlineCollection }

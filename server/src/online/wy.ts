@@ -9,7 +9,7 @@
 //         仅公开内容试听（128k standard），不做 VIP/无损解锁。
 // ---------------------------------------------------------------------------
 
-import type { OnlineItem, OnlineSearchResult } from './kw'
+import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult, OnlineCollectionDetail } from './kw'
 import { createHash, createCipheriv, randomBytes, publicEncrypt, constants } from 'node:crypto'
 
 const UA =
@@ -85,6 +85,114 @@ export const wySearch = async (keyword: string, page: number, size: number): Pro
     })
   }
   return { list, total: parseInt(String(json.data?.totalCount ?? '0'), 10) || 0, page, size }
+}
+
+/** 网易云专辑搜索（公开老 API /api/search/get/web，type=10） */
+export const wySearchAlbums = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const url =
+    'https://music.163.com/api/search/get/web?s=' + encodeURIComponent(keyword) +
+    '&type=10&limit=' + size + '&offset=' + (size * (page - 1))
+  const resp = await fetch(url, { signal: AbortSignal.timeout(12_000), headers: { 'User-Agent': UA, Referer: 'https://music.163.com/' } })
+  if (!resp.ok) throw new Error('网易接口 HTTP ' + resp.status)
+  const json: any = await resp.json().catch(() => null)
+  const arr: any[] = Array.isArray(json?.result?.albums) ? json.result.albums : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it?.id)
+    .map((it) => ({
+      source: 'wy',
+      id: String(it.id),
+      name: String(it.name || '未知专辑'),
+      creator: String(it.artist?.name || it.company || ''),
+      trackCount: parseInt(String(it.size ?? '0'), 10) || 0,
+      pic: /^https?:\/\//.test(String(it.picUrl ?? '')) ? String(it.picUrl) : null,
+    }))
+  return { list, total: parseInt(String(json?.result?.albumCount ?? '0'), 10) || list.length, page, size }
+}
+
+/** 网易云歌单搜索（公开老 API /api/search/get/web，type=1000） */
+export const wySearchPlaylists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const url =
+    'https://music.163.com/api/search/get/web?s=' + encodeURIComponent(keyword) +
+    '&type=1000&limit=' + size + '&offset=' + (size * (page - 1))
+  const resp = await fetch(url, { signal: AbortSignal.timeout(12_000), headers: { 'User-Agent': UA, Referer: 'https://music.163.com/' } })
+  if (!resp.ok) throw new Error('网易接口 HTTP ' + resp.status)
+  const json: any = await resp.json().catch(() => null)
+  const arr: any[] = Array.isArray(json?.result?.playlists) ? json.result.playlists : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it?.id)
+    .map((it) => ({
+      source: 'wy',
+      id: String(it.id),
+      name: String(it.name || '未知歌单'),
+      creator: String(it.creator?.nickname || ''),
+      trackCount: parseInt(String(it.trackCount ?? '0'), 10) || 0,
+      pic: /^https?:\/\//.test(String(it.coverImgUrl ?? '')) ? String(it.coverImgUrl) : null,
+    }))
+  return { list, total: parseInt(String(json?.result?.playlistCount ?? '0'), 10) || list.length, page, size }
+}
+
+/** 批量单曲信息（eapi /api/song/detail；ids 每批最多 100） */
+const wySongDetail = async (ids: number[]): Promise<OnlineItem[]> => {
+  if (!ids.length) return []
+  const json = await eapiPost('/api/song/detail', {
+    ids: '[' + ids.join(',') + ']',
+    c: '[' + ids.map((x) => '{"id":' + x + '}').join(',') + ']',
+  })
+  const arr: any[] = Array.isArray(json.songs) ? json.songs : []
+  const out: OnlineItem[] = []
+  for (const it of arr) {
+    if (!it?.id) continue
+    out.push({
+      source: 'wy',
+      id: String(it.id),
+      name: String(it.name || '未知歌曲'),
+      singer: (Array.isArray(it.artists) ? it.artists.map((a: any) => String(a?.name ?? '')).filter(Boolean).join('、') : ''),
+      album: String(it.album?.name || ''),
+      intervalMs: parseInt(String(it.duration ?? it.dt ?? '0'), 10) || 0,
+      pic: /^https?:\/\//.test(String(it.album?.picUrl ?? '')) ? String(it.album.picUrl) : null,
+    })
+  }
+  return out
+}
+
+/** 网易云歌单详情：v6/detail 拿 trackIds → song/detail 分批取全量曲目 */
+export const wyPlaylistDetail = async (id: string): Promise<OnlineCollectionDetail> => {
+  if (!/^\d{1,16}$/.test(id)) throw new Error('歌单 id 非法')
+  const resp = await fetch('https://music.163.com/api/v6/playlist/detail?id=' + encodeURIComponent(id) + '&n=1000&s=8', {
+    method: 'POST',
+    signal: AbortSignal.timeout(15_000),
+    headers: { 'User-Agent': UA, Referer: 'https://music.163.com/', 'Content-Type': 'application/x-www-form-urlencoded' },
+  })
+  if (!resp.ok) throw new Error('网易接口 HTTP ' + resp.status)
+  const json: any = await resp.json().catch(() => null)
+  const pl: any = json?.playlist
+  if (!pl) throw new Error('歌单不存在或已被删除')
+  const trackIds: number[] = Array.isArray(pl.trackIds) ? pl.trackIds.map((x: any) => Number(x?.id)).filter((x: number) => x > 0) : []
+  if (!trackIds.length) throw new Error('歌单为空')
+  // 分批取单曲信息（每批 100）
+  const list: OnlineItem[] = []
+  for (let i = 0; i < trackIds.length; i += 100) {
+    const batch = trackIds.slice(i, i + 100)
+    const items = await wySongDetail(batch).catch(() => [])
+    list.push(...items)
+    if (i + 100 >= trackIds.length) break
+  }
+  return {
+    info: {
+      source: 'wy',
+      id,
+      name: String(pl.name || '未知歌单'),
+      creator: String(pl.creator?.nickname || ''),
+      trackCount: parseInt(String(pl.trackCount ?? list.length), 10) || list.length,
+      pic: /^https?:\/\//.test(String(pl.coverImgUrl ?? '')) ? String(pl.coverImgUrl) : null,
+    },
+    list,
+  }
+}
+
+/** 网易云专辑详情：老接口/eapi/weapi 均受风控，暂不可用（能力位不含 detail） */
+export const wyAlbumDetail = async (id: string): Promise<OnlineCollectionDetail> => {
+  throw new Error('网易云专辑曲目接口暂不可用，试试搜索同名单曲或导入歌单')
 }
 
 /** 解析网易试听直链（eapi enhance/player/url，standard=128k） */

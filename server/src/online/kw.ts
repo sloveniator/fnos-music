@@ -46,6 +46,28 @@ export interface OnlineSearchResult {
   size: number
 }
 
+/** 专辑 / 歌单等集合（非单曲搜索结果） */
+export interface OnlineCollection {
+  source: string
+  id: string
+  name: string
+  creator: string
+  trackCount: number
+  pic: string | null
+}
+
+export interface OnlineCollectionResult {
+  list: OnlineCollection[]
+  total: number
+  page: number
+  size: number
+}
+
+export interface OnlineCollectionDetail {
+  info: OnlineCollection
+  list: OnlineItem[]
+}
+
 export const kwSearch = async (keyword: string, page: number, size: number): Promise<OnlineSearchResult> => {
   const url =
     'https://search.kuwo.cn/r.s?all=' + encodeURIComponent(keyword) +
@@ -88,3 +110,56 @@ export const kwPlayUrl = async (rid: string): Promise<string> => {
   if (!/^https?:\/\/.+\.mp3/.test(playUrl) && !/^https?:\/\/.+/.test(playUrl)) throw new Error('酷我未返回可播放地址')
   return playUrl
 }
+
+/** 酷我专辑搜索（r.s ft=album） */
+export const kwSearchAlbums = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const url =
+    'https://search.kuwo.cn/r.s?all=' + encodeURIComponent(keyword) +
+    '&ft=album&itemset=web_2013&client=kt&pn=' + (page - 1) +
+    '&rn=' + size + '&rformat=json&encoding=utf8&vipver=1'
+  const text = await fetchText(url, { Referer: 'http://www.kuwo.cn/' })
+  const j = kwParseJSON(text)
+  const total = parseInt(j.TOTAL ?? '0', 10) || 0
+  const arr: any[] = Array.isArray(j.albumlist) ? j.albumlist : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it && (it.albumid || it.id))
+    .map((it) => ({
+      source: 'kw',
+      id: String(it.albumid || it.id),
+      name: String(it.name || it.ALBUM || '未知专辑').replace(/&nbsp;/g, ' '),
+      creator: String(it.artist || it.aartist || '').replace(/&nbsp;/g, ' ').replace(/&/g, '、'),
+      trackCount: parseInt(String(it.songnum ?? '0'), 10) || 0,
+      pic: (() => {
+        const p = String(it.img || it.hts_img || '')
+        return p ? p.replace(/_?120/g, '') : null
+      })(),
+    }))
+  return { list, total, page, size }
+}
+
+/** 酷我歌单搜索（r.s ft=playlist） */
+export const kwSearchPlaylists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const url =
+    'https://search.kuwo.cn/r.s?all=' + encodeURIComponent(keyword) +
+    '&ft=playlist&itemset=web_2013&client=kt&pn=' + (page - 1) +
+    '&rn=' + size + '&rformat=json&encoding=utf8&vipver=1'
+  const text = await fetchText(url, { Referer: 'http://www.kuwo.cn/' })
+  const j = kwParseJSON(text)
+  const total = parseInt(j.TOTAL ?? '0', 10) || 0
+  const arr: any[] = Array.isArray(j.abslist) ? j.abslist : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it && it.playlistid)
+    .map((it) => ({
+      source: 'kw',
+      id: String(it.playlistid),
+      name: String(it.name || '未知歌单').replace(/&nbsp;/g, ' '),
+      creator: String(it.nickname || '').replace(/&nbsp;/g, ' '),
+      trackCount: parseInt(String(it.songnum ?? '0'), 10) || 0,
+      pic: (() => {
+        const p = String(it.pic || it.hts_pic || '')
+        return p ? p.replace(/_?240/g, '') : null
+      })(),
+    }))
+  return { list, total, page, size }
+}
+
