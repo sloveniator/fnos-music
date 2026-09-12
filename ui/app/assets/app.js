@@ -435,7 +435,14 @@
     const hour = new Date().getHours()
     v.appendChild(el('h2', 'page', hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'))
 
-    const stats = await api('/api/stats')
+    // 并发拉取：统计卡片 + 发现页数据 + 最近播放
+    const [stats, discover, played] = await Promise.all([
+      api('/api/stats'),
+      api('/api/discover'),
+      api('/api/played'),
+    ])
+
+    // 统计卡片（保留）
     const quick = el('div', 'grid')
     quick.style.marginBottom = '8px'
     const tiles = [
@@ -456,8 +463,56 @@
     }
     v.appendChild(quick)
 
-    const played = await api('/api/played')
-    if (played.tracks.length) {
+    // 今日推荐（dailyMix：每天种子洗牌，同歌手最多 2 首）
+    if (discover.dailyMix && discover.dailyMix.length) {
+      const rh = el('div', 'row-head')
+      rh.appendChild(el('h3', null, '今日推荐'))
+      const btns = el('div', 'btns')
+      const bAll = el('button', 'btn ghost')
+      bAll.innerHTML = SVG.play + '<span>播放全部</span>'
+      bAll.onclick = () => player.play(discover.dailyMix, 0)
+      const bShuf = el('button', 'btn ghost')
+      bShuf.innerHTML = SVG.shuffle + '<span>随机播放</span>'
+      bShuf.onclick = () => player.shufflePlay(discover.dailyMix)
+      btns.appendChild(bAll); btns.appendChild(bShuf)
+      rh.appendChild(btns)
+      v.appendChild(rh)
+      v.appendChild(trackTable(discover.dailyMix.slice(0, 10), { menu: true }))
+    }
+
+    // 新入库（按 mtime 倒序）
+    if (discover.newArrivals && discover.newArrivals.length) {
+      const rh = el('div', 'row-head')
+      rh.appendChild(el('h3', null, '新入库'))
+      const btns = el('div', 'btns')
+      const bAll = el('button', 'btn ghost', '播放全部')
+      bAll.onclick = () => player.play(discover.newArrivals, 0)
+      btns.appendChild(bAll)
+      rh.appendChild(btns)
+      v.appendChild(rh)
+      v.appendChild(trackTable(discover.newArrivals.slice(0, 10), { menu: true, showAlbum: false }))
+    }
+
+    // 热门歌手（按曲目数降序，横向卡片网格）
+    if (discover.hotArtists && discover.hotArtists.length) {
+      const rh = el('div', 'row-head')
+      rh.appendChild(el('h3', null, '热门歌手'))
+      v.appendChild(rh)
+      const grid = el('div', 'grid')
+      grid.style.marginBottom = '24px'
+      for (const a of discover.hotArtists) {
+        const c = el('div', 'card')
+        c.appendChild(coverImg(a.coverTrackId ? { id: a.coverTrackId, hasCover: true } : null, 'cover'))
+        c.appendChild(el('div', 't', a.name))
+        c.appendChild(el('div', 's', a.count + ' 首 · ' + a.albumCount + ' 张'))
+        c.onclick = () => { location.hash = '#/artist?singer=' + encodeURIComponent(a.name) }
+        grid.appendChild(c)
+      }
+      v.appendChild(grid)
+    }
+
+    // 最近播放（保留）
+    if (played.tracks && played.tracks.length) {
       const rh = el('div', 'row-head')
       rh.appendChild(el('h3', null, '最近播放'))
       const playedBtns = el('div', 'btns')
