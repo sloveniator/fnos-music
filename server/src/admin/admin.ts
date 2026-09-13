@@ -143,7 +143,7 @@ const SECURITY_HEADERS: http.OutgoingHttpHeaders = {
   'Referrer-Policy': 'strict-origin-when-cross-origin',
 }
 
-const serveStatic = (res: http.ServerResponse, staticDir: string, urlPath: string) => {
+const serveStatic = (res: http.ServerResponse, staticDir: string, urlPath: string, req?: http.IncomingMessage) => {
   let rel = urlPath.replace(/^\/+/, '')
   if (!rel) rel = 'index.html'
   const normalizedRoot = path.normalize(staticDir + path.sep)
@@ -168,7 +168,26 @@ const serveStatic = (res: http.ServerResponse, staticDir: string, urlPath: strin
     return
   }
   const ext = path.extname(target).toLowerCase()
-  res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': contentTypes[ext] ?? 'application/octet-stream' })
+  // 协商缓存：ETag 基于 size+mtime，配合 no-cache（每次校验，命中则 304）。
+  // 避免升级后浏览器继续用旧 assets，同时不重复传输未变更文件。
+  try {
+    const st = fs.statSync(target)
+    const etag = '"' + st.size.toString(16) + '-' + Math.floor(st.mtimeMs).toString(16) + '"'
+    if (req && req.headers['if-none-match'] === etag) {
+      res.writeHead(304, { ...SECURITY_HEADERS, ETag: etag, 'Cache-Control': 'no-cache' })
+      res.end()
+      return
+    }
+    res.writeHead(200, {
+      ...SECURITY_HEADERS,
+      'Content-Type': contentTypes[ext] ?? 'application/octet-stream',
+      'Content-Length': String(st.size),
+      ETag: etag,
+      'Cache-Control': 'no-cache',
+    })
+  } catch {
+    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': contentTypes[ext] ?? 'application/octet-stream' })
+  }
   fs.createReadStream(target).pipe(res)
 }
 
@@ -424,7 +443,7 @@ export const handleAdminRequest = async(req: http.IncomingMessage, res: http.Ser
     const rel = p == '/admin/'
       ? 'index.html'
       : p.replace(/^\/admin\//, '')
-    serveStatic(res, staticDir, '/' + rel)
+    serveStatic(res, staticDir, '/' + rel, req)
     return true
   }
 
@@ -432,7 +451,7 @@ export const handleAdminRequest = async(req: http.IncomingMessage, res: http.Ser
   if ((p == '/' || p == '/index.html') && method == 'GET') {
     const appDir = process.env.GS_APP_STATIC_DIR
     if (appDir) {
-      serveStatic(res, appDir, '/index.html')
+      serveStatic(res, appDir, '/index.html', req)
       return true
     }
     // 未部署消费者端时回落管理后台
@@ -443,10 +462,10 @@ export const handleAdminRequest = async(req: http.IncomingMessage, res: http.Ser
   if ((p.startsWith('/assets/') || p == '/favicon.ico' || p == '/manifest.json' || p == '/sw.js') && method == 'GET') {
     const appDir = process.env.GS_APP_STATIC_DIR
     if (appDir) {
-      if (p == '/favicon.ico') serveStatic(res, appDir, '/assets/icon.png')
-      else if (p == '/manifest.json') serveStatic(res, appDir, '/manifest.json')
-      else if (p == '/sw.js') serveStatic(res, appDir, '/sw.js')
-      else serveStatic(res, appDir, p)
+      if (p == '/favicon.ico') serveStatic(res, appDir, '/assets/icon.png', req)
+      else if (p == '/manifest.json') serveStatic(res, appDir, '/manifest.json', req)
+      else if (p == '/sw.js') serveStatic(res, appDir, '/sw.js', req)
+      else serveStatic(res, appDir, p, req)
       return true
     }
   }
