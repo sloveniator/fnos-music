@@ -1840,88 +1840,81 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
   let dlSse = null, dlQueue = []
   let dlDir = { current: '', dirs: [], authed: [], userDir: '', autoAssigned: false }
-  // 容量条：limitGb / effectiveGb / usedBytes / remainingBytes / note
+  // 头部信息统一收敛到一行 meta（替代原 banner/目录条/容量卡/统计卡，原占视口 46%）
   let dlQuota = null
-  async function loadDlQuota() {
-    try {
-      const d = await api('/api/quota')
-      dlQuota = d
-      const bar = document.getElementById('dl-quota-bar')
-      if (!bar) return
-      bar.innerHTML = ''
-      if (!d) return
-      const gb = 1024 * 1024 * 1024
-      const usedGb = d.usedBytes / gb
-      const pct = Math.min(100, (usedGb / Math.max(d.effectiveGb, 0.0001)) * 100)
-      const cls = pct >= 90 ? 'dl-quota-full' : (pct >= 70 ? 'dl-quota-warn' : '')
-      const head = el('div', 'dl-quota-head')
-      head.appendChild(el('span', 'dl-quota-icon', '📊'))
-      head.appendChild(el('span', 'dl-quota-title', `已用 ${usedGb.toFixed(2)} GB / ${d.effectiveGb} GB`))
-      const rem = el('span', 'dl-quota-rem', `剩余 ${((d.remainingBytes / gb)).toFixed(2)} GB`)
-      head.appendChild(rem)
-      bar.appendChild(head)
-      const barWrap = el('div', 'dl-quota-bar-wrap')
-      const fill = el('div', 'dl-quota-fill' + (cls ? ' ' + cls : ''), '')
-      fill.style.width = pct.toFixed(1) + '%'
-      barWrap.appendChild(fill)
-      bar.appendChild(barWrap)
-      if (d.note) bar.appendChild(el('div', 'dl-quota-note', d.note))
-    } catch { /* 静默 */ }
-  }
+  let dlStatsCache = null
+  let dlMetaLast = 0
 
-  async function loadDownloadDir() {
-    try {
-      const d = await api('/api/downloads/dir')
-      dlDir = { current: d.current || '', dirs: d.dirs || [], authed: d.authed || [], userDir: d.userDir || '', autoAssigned: !!d.autoAssigned }
-    } catch { /* 保持空状态 */ }
-    paintDownloadDir()
+  function shortDir(p) {
+    if (!p) return ''
+    const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
+    return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/')
   }
-  function paintDownloadDir() {
-    const bar = document.getElementById('dl-dir-bar')
-    if (!bar) return
-    bar.innerHTML = ''
-    const wrap = el('div', 'dl-dir-row')
-    const icon = el('span', 'dl-dir-icon', '📁')
-    wrap.appendChild(icon)
-    const label = el('span', 'dl-dir-label', '下载目录')
-    wrap.appendChild(label)
-    // 显示自动分配的目录路径
-    const dirPath = dlDir.current || dlDir.userDir || 'dataPath/library/'
-    const dirDisplay = el('span', 'dl-dir-current', dirPath)
-    dirDisplay.title = '此目录在注册时自动分配，无需手动设置'
-    wrap.appendChild(dirDisplay)
-    // 标记为自动分配
-    if (dlDir.autoAssigned) {
-      const badge = el('span', 'dl-dir-badge', '✓ 已自动分配')
-      wrap.appendChild(badge)
+  /** 下载队列 Tab 徽章（下载中数量） */
+  function paintDlBadge() {
+    const btn = document.querySelector('.dl-otabs [data-tab="queue"]')
+    if (!btn) return
+    const n = dlStatsCache ? (dlStatsCache.downloading || 0) : 0
+    let b = btn.querySelector('.otab-badge')
+    if (!n) { if (b) b.remove(); return }
+    if (!b) { b = el('span', 'otab-badge', String(n)); btn.appendChild(b) }
+    else b.textContent = String(n)
+  }
+  /** 拉取队列统计 / 配额 / 下载目录，渲染成单行 meta */
+  async function refreshDlMeta() {
+    dlMetaLast = Date.now()
+    const box = document.getElementById('dl-meta')
+    if (!box) return
+    const [stats, quota, dir] = await Promise.all([
+      api('/api/downloads/stats').catch(() => null),
+      api('/api/quota').catch(() => null),
+      api('/api/downloads/dir').catch(() => null),
+    ])
+    if (stats) dlStatsCache = stats
+    if (dir) dlDir = { current: dir.current || '', dirs: dir.dirs || [], authed: dir.authed || [], userDir: dir.userDir || '', autoAssigned: !!dir.autoAssigned }
+    dlQuota = quota
+    box.innerHTML = ''
+    const add = (cls, txt, title) => {
+      const n = el('span', cls, txt)
+      if (title) n.title = title
+      box.appendChild(n)
+      return n
     }
-    bar.appendChild(wrap)
-  }
-  async function saveDownloadDir(dir) {
-    if (!dir) { toast('目录不能为空', true); return }
-    try {
-      const r = await api('/api/downloads/dir', { method: 'POST', body: { dir } })
-      dlDir.current = r.current || dir
-      if (!dlDir.dirs.length || dlDir.dirs[0] !== dlDir.current) {
-        dlDir.dirs = r.settings?.dirs || [dlDir.current]
-      }
-      toast('下载目录已更新')
-      paintDownloadDir()
-    } catch (e) { toast(e.message, true) }
+    if (stats) {
+      add('dm-i dm-strong', stats.total + ' 首')
+      if (stats.downloading) add('dm-i dm-run', stats.downloading + ' 下载中')
+      if (stats.done) add('dm-i dm-ok', stats.done + ' 完成')
+      if (stats.failed) add('dm-i dm-bad', stats.failed + ' 失败')
+      add('dm-i', fmtBytes(stats.bytes))
+    } else {
+      add('dm-i', '统计不可用')
+    }
+    const dirPath = dlDir.current || dlDir.userDir || ''
+    if (dirPath) add('dm-i dm-dir', '📁 ' + shortDir(dirPath), '下载目录：' + dirPath + (dlDir.autoAssigned ? '（自动分配）' : ''))
+    if (quota && quota.effectiveGb) {
+      const gb = 1024 * 1024 * 1024
+      const pct = Math.min(100, (quota.usedBytes / gb) / Math.max(quota.effectiveGb, 0.0001) * 100)
+      const q = el('span', 'dm-quota')
+      const bar = el('span', 'dm-q-bar')
+      const fill = el('i')
+      if (pct >= 90) fill.className = 'full'
+      else if (pct >= 70) fill.className = 'warn'
+      fill.style.width = pct.toFixed(1) + '%'
+      bar.appendChild(fill)
+      q.appendChild(bar)
+      q.appendChild(el('span', 'dm-q-txt', (quota.usedBytes / gb).toFixed(2) + ' / ' + quota.effectiveGb + ' GB'))
+      q.title = quota.note || '存储配额'
+      box.appendChild(q)
+    }
+    paintDlBadge()
   }
 
   const renderDlCenter = async (v) => {
     if (dlSse) { try { dlSse.close() } catch {} dlSse = null }
     v.innerHTML = ''
-    // 标题由 banner 承担（与在线音乐页风格一致）
-    const banner = el('div', 'online-banner dl-banner')
-    banner.appendChild(el('div', 'ob-t', '下载到 NAS 曲库'))
-    banner.appendChild(el('div', 'ob-s', '搜索在线歌曲 → 加入下载队列 → 保存到本机曲库目录（多源并发 · 断点重试 · 已存在跳过）'))
-    v.appendChild(banner)
-    const dirBar = el('div', 'dl-dir-bar'); dirBar.id = 'dl-dir-bar'; v.appendChild(dirBar)
-    const quotaBar = el('div', 'dl-quota-bar'); quotaBar.id = 'dl-quota-bar'; v.appendChild(quotaBar)
-    const stBox = el('div', 'dl-stats'); stBox.id = 'dl-stats'; v.appendChild(stBox)
-    const tabs = el('div', 'otabs'); v.appendChild(tabs)
+    // 精简头部：仅 Tab + 单行 meta（目录/容量/统计），把高度让给实际内容
+    const tabs = el('div', 'otabs dl-otabs'); v.appendChild(tabs)
+    const metaBar = el('div', 'dl-meta'); metaBar.id = 'dl-meta'; v.appendChild(metaBar)
     const area = el('div', 'dl-area'); v.appendChild(area)
 
     // 进入下载中心时刷新在线源（dlState.sources 是 init 快照，不能依赖缓存）
@@ -1937,25 +1930,13 @@ kuwo.cn/playlist_detail/280301309</pre>
       box.innerHTML = ''
       const t1 = el('button', 'otab' + (dlState.tab === 'search' ? ' on' : ''), '🔍 搜索')
       const t2 = el('button', 'otab' + (dlState.tab === 'queue' ? ' on' : ''), '⏬ 下载队列')
+      t2.dataset.tab = 'queue'
       const t3 = el('button', 'otab' + (dlState.tab === 'playlist' ? ' on' : ''), '📋 歌单导入')
       t1.onclick = () => { dlState.tab = 'search'; renderDlTabs(box); renderDlArea(area) }
       t2.onclick = () => { dlState.tab = 'queue'; renderDlTabs(box); renderDlArea(area) }
       t3.onclick = () => { dlState.tab = 'playlist'; renderDlTabs(box); renderDlArea(area) }
       box.appendChild(t1); box.appendChild(t2); box.appendChild(t3)
-    }
-    function renderDlStats(s) {
-      stBox.innerHTML = ''
-      if (!s) return
-      const items = [['总数', s.total, ''], ['下载中', s.downloading, 'dl-active'], ['已完成', s.done, 'dl-done'], ['失败', s.failed, 'dl-failed'], ['体积', fmtBytes(s.bytes), '']]
-      for (const [label, val, cls] of items) {
-        const card = el('div', 'stat' + (cls ? ' ' + cls : ''))
-        card.appendChild(el('div', 'st-v', String(val)))
-        card.appendChild(el('div', 'st-l', label))
-        stBox.appendChild(card)
-      }
-    }
-    async function loadStats() {
-      try { renderDlStats(await api('/api/downloads/stats')) } catch {}
+      paintDlBadge()
     }
     function renderDlArea(box) {
       if (dlState.tab === 'search') renderSearch(box)
@@ -2024,7 +2005,7 @@ kuwo.cn/playlist_detail/280301309</pre>
         const okN = r.accepted || 0
         const failN = (r.reasons || []).length
         if (okN > 0) {
-          toast(`已加入 ${okN} 首到下载队列`); loadStats(); loadDlQuota()
+          toast(`已加入 ${okN} 首到下载队列`); refreshDlMeta()
         }
         if (failN > 0) {
           const r0 = (r.reasons || [])[0]
@@ -2143,7 +2124,7 @@ kuwo.cn/playlist_detail/280301309</pre>
           const reasons = Array.isArray(r.reasons) ? r.reasons : []
           if (r.accepted > 0) {
             bAdd.textContent = '✓ 已加入'; bAdd.classList.remove('primary'); bAdd.classList.add('ghost')
-            toast('已加入下载队列'); loadStats(); loadDlQuota()
+            toast('已加入下载队列'); refreshDlMeta()
           } else if (reasons.length) {
             toast(reasons[0].reason || '入队失败', true)
             bAdd.disabled = false; bAdd.textContent = '⬇ 下载'
@@ -2384,9 +2365,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       } catch (e) { toast(e.message, true) }
     }
 
-    renderDlTabs(tabs); renderDlArea(area); loadStats()
-    loadDownloadDir()
-    loadDlQuota()
+    renderDlTabs(tabs); renderDlArea(area); refreshDlMeta()
 
     // SSE（指数退避重连）
     let dlSseRetry = 0
@@ -2403,8 +2382,9 @@ kuwo.cn/playlist_detail/280301309</pre>
             if (idx >= 0) dlQueue[idx] = t
             else dlQueue.unshift(t)
             paintQueue(document.getElementById('dl-queue'))
-            loadStats()
           }
+          // 任意 tab 下都刷新顶部统计（节流 2s：进度事件很密集）
+          if (Date.now() - dlMetaLast > 2000) refreshDlMeta()
         })
         dlSse.onerror = () => {
           dlSse.close()

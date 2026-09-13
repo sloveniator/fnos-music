@@ -588,16 +588,6 @@ img.ph {
 .q-x:hover { color: #ff9c9c; }
 
 /* ============ 0021：下载中心（MVP） ============ */
-.dl-banner { background: linear-gradient(135deg, rgba(34,197,94,.18), rgba(59,130,246,.14)); }
-.dl-banner::after { content: '⬇'; font-size: 60px; }
-.dl-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 0 0 14px; }
-.dl-stats .stat { background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
-  border: 1px solid var(--line-soft); border-radius: 12px; padding: 12px 14px; }
-.dl-stats .st-v { font-size: 20px; font-weight: 700; letter-spacing: -.3px; color: #fff; }
-.dl-stats .st-l { font-size: 12px; color: var(--muted); margin-top: 2px; }
-.dl-stats .dl-active .st-v { color: #60a5fa; }
-.dl-stats .dl-done .st-v { color: #4ade80; }
-.dl-stats .dl-failed .st-v { color: #f87171; }
 @media (max-width: 720px) { .dl-stats { grid-template-columns: repeat(2, 1fr); } }
 .dl-search-bar { display: flex; gap: 10px; margin: 10px 0 18px; }
 .dl-search-bar input { flex: 1; padding: 10px 14px; border-radius: 10px; background: rgba(255,255,255,.05);
@@ -624,24 +614,6 @@ img.ph {
 .dl-parse-miss { margin: 8px 0; padding-left: 20px; font-size: 12px; color: #fca5a5; list-style: disc; }
 .dl-parse-miss li { margin: 2px 0; }
 .dl-queue-box { display: flex; flex-direction: column; gap: 8px; }
-.dl-dir-bar { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 6px; }
-.dl-quota-bar { margin: 10px 0 8px; padding: 10px 12px;
-  background: rgba(79,140,255,.06); border: 1px solid rgba(79,140,255,.22); border-radius: 10px;
-  display: flex; flex-direction: column; gap: 6px; }
-.dl-quota-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.dl-quota-icon { font-size: 14px; }
-.dl-quota-title { font-weight: 600; color: #fff; }
-.dl-quota-rem { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
-.dl-quota-bar-wrap { height: 8px; background: rgba(255,255,255,.08); border-radius: 4px; overflow: hidden; }
-.dl-quota-fill { height: 100%; background: linear-gradient(90deg, #4f9dff, #7bd38f);
-  transition: width .3s; border-radius: 4px; }
-.dl-quota-fill.dl-quota-warn { background: linear-gradient(90deg, #4f9dff, #ffb84d); }
-.dl-quota-fill.dl-quota-full { background: linear-gradient(90deg, #ffb84d, #ff6b6b); }
-.dl-quota-note { font-size: 11px; color: var(--muted); line-height: 1.4; }
-.dl-dir-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  background: rgba(79,140,255,.06); border: 1px solid rgba(79,140,255,.22); border-radius: 10px; flex-wrap: wrap; }
-.dl-dir-icon { font-size: 18px; }
-.dl-dir-label { font-size: 13px; font-weight: 600; color: #fff; }
 .dl-dir-select { background: rgba(255,255,255,.05); color: #fff; border: 1px solid var(--line-soft);
   border-radius: 8px; padding: 6px 10px; font-size: 12px; min-width: 240px; max-width: 360px; }
 .dl-dir-select:focus { outline: none; border-color: rgba(79,140,255,.6); }
@@ -649,8 +621,6 @@ img.ph {
 .dl-dir-custom { background: rgba(255,255,255,.05); color: #fff; border: 1px solid var(--line-soft);
   border-radius: 8px; padding: 6px 10px; font-size: 12px; min-width: 260px; }
 .dl-dir-custom:focus { outline: none; border-color: rgba(79,140,255,.6); }
-.dl-dir-current { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-.dl-dir-tip { font-size: 12px; color: #fbbf24; padding: 0 12px; }
 .dl-batch-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px;
   background: rgba(79,140,255,.08); border: 1px solid rgba(79,140,255,.22); margin-bottom: 4px; }
 .dl-batch-bar .dl-sel-all { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #fff; cursor: pointer; user-select: none; }
@@ -862,3 +832,19 @@ img.ph {
 .cf-ops { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .cf-ops .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .cf-auto { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; opacity: .85; cursor: pointer; }
+/* ============ 下载中心：精简头部（原 banner/目录条/容量卡/统计卡占视口 46%） ============ */
+.dl-otabs { margin: 0 0 10px; }
+.otab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 9px; font-size: 11px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #4f8cff, #7b5cff); vertical-align: middle; }
+.dl-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 14px; padding: 0 2px 10px; margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, .06); font-size: 12.5px; color: var(--muted); }
+.dm-i { white-space: nowrap; }
+.dm-strong { color: #fff; font-weight: 600; }
+.dm-run { color: #60a5fa; }
+.dm-ok { color: #4ade80; }
+.dm-bad { color: #f87171; }
+.dm-dir { cursor: help; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
+.dm-quota { display: inline-flex; align-items: center; gap: 7px; }
+.dm-q-bar { display: inline-block; width: 56px; height: 5px; border-radius: 99px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.dm-q-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #4f9dff, #7bd38f); }
+.dm-q-bar i.warn { background: linear-gradient(90deg, #4f9dff, #ffb84d); }
+.dm-q-bar i.full { background: linear-gradient(90deg, #ffb84d, #ff6b6b); }
+.dm-q-txt { font-variant-numeric: tabular-nums; }
