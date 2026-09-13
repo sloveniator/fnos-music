@@ -233,7 +233,13 @@ export const parseId3v2 = (buf: Buffer): { tags: RawTags, id3Size: number } => {
     const id = buf.toString('latin1', pos, pos + 4)
     if (!/^[A-Z][A-Z0-9]{3}$/.test(id)) break
     const size = major == 4 ? syncSafe(buf, pos + 4) : buf.readUInt32BE(pos + 4)
-    if (size <= 0 || pos + 10 + size > end) break
+    if (size <= 0 || pos + 10 > end) break
+    if (pos + 10 + size > end) {
+      // 内嵌封面常达数百 KB，超过头部读取窗口。仍按已读部分解析，
+      // 保证 hasCover 检测不受窗口大小影响（完整提取见 readCover）
+      if (id == 'APIC') parseApic(buf.subarray(pos + 10, end), tags)
+      break
+    }
     const body = buf.subarray(pos + 10, pos + 10 + size)
     switch (id[0]) {
       case 'T': id3TextFrame(id, body, tags); break
@@ -599,9 +605,35 @@ export const readTrackMeta = async (filePath: string, relPath: string): Promise<
 }
 
 /** 按需提取内嵌封面（不缓存，扫描不写盘） */
+const MAX_ID3_TAG_READ = 12 * 1024 * 1024
+
+/** mp3/wav：按 ID3 标签头声明的大小完整读取（封面帧可能远超头部窗口） */
+const readId3Cover = async (filePath: string): Promise<{ mime: string, data: Buffer } | null> => {
+  const fd = await fs.open(filePath, 'r')
+  try {
+    const h = Buffer.allocUnsafe(10)
+    const hr = await fd.read(h, 0, 10, 0)
+    if (hr.bytesRead < 10 || h.toString('latin1', 0, 3) != 'ID3') return null
+    const tagSize = syncSafe(h, 6) + 10
+    if (tagSize <= 10 || tagSize > MAX_ID3_TAG_READ) return null
+    const buf = Buffer.allocUnsafe(tagSize)
+    const r = await fd.read(buf, 0, tagSize, 0)
+    const parsed = parseId3v2(buf.subarray(0, r.bytesRead))
+    return parsed.tags.picture ?? null
+  } catch {
+    return null
+  } finally {
+    await fd.close()
+  }
+}
+
 const readCover = async (filePath: string): Promise<{ mime: string, data: Buffer } | null> => {
   const ext = path.extname(filePath).toLowerCase()
   try {
+    if (ext == '.mp3' || ext == '.wav') {
+      const pic = await readId3Cover(filePath)
+      if (pic) return pic
+    }
     const { fd, head, size } = await openHead(filePath)
     try {
       const tags = ext == '.m4a' || ext == '.aac' ? await parseMp4WithTail(fd, head, size) : parseTagsByExt(ext, head, size)

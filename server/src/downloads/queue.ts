@@ -155,7 +155,26 @@ const pickSource = async (source: string, rid: string): Promise<string> => {
 
 // ---------- ID3v2 标签写入（仅 mp3） ----------
 // 失败降级：不抛错给下载流程；仅返回错误信息供 task.error 记录。
-const writeId3Tags = (filePath: string, task: DownloadTask): string | null => {
+/** 拉取在线封面图（限 3MB），失败返回 null 不影响下载结果 */
+const fetchCover = async (url: string): Promise<{ mime: string, data: Buffer } | null> => {
+  try {
+    if (!/^https?:\/\//.test(String(url ?? ''))) return null
+    // 网易云原图常 500KB+，会让 ID3 标签臃肿；图床支持 param 参数取缩略图
+    const target = /music\.126\.net\//.test(url) && !url.includes('?') ? url + '?param=500y500' : url
+    const r = await fetch(target, {
+      signal: AbortSignal.timeout(15_000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36' },
+    })
+    if (!r.ok) return null
+    const ct = String(r.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+    const ab = await r.arrayBuffer()
+    if (!ab.byteLength || ab.byteLength > 3 * 1024 * 1024) return null
+    const mime = /^image\/(jpeg|jpg|png|webp)$/.test(ct) ? (ct === 'image/jpg' ? 'image/jpeg' : ct) : 'image/jpeg'
+    return { mime, data: Buffer.from(ab) }
+  } catch { return null }
+}
+
+const writeId3Tags = (filePath: string, task: DownloadTask, cover?: { mime: string, data: Buffer } | null): string | null => {
   if (!filePath.toLowerCase().endsWith('.mp3')) return null
   try {
     const tags: Record<string, unknown> = {}
@@ -163,6 +182,14 @@ const writeId3Tags = (filePath: string, task: DownloadTask): string | null => {
     if (task.singer) tags.artist = task.singer
     if (task.album) tags.album = task.album
     if (task.duration > 0) tags.TCON = 'Music'
+    if (cover) {
+      tags.image = {
+        mime: cover.mime,
+        type: { id: 3, name: 'front cover' },
+        description: 'Cover',
+        imageBuffer: cover.data,
+      }
+    }
     if (!Object.keys(tags).length) return null
     const r = ID3.write(tags, filePath) as true | Error
     if (r === true) return null
@@ -306,7 +333,8 @@ const downloadTask = async (task: DownloadTask): Promise<void> => {
     task.error = undefined
     // 写 ID3v2 标签（mp3 文件才支持；失败仅记 error，不影响任务状态）
     if (target.toLowerCase().endsWith('.mp3')) {
-      try { writeId3Tags(target, task) } catch (e: any) {
+      const cover = task.pic ? await fetchCover(task.pic) : null
+      try { writeId3Tags(target, task, cover) } catch (e: any) {
         task.error = 'ID3 写入失败：' + (e?.message || e)
       }
     }

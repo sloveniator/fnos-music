@@ -93,6 +93,16 @@ const playlistSummary = async(userName: string) => {
   ]
 }
 
+// ---------------- 在线封面代理（图片直连第三方） ----------------
+const PIC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+// 白名单防 SSRF：只允许已知音源图床
+const PIC_HOST_ALLOW = [
+  /(^|\.)music\.126\.net$/, /(^|\.)126\.net$/, /(^|\.)music\.163\.com$/,
+  /(^|\.)kuwo\.cn$/, /(^|\.)migu\.cn$/, /(^|\.)qq\.com$/, /(^|\.)gtimg\.cn$/,
+]
+const PIC_TTL = 6 * 60 * 60 * 1000
+const picCache = new Map<string, { ct: string, buf: Buffer, ts: number }>()
+
 export const handleWebRequest = async(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> => {
   const p = url.pathname
   const method = req.method ?? 'GET'
@@ -187,6 +197,46 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
       (playUrl) => pipeHttpStream(req, res, playUrl, { Referer: 'http://www.kuwo.cn/' }, asDownload ? { download: true, filename: fileName } : {}),
       (e) => fail(res, 502, (e as Error).message),
     )
+    return true
+  }
+  // 在线封面代理：/web/media/pic?u=<encodeURIComponent(url)>
+  // 第三方图床多为 http（部分域名 https 不可达），由 NAS 取回再回传，
+  // 规避浏览器对 http 图片的拦截；命中本地缓存直接返回
+  if (method == 'GET' && p == '/web/media/pic') {
+    const raw = url.searchParams.get('u') ?? ''
+    let target: URL | null = null
+    try { target = new URL(raw) } catch { target = null }
+    if (!target || (target.protocol != 'http:' && target.protocol != 'https:')) return fail(res, 400, '图片地址非法'), true
+    const picUrl: URL = target
+    if (!PIC_HOST_ALLOW.some((re) => re.test(picUrl.hostname))) return fail(res, 403, '图片来源不在白名单内'), true
+    const hit = picCache.get(picUrl.href)
+    if (hit && Date.now() - hit.ts < PIC_TTL) {
+      res.writeHead(200, {
+        'Content-Type': hit.ct, 'Content-Length': String(hit.buf.length),
+        'Cache-Control': 'public, max-age=86400', 'X-Pic-Cache': 'hit',
+      })
+      res.end(hit.buf)
+      return true
+    }
+    try {
+      const r = await fetch(picUrl.href, {
+        signal: AbortSignal.timeout(12_000),
+        headers: { 'User-Agent': PIC_UA, Referer: picUrl.origin + '/' },
+      })
+      if (!r.ok) return fail(res, 502, '上游返回 ' + r.status), true
+      const ct = String(r.headers.get('content-type') ?? '').split(';')[0].trim() || 'image/jpeg'
+      if (!/^image\//.test(ct)) return fail(res, 502, '上游不是图片'), true
+      const buf = Buffer.from(await r.arrayBuffer())
+      if (!buf.length || buf.length > 6 * 1024 * 1024) return fail(res, 502, '图片为空或过大'), true
+      picCache.set(picUrl.href, { ct, buf, ts: Date.now() })
+      if (picCache.size > 150) picCache.delete(String(picCache.keys().next().value))
+      res.writeHead(200, {
+        'Content-Type': ct, 'Content-Length': String(buf.length), 'Cache-Control': 'public, max-age=86400',
+      })
+      res.end(buf)
+    } catch (e) {
+      return fail(res, 502, '取图失败：' + (e as Error).message), true
+    }
     return true
   }
   // 在线源封面已在 media 段最前处理（pic 分支必须先于 online/{source} 匹配）

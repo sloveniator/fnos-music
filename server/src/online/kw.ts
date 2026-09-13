@@ -2,7 +2,7 @@
 // 酷我音乐平台适配器（内置在线源 · 方案 B）
 //   搜索：search.kuwo.cn r.s 公开接口（免签名，响应为单引号 JSON）
 //   试听：antiserver.kuwo.cn convert_url3 → mp3 直链（NAS 代理拉流）
-//   封面：img1.kuwo.cn star/albumcover/{web_albumpic_short}
+//   封面：img3.sycdn.kuwo.cn star/albumcover/{web_albumpic_short}（旧域名 img1.kuwo.cn 已停用）
 //   说明：仅用于 Web 播放器的在线搜索/试听；不做 VIP/无损解锁，纯公开内容。
 // ---------------------------------------------------------------------------
 
@@ -89,7 +89,9 @@ export const kwSearch = async (keyword: string, page: number, size: number): Pro
         singer: String(it.ARTIST || it.AARTIST || '未知歌手').replace(/&nbsp;/g, ' ').replace(/&/g, '、'),
         album: String(it.ALBUM || '').replace(/&nbsp;/g, ' '),
         intervalMs: (parseInt(String(it.DURATION ?? '0'), 10) || 0) * 1000,
-        pic: pic ? 'http://img1.kuwo.cn/star/albumcover/' + pic.replace(/^120\//, '300/') : null,
+        // web_albumpic_short 形如 120/s4s34/98/932410455.jpg；
+        // 旧域名 img1.kuwo.cn 已停用（404），改用 sycdn 图床并把尺寸从 120 提到 240
+        pic: pic ? 'http://img3.sycdn.kuwo.cn/star/albumcover/' + pic.replace(/^120\//, '240/') : null,
       }
     })
   return { list, total, page, size }

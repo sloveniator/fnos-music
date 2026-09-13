@@ -492,6 +492,29 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
 /* ============ 在线 v2：横幅 / Tab / 榜单 / 封面列 ============ */
 .tracks th.cov, .tracks td.cov { width: 56px; padding: 8px 6px 8px 4px; }
 .tracks td.cov img { width: 42px; height: 42px; border-radius: 9px; object-fit: cover; background: var(--card2); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+/* 无封面占位：按曲目/专辑取色的渐变 + 音符水印，避免整片空白 */
+img.ph {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff' fill-opacity='.5'%3E%3Cpath d='M9 18.5V5.5L21 3.2v13'/%3E%3Ccircle cx='6.5' cy='18.5' r='2.8'/%3E%3Ccircle cx='18.5' cy='16.2' r='2.8'/%3E%3C/svg%3E"),
+    linear-gradient(140deg, var(--ph-a, #5b6cf9), var(--ph-b, #8f5cf9));
+  background-size: 34%, cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  object-fit: cover;
+}
+.tracks td.cov img.ph { background-size: 46%, cover; }
+.card .cover img.ph { background-size: 40%, cover; }
+.card .cover.round img.ph { background-size: 52%, cover; }
+
+/* 在线列表：多选列 */
+.tracks th.sel-col, .tracks td.sel-col { width: 34px; padding-right: 0; text-align: center; }
+.tracks th.sel-col input, .tracks td.sel-col input {
+  width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; vertical-align: middle; margin: 0; }
+.tracks td.sel-col input { opacity: .8; }
+.tracks tr.row:hover td.sel-col input, .tracks td.sel-col input:checked { opacity: 1; }
+.btn.dl-sel { white-space: nowrap; }
+.btn.dl-sel[disabled] { opacity: .45; cursor: not-allowed; }
+.btn.dl-sel svg { width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; }
+
 .tracks td.cov.cov-empty img, .tracks td.cov.cov-empty { background: transparent; box-shadow: none; }
 .tracks td.cov.cov-empty::before { content: ''; display: block; width: 42px; height: 42px; border-radius: 9px; background: linear-gradient(145deg, #232a3d, #151926); opacity: .55; }
 .tracks tr.playing td.cov img { box-shadow: 0 0 0 2px rgba(79,140,255,.65); }
@@ -803,3 +826,24 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .hscroll .card { flex: 0 0 104px; width: 104px; }
   .hscroll .card .cover { width: 104px; height: 104px; }
 }
+
+/* ============ 首页统计条（替代原先占满首屏的大卡片） ============ */
+.stat-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.stat-pill { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; min-width: 0;
+  background: linear-gradient(180deg, var(--card), #10131d); border: 1px solid var(--line-soft); cursor: pointer;
+  transition: transform .18s ease, border-color .18s; }
+.stat-pill:hover { transform: translateY(-2px); border-color: #2e3648; }
+.sp-ic { width: 34px; height: 34px; border-radius: 10px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, rgba(108,124,255,.24), rgba(143,92,249,.2)); color: #a9b4ff; }
+.sp-ic svg { width: 18px; height: 18px; }
+.sp-tx { min-width: 0; }
+.sp-n { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-s { font-size: 15px; font-weight: 600; margin-top: 1px; }
+@media (max-width: 760px) { .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ============ 在线音乐：工具栏（音源 chips 与视图 tabs 同行） ============ */
+.onl-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px 18px; flex-wrap: wrap; margin: 0 0 16px; }
+.onl-tools .chips { margin: 0; }
+.onl-tools .otabs { margin: 0; }
+.onl-area { min-height: 220px; }
+.online-banner .ob-t { font-size: 22px; font-weight: 700; letter-spacing: .3px; }
