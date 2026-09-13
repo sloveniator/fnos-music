@@ -419,7 +419,18 @@
   function openTrackMenu(btn, track, musics, idx) {
     document.querySelectorAll('.menu').forEach(m => m.remove())
     const menu = el('div', 'menu')
-    const mk = (label, fn) => { const b = el('button', null, label); b.onclick = (e) => { e.stopPropagation(); menu.remove(); fn() }; menu.appendChild(b) }
+    // fn 收到点击坐标（程序化 .click() 时 clientX/Y 为 0，回退到按钮自身位置）
+    const mk = (label, fn) => {
+      const b = el('button', null, label)
+      b.onclick = (e) => {
+        e.stopPropagation()
+        const r = b.getBoundingClientRect()
+        const pt = (e.clientX > 1 || e.clientY > 1) ? { x: e.clientX, y: e.clientY + 4 } : { x: r.left, y: r.bottom + 4 }
+        menu.remove()
+        fn(pt)
+      }
+      menu.appendChild(b)
+    }
     mk('立即播放', () => player.play(musics, idx))
     mk('下一首播放', () => { player.insertNext(track); toast('已插入下一首') })
     mk('加入我喜欢', async () => {
@@ -446,7 +457,7 @@
     //   若曲目既无本地 id 又无在线 rid（如从第三方客户端同步过来的歌单项）则不显示
     const canDl = track.id || (track.kind === 'online' && track.rid) || (track.online === true && track.rid)
     if (canDl) {
-      mk('下载…', () => downloadTrack(track))
+      mk('下载…', (pt) => askDownload([track], pt))
     }
     const wrap = btn.parentElement
     wrap.appendChild(menu)
@@ -532,28 +543,100 @@
     }
     return mediaUrl('download', t.id)
   }
-  function downloadCurrent() {
+  function downloadCurrent(anchor) {
     const t = player.cur
     if (!t) return toast('当前无曲目', true)
-    if (t.kind === 'online' && !t.rid) return toast('该在线曲目无法下载', true)
-    if (t.kind !== 'online' && !t.id) return toast('当前曲目无法下载', true)
-    const a = document.createElement('a')
-    a.href = downloadUrl(t)
-    a.download = ''
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
+    askDownload([t], anchor)
   }
-  function downloadTrack(t) {
+  /** 通用浮层小菜单：anchor 为元素（跟随其位置）、坐标对象 {x,y}，或 null（屏幕中上） */
+  function popMenu(anchor, items) {
+    document.querySelectorAll('.menu.pop').forEach(m => m.remove())
+    const menu = el('div', 'menu pop')
+    for (const [label, fn] of items) {
+      const b = el('button', null, label)
+      b.onclick = (e) => { e.stopPropagation(); close(); fn() }
+      menu.appendChild(b)
+    }
+    const close = () => { menu.remove(); document.removeEventListener('click', onDoc, true) }
+    const onDoc = (e) => { if (!menu.contains(e.target)) close() }
+    document.body.appendChild(menu)
+    let x, y
+    if (anchor && anchor.getBoundingClientRect) {
+      const r = anchor.getBoundingClientRect()
+      x = r.left; y = r.bottom + 6
+    } else if (anchor && typeof anchor.x === 'number') {
+      x = anchor.x; y = anchor.y
+    } else {
+      x = window.innerWidth / 2 - 95; y = Math.max(80, window.innerHeight / 3)
+    }
+    menu.style.position = 'fixed'
+    menu.style.right = 'auto'
+    menu.style.top = Math.min(y, Math.max(8, window.innerHeight - menu.offsetHeight - 10)) + 'px'
+    menu.style.left = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 10)) + 'px'
+    setTimeout(() => document.addEventListener('click', onDoc, true), 0)
+    return menu
+  }
+
+  /** 云盘（NAS 用户网盘，默认 1GB 配额）：把本地曲目复制进网盘目录 */
+  async function saveToCloud(tracks) {
+    const all = (tracks || []).filter(Boolean)
+    const list = all.filter(t => t.kind !== 'online' && t.id)
+    const online = all.filter(t => t.kind === 'online' && t.rid)
+    // 在线曲目：走下载入队（服务端拉取后落进云盘目录）
+    if (online.length) {
+      try {
+        const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: online.map(toEnqueueItem) } })
+        toast('☁️ 已加入下载队列 ' + (r.accepted || 0) + ' 首' + (list.length ? '，另有 ' + list.length + ' 首待复制' : ''), !(r.accepted || 0))
+      } catch (e) { toast(e.message, true) }
+      if (!list.length) return
+    }
+    if (!list.length) { toast('没有可保存的曲目', true); return }
+    try {
+      const r = await api('/api/cloud/save', { method: 'POST', body: { trackIds: list.map(t => t.id) } })
+      const parts = ['已存 ' + (r.saved || 0) + ' 首']
+      if (r.skipped) parts.push('已在云盘 ' + r.skipped)
+      if (r.missing) parts.push('未找到 ' + r.missing)
+      if (r.failed) parts.push('失败 ' + r.failed)
+      const mb = r.bytes ? '（' + (r.bytes / 1048576).toFixed(1) + ' MB）' : ''
+      toast('☁️ ' + parts.join('、') + mb + (r.reason ? ' · ' + r.reason : ''), !r.saved)
+    } catch (e) { toast(e.message, true) }
+  }
+
+  /** 浏览器原生下载（原有行为），批量时逐个触发 */
+  function downloadLocal(tracks) {
+    const list = (tracks || []).filter(Boolean)
+    let n = 0
+    for (const t of list) {
+      if (t.kind === 'online' ? !t.rid : !t.id) continue
+      const a = document.createElement('a')
+      a.href = downloadUrl(t)
+      a.download = ''
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      n++
+    }
+    if (!n) return toast('该曲目无法下载', true)
+    if (n > 1) toast('已开始下载 ' + n + ' 个文件')
+  }
+
+  /** 点击下载 → 选择下载方式（本机 / 云盘） */
+  function askDownload(tracks, anchor) {
+    const list = (tracks || []).filter(Boolean)
+    if (!list.length) return toast('无可用曲目', true)
+    const localN = list.filter(t => (t.kind === 'online' ? !!t.rid : !!t.id)).length
+    const cloudN = list.filter(t => t.kind !== 'online' && t.id).length
+    if (!localN && !cloudN) return toast('该曲目无法下载', true)
+    const tail = list.length > 1 ? (n) => '（' + n + ' 首）' : () => ''
+    popMenu(anchor, [
+      ['💻 下载到本机' + tail(localN), () => downloadLocal(list)],
+      ['☁️ 保存到云盘' + tail(cloudN), () => saveToCloud(list)],
+    ])
+  }
+
+  function downloadTrack(t, anchor) {
     if (!t) return toast('该曲目无法下载', true)
-    if (t.kind === 'online' && !t.rid) return toast('该在线曲目无法下载', true)
-    if (t.kind !== 'online' && !t.id) return toast('该曲目无法下载', true)
-    const a = document.createElement('a')
-    a.href = downloadUrl(t)
-    a.download = ''
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
+    askDownload([t], anchor)
   }
 
   // ---------------- 视图：首页 ----------------
@@ -2742,7 +2825,7 @@ kuwo.cn/playlist_detail/280301309</pre>
           this.renderNp()
         }).catch(e => toast(e.message, true))
       }
-      $('#np-download').onclick = () => downloadCurrent()
+      $('#np-download').onclick = (e) => downloadCurrent(e.currentTarget)
       // 播放页（歌词全屏）收藏/下载：与底栏共用逻辑
       $('#lf-love').onclick = () => {
         if (!this.cur) return
@@ -2753,7 +2836,7 @@ kuwo.cn/playlist_detail/280301309</pre>
           this.renderNp()
         }).catch(e => toast(e.message, true))
       }
-      $('#lf-download').onclick = () => downloadCurrent()
+      $('#lf-download').onclick = (e) => downloadCurrent(e.currentTarget)
       // UPGRADE_0019: 点击底栏封面拉起播放页（CD 旋转 + 歌词）
       const npCover = $('#np-cover')
       if (npCover) {

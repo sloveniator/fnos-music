@@ -3,7 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { serveAudio } from '@/library/stream'
 import { extractCover } from '@/library/metadata'
-import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags } from '@/library/tenant'
+import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags, startTenantScan } from '@/library/tenant'
 import { coverCacheStats, readCachedCover, clearCoverCache } from '@/library/cover-cache'
 import { runCoverBackfill, cancelCoverBackfill, coverBackfillState, subscribeCoverBackfill } from '@/library/cover-backfill'
 import {
@@ -45,6 +45,9 @@ const json = (res: http.ServerResponse, code: number, data: unknown): void => {
 }
 const ok = (res: http.ServerResponse, data: unknown): void => json(res, 200, { code: 0, data })
 const fail = (res: http.ServerResponse, code: number, msg: string): void => json(res, code, { code: -1, msg })
+
+const cloudSafeName = (s: string, max = 120): string =>
+  (s || '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim().substring(0, max)
 
 const readBody = (req: http.IncomingMessage): Promise<string> => new Promise((resolve, reject) => {
   const chunks: Buffer[] = []
@@ -442,6 +445,50 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
   // ---------------- 在线下载队列（MVP，移植 daoyin 下载能力的最小内核） ----------------
+  // 保存到云盘：把本地曲目复制进用户网盘目录（默认 dataPath/library/<user>，受配额约束）
+  //   POST /web/api/cloud/save { trackIds: string[] }
+  //   落盘结构与下载中心一致：<网盘根>/<歌手>/<专辑>/<曲名>.<ext>
+  if (method == 'POST' && p == '/web/api/cloud/save') {
+    let body: any
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const ids: string[] = Array.isArray(body?.trackIds)
+      ? body.trackIds.map((x: unknown) => String(x)).filter(Boolean).slice(0, 300)
+      : []
+    if (!ids.length) return fail(res, 400, '未指定曲目'), true
+    // 云盘目录固定为用户专属网盘（自动创建，独立于曲库扫描目录），受 1GB 配额约束
+    const dir = path.join(global.lx.dataPath, 'library', userName)
+    try { fs.mkdirSync(dir, { recursive: true }) } catch (e: any) { return fail(res, 500, '云盘目录不可写：' + (e?.message || '')), true }
+    let remaining = getQuota(userName).remainingBytes
+    const out = { saved: 0, skipped: 0, missing: 0, failed: 0, bytes: 0, full: false, reason: '' }
+    for (const id of ids) {
+      const tr = getTenantTrack(userName, id)
+      if (!tr) { out.missing++; continue }
+      const ext = path.extname(tr.filePath) || '.mp3'
+      const dest = path.join(dir, cloudSafeName(tr.singer), cloudSafeName(tr.album), cloudSafeName(tr.name) + ext)
+      // 已在网盘内的同一文件 → 跳过，避免自我复制
+      if (path.resolve(tr.filePath) === path.resolve(dest)) { out.skipped++; continue }
+      try { if (fs.statSync(dest).size > 0) { out.skipped++; continue } } catch { /* 不存在则继续 */ }
+      let size = 0
+      try { size = fs.statSync(tr.filePath).size } catch { out.failed++; continue }
+      if (size > remaining) {
+        out.full = true
+        out.reason = '云盘剩余空间不足（剩 ' + (remaining / 1048576).toFixed(1) + ' MB）'
+        break
+      }
+      try {
+        fs.mkdirSync(path.dirname(dest), { recursive: true })
+        fs.copyFileSync(tr.filePath, dest)
+        remaining -= size
+        out.saved++
+        out.bytes += size
+      } catch { out.failed++ }
+    }
+    // 有新文件落地才触发增量扫描，让保存的曲目立即出现在曲库中
+    if (out.saved > 0) { try { startTenantScan(userName) } catch { /* 扫描失败不影响保存结果 */ } }
+    ok(res, out)
+    return true
+  }
+
   if (method == 'GET' && p == '/web/api/downloads/stats') {
     ok(res, downloadStats(userName))
     return true
