@@ -8,7 +8,7 @@
 
 import { kwSearch, kwPlayUrl, kwParseJSON, kwSearchAlbums, kwSearchPlaylists } from './kw'
 import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult, OnlineCollectionDetail } from './kw'
-import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wyAlbumDetail, wyPlaylistDetail } from './wy'
+import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wyAlbumDetail, wyPlaylistDetail, wyRecPlaylists } from './wy'
 import { mgSearch, mgPlayUrl, mgLyric } from './mg'
 import { getSettings } from '@/library'
 import { resolveFromUserSources } from './user-source'
@@ -72,6 +72,12 @@ const sourceAbilities = (def: OnlineSourceDef): string[] => {
     if (def.albumDetail && def.playlistDetail) a.push('detail', 'import')
   }
   return a
+}
+
+/** 推荐歌单：优先 wy（推荐接口），其余源不支持时返回空 */
+export const onlineRecPlaylists = async (source: string, limit: number): Promise<{ id: string, name: string, pic: string, trackCount: number, creator: string }[]> => {
+  if (source === 'wy') return wyRecPlaylists(Math.min(Math.max(limit, 1), 30))
+  return []
 }
 
 export const onlineSources = (): { id: string; name: string; enabled: boolean; lyric: boolean; boards: boolean; abilities: string[] }[] =>

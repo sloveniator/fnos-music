@@ -119,11 +119,13 @@ const safeName = (s: string, max = 120): string => {
 }
 
 const targetPath = (dir: string, task: DownloadTask): string => {
-  // 文件名：<歌手> - <曲名>.<ext>；extension 通过 Content-Type / 上游决定，MVP 先用 .mp3 兜底
+  // 落盘结构：<下载根>/<歌手>/<专辑>/<曲名>.<ext>，与曲库扫描目录结构一致，
+  // 扫描后自动按歌手/专辑分类；缺歌手或专辑时退化为根目录散文件。
+  const name = safeName(task.name) || task.rid || 'unknown'
+  const album = safeName(task.album)
   const singer = safeName(task.singer)
-  const name = safeName(task.name)
-  const base = [singer, name].filter(Boolean).join(' - ') || task.rid || 'unknown'
-  return path.join(dir, base + '.mp3')
+  const sub = [singer, album].filter(Boolean)
+  return sub.length ? path.join(dir, ...sub, name + '.mp3') : path.join(dir, name + '.mp3')
 }
 
 // ---------- 已存在检测 ----------
@@ -133,6 +135,14 @@ const isDownloaded = (dir: string, task: DownloadTask): string | null => {
     if (fs.existsSync(target)) {
       const st = fs.statSync(target)
       if (st.size > 0) return target
+    }
+  } catch {}
+  // 兼容旧版散文件：<歌手> - <曲名>.mp3
+  try {
+    const legacy = path.join(dir, [safeName(task.singer), safeName(task.name)].filter(Boolean).join(' - ') + '.mp3')
+    if (legacy !== target && fs.existsSync(legacy)) {
+      const st = fs.statSync(legacy)
+      if (st.size > 0) return legacy
     }
   } catch {}
   return null
@@ -201,6 +211,8 @@ const downloadTask = async (task: DownloadTask): Promise<void> => {
 
   const target = targetPath(dir, task)
   const tmp = target + '.part'
+  // 子目录（歌手/专辑）可能不存在，落盘前先创建
+  try { fs.mkdirSync(path.dirname(target), { recursive: true }) } catch {}
   const ext = task.name.toLowerCase().endsWith('.m4a') ? '.m4a' : '.mp3'
 
   try {
@@ -298,6 +310,17 @@ const downloadTask = async (task: DownloadTask): Promise<void> => {
         task.error = 'ID3 写入失败：' + (e?.message || e)
       }
     }
+    // 试听片段检测：上游对 VIP/版权曲目常返回十几秒的片段。
+    // 以 128kbps 估算期望体积，实际不足 55% 且时长明显偏短时给出提示（不改变 done 状态）。
+    try {
+      if (task.duration > 1000 && stat.size > 0) {
+        const expected = task.duration / 1000 * 16000
+        if (stat.size < expected * 0.55) {
+          const estSec = Math.round(stat.size / 16000)
+          task.error = `⚠ 疑似试听片段（约 ${estSec}s / 源标注 ${Math.round(task.duration / 1000)}s，音源版权限制）`
+        }
+      }
+    } catch {}
     // 触发扫描（异步，不阻塞）
     try {
       const r = startTenantScan(task.userName)

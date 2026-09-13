@@ -555,6 +555,37 @@
       v.appendChild(trackTable(recommend.tracks.slice(0, 10), { menu: true }))
     }
 
+    // 推荐歌单（网易云推荐歌单 · 横向滚动卡片）
+    try {
+      const rec = await api('/api/online/rec-playlists?source=wy&limit=12')
+      if (rec.list && rec.list.length) {
+        const rh = el('div', 'row-head')
+        rh.appendChild(el('h3', null, '推荐歌单'))
+        const btns = el('div', 'btns')
+        const bMore = el('button', 'btn ghost', '去在线音乐 ›')
+        bMore.onclick = () => { location.hash = '#/online' }
+        btns.appendChild(bMore)
+        rh.appendChild(btns)
+        v.appendChild(rh)
+        const sc = el('div', 'hscroll')
+        for (const rp of rec.list) {
+          const card = el('div', 'card mini')
+          const cov = el('div', 'cover')
+          if (rp.pic) { const im = el('img'); im.loading = 'lazy'; im.src = rp.pic; im.onerror = () => { im.src = 'assets/icon.png' }; cov.appendChild(im) }
+          else cov.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h10"/></svg>'
+          card.appendChild(cov)
+          card.appendChild(el('div', 't', rp.name))
+          card.appendChild(el('div', 's', (rp.trackCount ? rp.trackCount + ' 首' : '歌单')))
+          card.onclick = () => {
+            window.__pendingRec = { source: 'wy', type: 'playlist', item: { id: rp.id, name: rp.name, pic: rp.pic, creator: rp.creator, trackCount: rp.trackCount } }
+            location.hash = '#/online'
+          }
+          sc.appendChild(card)
+        }
+        v.appendChild(sc)
+      }
+    } catch (e) { /* 推荐歌单失败不阻塞首页 */ }
+
     // 新入库（按 mtime 倒序）
     if (discover.newArrivals && discover.newArrivals.length) {
       const rh = el('div', 'row-head')
@@ -1249,6 +1280,19 @@ kuwo.cn/playlist_detail/280301309</pre>
     allBtn.hidden = !ostate.list.length
     allBtn.onclick = () => { if (ostate.list.length) player.play(ostate.list, 0) }
     hd.appendChild(allBtn)
+    const bDl = el('button', 'btn mini play-all dl-all')
+    bDl.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>下载全部'
+    bDl.hidden = !ostate.list.length
+    bDl.onclick = async () => {
+      if (!ostate.list.length) return
+      bDl.disabled = true
+      try {
+        const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: ostate.list.map(t => ({ source: t.source, id: t.rid, name: t.name, singer: t.singer, intervalMs: t.interval, pic: t.pic, album: t.album })) } })
+        toast(`已加入 ${r.accepted || 0} 首到下载队列`, (r.accepted || 0) === 0)
+      } catch (e) { toast(e.message, true) }
+      bDl.disabled = false
+    }
+    hd.appendChild(bDl)
     onlArea.appendChild(hd)
     if (!ostate.list.length) { onlArea.appendChild(skeletonRows(8)); return }
     const tbl = el('table', 'tracks')
@@ -1597,6 +1641,14 @@ kuwo.cn/playlist_detail/280301309</pre>
         api('/api/online/sources').then(d => {
           if (d.sources && d.sources.length) onlineSourcesCache = d.sources
           renderChips(); renderTabs(); renderArea()
+          const pend = window.__pendingRec
+          if (pend) {
+            window.__pendingRec = null
+            ostate.source = pend.source
+            ostate.type = pend.type
+            renderChips(); renderTabs()
+            openCollection(pend.source, pend.type, pend.item)
+          }
         }).catch(() => { renderChips(); renderTabs(); renderArea() })
       } else if (topTab === 'dl') {
         renderDlCenter(body)
@@ -2037,7 +2089,7 @@ kuwo.cn/playlist_detail/280301309</pre>
         bar.appendChild(fill); main.appendChild(bar)
         const statusText = {
           pending: '⏳ 等待中', downloading: '⬇ 下载中 ' + pct + '%',
-          done: '✓ 已完成 · ' + fmtBytes(t.size),
+          done: '✓ 已完成 · ' + fmtBytes(t.size) + (t.error ? ' · ' + t.error : ''),
           failed: '✗ 失败' + (t.error ? '：' + t.error : ''),
         }[t.status] || ''
         main.appendChild(el('div', 'dl-status ' + t.status, statusText))

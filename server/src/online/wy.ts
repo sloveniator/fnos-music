@@ -198,11 +198,34 @@ export const wyAlbumDetail = async (id: string): Promise<OnlineCollectionDetail>
 /** 解析网易试听直链（eapi enhance/player/url，standard=128k） */
 export const wyPlayUrl = async (id: string): Promise<string> => {
   if (!/^\d{1,16}$/.test(id)) throw new Error('歌曲 id 非法')
-  const json = await eapiPost('/api/song/enhance/player/url', { ids: '[' + id + ']', br: 128000, level: 'standard' })
-  const it: any = Array.isArray(json.data) ? json.data[0] : null
-  const url = it?.url
-  if (!/^https?:\/\//.test(String(url ?? ''))) throw new Error('该歌曲暂无可播放地址（版权或 VIP 受限）')
-  return url as string
+  // 多通道尝试：eapi standard → eapi 高音质 → weapi → 老接口，任一命中即返回
+  const channels: { name: string, run: () => Promise<string> }[] = [
+    { name: 'eapi-standard', run: async () => { const j = await eapiPost('/api/song/enhance/player/url', { ids: '[' + id + ']', br: 128000, level: 'standard' }); return urlOf(j) } },
+    { name: 'eapi-exhigh', run: async () => { const j = await eapiPost('/api/song/enhance/player/url', { ids: '[' + id + ']', br: 320000, level: 'exhigh' }); return urlOf(j) } },
+    { name: 'weapi', run: async () => { const j = await weapiPost('/weapi/song/enhance/player/url', { ids: '[' + id + ']', br: 128000, level: 'standard' }); return urlOf(j) } },
+    { name: 'legacy', run: async () => {
+        const resp = await fetch('https://music.163.com/api/song/enhance/player/url?id=' + encodeURIComponent(id) + '&ids=%5B' + encodeURIComponent(id) + '%5D&br=128000', {
+          signal: AbortSignal.timeout(15_000),
+          headers: { 'User-Agent': UA, Referer: 'https://music.163.com/', Origin: 'https://music.163.com' },
+        })
+        if (!resp.ok) throw new Error('HTTP ' + resp.status)
+        const j: any = await resp.json().catch(() => null)
+        const it: any = Array.isArray(j?.data) ? j.data[0] : null
+        return /^https?:\/\//.test(String(it?.url ?? '')) ? String(it.url) : ''
+      } },
+  ]
+  let lastErr: Error | null = null
+  for (const ch of channels) {
+    try {
+      const url = await ch.run()
+      if (/^https?:\/\//.test(url)) return url
+    } catch (e: any) { lastErr = e }
+  }
+  throw new Error('该歌曲暂无可播放地址（版权或 VIP 受限）' + (lastErr ? '：' + lastErr.message : ''))
+}
+const urlOf = (j: any): string => {
+  const it: any = Array.isArray(j?.data) ? j.data[0] : null
+  return /^https?:\/\//.test(String(it?.url ?? '')) ? String(it.url) : ''
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +253,7 @@ const wyWeapiForm = (obj: unknown): { params: string; encSecKey: string } => {
   return { params, encSecKey }
 }
 
-const weapiPost = async (path: string, data: unknown): Promise<any> => {
+export const weapiPost = async (path: string, data: unknown): Promise<any> => {
   const { params, encSecKey } = wyWeapiForm(data)
   const resp = await fetch('https://music.163.com' + path, {
     method: 'POST',
@@ -306,6 +329,18 @@ export const wyBoardList = async (bangid: string, limit: number): Promise<Online
 }
 
 /** 网易云歌词（主词 + 翻译），返回 LRC 文本；无歌词时 lyric='' */
+/** 网易云推荐歌单（weapi personalized/playlist，匿名可用） */
+export const wyRecPlaylists = async (limit: number): Promise<{ id: string, name: string, pic: string, trackCount: number, creator: string }[]> => {
+  const j = await weapiPost('/weapi/personalized/playlist', { limit, n: limit, total: true })
+  return (j?.result ?? []).map((p: any) => ({
+    id: String(p.id ?? ''),
+    name: String(p.name ?? '未知歌单'),
+    pic: /^https?:\/\//.test(String(p.picUrl ?? '')) ? String(p.picUrl) : '',
+    trackCount: Number(p.trackCount) || 0,
+    creator: String((p.creator || {}).nickname || ''),
+  })).filter((x: any) => x.id)
+}
+
 export const wyLyric = async (id: string): Promise<{ lyric: string; tlyric: string }> => {
   if (!/^\d{1,16}$/.test(id)) return { lyric: '', tlyric: '' }
   try {

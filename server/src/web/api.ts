@@ -17,7 +17,7 @@ import {
 import { getUserSpace } from '@/user'
 import { LIST_IDS } from '@/constants'
 import { lyricWithFallback } from '@/online/lyric-fallback'
-import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList } from '@/online'
+import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists } from '@/online'
 import { pipeHttpStream } from '@/utils/httpPipe'
 import {
   enqueue, enqueueMany, listTasks, getTask, removeTask, retryTask, batchOperate, parsePlaylistText,
@@ -338,6 +338,17 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     }
     return true
   }
+  // /web/api/online/rec-playlists?source=wy&limit=12 —— 推荐歌单
+  if (method == 'GET' && p == '/web/api/online/rec-playlists') {
+    const source = url.searchParams.get('source') ?? 'wy'
+    const limit = parseInt(url.searchParams.get('limit') ?? '12', 10) || 12
+    if (!isOnlineSource(source)) return fail(res, 400, '参数非法'), true
+    try {
+      ok(res, { list: await onlineRecPlaylists(source, limit) })
+    } catch (e: any) { fail(res, 500, '获取推荐歌单失败：' + (e?.message || e)) }
+    return true
+  }
+
   // /web/api/online/boards?source= —— 榜单目录
   if (method == 'GET' && p == '/web/api/online/boards') {
     const source = url.searchParams.get('source') ?? ''
