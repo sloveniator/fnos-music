@@ -3,7 +3,9 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { serveAudio } from '@/library/stream'
 import { extractCover } from '@/library/metadata'
-import { tenantGroupingSeed, listTenantTracks, getTenantTrack, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings } from '@/library/tenant'
+import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags } from '@/library/tenant'
+import { coverCacheStats, readCachedCover, clearCoverCache } from '@/library/cover-cache'
+import { runCoverBackfill, cancelCoverBackfill, coverBackfillState, subscribeCoverBackfill } from '@/library/cover-backfill'
 import {
   tenantListAlbums, tenantListArtists, tenantAlbumTracks, tenantArtistAlbums, tenantArtistTracks,
 } from './grouping'
@@ -254,20 +256,31 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
   }
   if (method == 'GET' && (seg = /^\/web\/media\/cover\/([\w-]{1,64})$/.exec(p))) {
     const track = getTenantTrack(userName, seg[1])
-    if (!track?.hasCover) {
+    if (!track) {
       res.writeHead(404)
       res.end()
       return true
     }
-    void extractCover(track.filePath).then(pic => {
-      if (!pic) {
-        res.writeHead(404)
-        res.end()
-        return
-      }
+    const sendPic = (pic: { mime: string, data: Buffer }) => {
       res.writeHead(200, { 'Content-Type': pic.mime, 'Content-Length': String(pic.data.length), 'Cache-Control': 'private, max-age=86400' })
       res.end(pic.data)
+    }
+    const send404 = () => { res.writeHead(404); res.end() }
+    // 无内嵌封面的曲目：回退到在线回填缓存（covers/<trackId>.jpg）
+    if (!track.hasCover) {
+      const cached = readCachedCover(safeUserName(userName), track.id)
+      if (cached) sendPic(cached)
+      else send404()
+      return true
+    }
+    void extractCover(track.filePath).then(pic => {
+      if (pic) return sendPic(pic)
+      const cached = readCachedCover(safeUserName(userName), track.id)
+      if (cached) return sendPic(cached)
+      send404()
     }).catch(() => {
+      const cached = readCachedCover(safeUserName(userName), track.id)
+      if (cached) return sendPic(cached)
       res.writeHead(500)
       res.end()
     })
@@ -580,6 +593,77 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
   // dailyMix：按「当天日期 + 用户名」种子 Fisher-Yates 洗牌，同歌手最多 2 首，取 20
   // newArrivals：按 mtime 倒序取 20
   // hotArtists：复用 tenantListArtists（已按曲目数降序），取前 12
+  if (method == 'GET' && p == '/web/api/settings') {
+    ok(res, getTenantSettings(userName))
+    return true
+  }
+  if (method === 'PUT' && p == '/web/api/settings') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const patch: { dirs?: string[], coverAuto?: boolean } = {}
+    if (typeof body?.coverAuto === 'boolean') patch.coverAuto = body.coverAuto
+    if (Array.isArray(body?.dirs)) patch.dirs = body.dirs
+    ok(res, saveTenantSettings(userName, patch))
+    return true
+  }
+  // ---------------- 封面回填（在线源 → 本地持久化缓存） ----------------
+  if (method == 'GET' && p == '/web/api/covers/state') {
+    const tracks = getTenantTracks(userName)
+    const noCover = tracks.filter(t => !t.hasCover)
+    const cache = coverCacheStats(safeUserName(userName))
+    ok(res, {
+      total: tracks.length,
+      noCover: noCover.length,
+      pending: Math.max(0, noCover.length - cache.total),
+      cache,
+      job: coverBackfillState(safeUserName(userName)),
+    })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/covers/backfill') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { body = {} }
+    const safeUser = safeUserName(userName)
+    if (coverBackfillState(safeUser).running) return fail(res, 409, '回填任务正在进行中'), true
+    const num = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? v : undefined
+    void runCoverBackfill(userName, {
+      force: !!body?.force,
+      limit: num(body?.limit),
+      delayMs: num(body?.delayMs),
+      sources: Array.isArray(body?.sources)
+        ? body.sources.filter((x: unknown) => typeof x === 'string').slice(0, 3)
+        : undefined,
+    }).catch(() => { /* 失败原因已记录在 job.state.error */ })
+    ok(res, { started: true, job: coverBackfillState(safeUser) })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/covers/backfill/cancel') {
+    cancelCoverBackfill(safeUserName(userName))
+    ok(res, { job: coverBackfillState(safeUserName(userName)) })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/covers/cache/clear') {
+    const removed = clearCoverCache(safeUserName(userName))
+    refreshCoverFlags(userName)
+    ok(res, { removed })
+    return true
+  }
+  // SSE：封面回填进度
+  if (method == 'GET' && p == '/web/api/covers/events') {
+    const safeUser = safeUserName(userName)
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    })
+    res.write('retry: 5000\r\n\r\n')
+    const push = (s: unknown) => { res.write('event: cover\r\ndata: ' + JSON.stringify(s) + '\r\n\r\n') }
+    push(coverBackfillState(safeUser))
+    const unsubscribe = subscribeCoverBackfill((su, s) => { if (su === safeUser) push(s) })
+    req.on('close', () => unsubscribe())
+    return true
+  }
   if (method == 'GET' && p == '/web/api/discover') {
     const seed = tenantGroupingSeed(userName)
     const all = seed.tracks

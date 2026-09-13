@@ -15,6 +15,8 @@ export interface TrackInfo extends TrackMeta {
   ext: string
   size: number
   mtime: number
+  /** 封面来自在线回填缓存（非文件内嵌），仅运行时标记、不写回索引 */
+  coverCache?: boolean
 }
 
 export interface ScanState {

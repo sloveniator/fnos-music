@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { runScanWithState, type ScanState, type TrackInfo } from './scan'
+import { hasCachedCover, dropCoverCache } from './cover-cache'
 
 // ---------------------------------------------------------------------------
 // 租户（Web 用户）曲库：每个 Web 用户独立物理曲库
@@ -14,6 +15,8 @@ import { runScanWithState, type ScanState, type TrackInfo } from './scan'
 export interface TenantSettings {
   /** 该用户扫描目录列表；空数组 = 尚未配置 */
   dirs: string[]
+  /** 扫描完成后自动回填在线封面（默认关闭：自动爬取会给音源带来额外请求） */
+  coverAuto?: boolean
 }
 
 export interface TenantState {
@@ -70,6 +73,29 @@ const DEFAULT_SETTINGS: TenantSettings = { dirs: [] }
 
 const emptyScanState = (): ScanState => ({ scanning: false, total: 0, done: 0, startedAt: 0, finishedAt: 0, error: null })
 
+type ScanDoneHook = (rawUser: string) => void
+const scanDoneHooks: ScanDoneHook[] = []
+
+/** 注册「扫描完成」回调（封面回填等模块使用，避免与 tenant 形成循环依赖） */
+export const onTenantScanDone = (fn: ScanDoneHook): void => { scanDoneHooks.push(fn) }
+
+/** 用户名的安全目录名（供 cover 缓存等模块定位同一租户目录） */
+export const safeUserName = (u: string): string => safeName(u)
+
+/** 把在线回填封面合并到曲目（内存标记，不写回 library.json） */
+const applyCoverFlags = (t: TenantState): void => {
+  for (const tr of t.tracks) {
+    if (tr.hasCover) {
+      if (tr.coverCache) tr.coverCache = undefined
+      continue
+    }
+    tr.coverCache = hasCachedCover(t.safeUser, tr.id) ? true : undefined
+  }
+}
+
+/** 重新合并回填封面标记（回填完成 / 清空缓存后调用） */
+export const refreshCoverFlags = (rawUser: string): void => { applyCoverFlags(loadTenant(rawUser)) }
+
 const loadTenant = (rawUser: string): TenantState => {
   const safeUser = safeName(rawUser)
   let t = tenants.get(safeUser)
@@ -89,6 +115,7 @@ const loadTenant = (rawUser: string): TenantState => {
   // 计算 maxMtime（供 grouping 缓存键）
   for (const tr of t.tracks) if (tr.mtime > t.maxMtime) t.maxMtime = tr.mtime
   tenants.set(safeUser, t)
+  applyCoverFlags(t)
   return t
 }
 
@@ -99,6 +126,7 @@ export const dropTenant = (rawUser: string): void => {
   if (!t) return
   if (t.scanState.scanning) return
   tenants.delete(s)
+  dropCoverCache(s)
 }
 
 export const listTenants = (): string[] => [...tenants.keys()]
@@ -111,6 +139,7 @@ export const getTenantSettings = (rawUser: string): TenantSettings => ({ ...load
 /** 保存设置（原子写；保存后立即生效，不自动扫描） */
 export const saveTenantSettings = (rawUser: string, patch: Partial<TenantSettings>): TenantSettings => {
   const t = loadTenant(rawUser)
+  if (patch.coverAuto !== undefined) t.settings.coverAuto = !!patch.coverAuto
   if (patch.dirs !== undefined) {
     t.settings.dirs = (Array.isArray(patch.dirs) ? patch.dirs : [])
       .map(d => String(d).trim()).filter(Boolean).slice(0, 32)
@@ -201,7 +230,15 @@ export const startTenantScan = (rawUser: string): { accepted: boolean, reason?: 
     let max = 0
     for (const tr of result) if (tr.mtime > max) max = tr.mtime
     t.maxMtime = max
+    // 新扫描结果需重新合并在线回填封面标记
+    applyCoverFlags(t)
     persistTenant(t)
+    // 自动回填（默认关闭）
+    if (t.settings.coverAuto) {
+      for (const hook of scanDoneHooks) {
+        try { hook(rawUser) } catch { /* 单个钩子失败不影响扫描结果 */ }
+      }
+    }
   }).catch(err => {
     t.scanState.error = err?.message ?? String(err)
     t.scanState.scanning = false

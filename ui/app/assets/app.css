@@ -847,3 +847,18 @@ img.ph {
 .onl-tools .otabs { margin: 0; }
 .onl-area { min-height: 220px; }
 .online-banner .ob-t { font-size: 22px; font-weight: 700; letter-spacing: .3px; }
+
+/* ============ 封面回填卡片 ============ */
+.set-hint { margin: -4px 0 12px; font-size: 13px; color: var(--muted, #8b93a7); line-height: 1.6; }
+.cf-stats { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.cf-pill { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 76px; padding: 8px 14px; border-radius: 12px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .07); }
+.cf-pill b { font-size: 18px; font-weight: 700; }
+.cf-pill span { font-size: 12px; opacity: .65; }
+.cf-bar { height: 6px; border-radius: 99px; background: rgba(255, 255, 255, .08); overflow: hidden; margin-bottom: 8px; }
+.cf-bar i { display: block; height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, #4f63e8, #8b5cf6); transition: width .3s ease; }
+.cf-bar.on i { background: linear-gradient(90deg, #4f63e8, #8b5cf6, #4f63e8); background-size: 200% 100%; animation: cfSlide 1.6s linear infinite; }
+@keyframes cfSlide { from { background-position: 0 0; } to { background-position: 200% 0; } }
+.cf-label { font-size: 13px; opacity: .8; margin-bottom: 12px; min-height: 18px; word-break: break-all; }
+.cf-ops { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.cf-ops .btn[disabled] { opacity: .45; cursor: not-allowed; }
+.cf-auto { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; opacity: .85; cursor: pointer; }

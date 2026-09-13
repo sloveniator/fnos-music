@@ -54,7 +54,7 @@ export const buildGroupings = (tracks: TrackInfo[], scannedAt: number, maxMtime:
     }
     a.count++
     a.size += t.size
-    if (!a.coverTrackId && t.hasCover) a.coverTrackId = t.id
+    if (!a.coverTrackId && (t.hasCover || t.coverCache)) a.coverTrackId = t.id
     if (!a.year && t.year) a.year = t.year
     let ar = artistMap.get(singer)
     if (!ar) {
@@ -64,7 +64,7 @@ export const buildGroupings = (tracks: TrackInfo[], scannedAt: number, maxMtime:
     ar.count++
     ar.size += t.size
     ar.albumSet.add(aKey)
-    if (!ar.coverTrackId && t.hasCover) ar.coverTrackId = t.id
+    if (!ar.coverTrackId && (t.hasCover || t.coverCache)) ar.coverTrackId = t.id
     let bt = albumTrackIdx.get(aKey)
     if (!bt) { bt = []; albumTrackIdx.set(aKey, bt) }
     bt.push(t)

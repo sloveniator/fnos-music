@@ -441,6 +441,9 @@
     for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0
     return Math.abs(h)
   }
+  /** 该曲目是否可显示封面：文件内嵌 或 在线回填缓存 */
+  const hasCoverOf = (t) => !!(t && (t.hasCover || t.coverCache))
+
   /** 第三方图片地址 → 本机代理地址（图床多为 http，直连会被浏览器拦） */
   const picProxy = (url) => (url && /^https?:\/\//.test(url))
     ? BASE + '/web/media/pic?u=' + encodeURIComponent(url) + '&k=' + encodeURIComponent(token)
@@ -482,7 +485,7 @@
       img.removeAttribute('src')
       img.onerror = null
     }
-    if (track && track.hasCover) {
+    if (track && hasCoverOf(track)) {
       img.src = mediaUrl('cover', track.id)
       img.onerror = placeholder
     } else {
@@ -917,7 +920,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     setActiveNav('albums')
     const v = $('#view')
     const d = await api('/api/album?singer=' + encodeURIComponent(singer) + '&album=' + encodeURIComponent(album))
-    const cover = d.tracks.find(t => t.hasCover)
+    const cover = d.tracks.find(hasCoverOf)
     const addAll = el('button', 'btn')
     addAll.textContent = '＋ 全部加到队列'
     addAll.onclick = () => { player.enqueue(d.tracks); toast('已加入 ' + d.tracks.length + ' 首') }
@@ -939,7 +942,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     setActiveNav('artists')
     const v = $('#view')
     const d = await api('/api/artist?singer=' + encodeURIComponent(singer))
-    const cover = d.tracks.find(t => t.hasCover)
+    const cover = d.tracks.find(hasCoverOf)
     const addAll = el('button', 'btn')
     addAll.textContent = '＋ 全部加到队列'
     addAll.onclick = () => { player.enqueue(d.tracks); toast('已加入 ' + d.tracks.length + ' 首') }
@@ -1082,7 +1085,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     const metaText = tracks.length + ' 首' + (playable.length < tracks.length ? '（' + (tracks.length - playable.length) + ' 首在线源歌曲需手机端播放）' : '')
     const shuf = shuffleBtn('随机播放')
     shuf.onclick = () => { if (playable.length) player.shufflePlay(playable); else toast('歌单里没有可在网页端播放的曲目', true) }
-    v.appendChild(heroBlock(tracks.find(t => t.hasCover), d.name, metaText, () => playable.length && player.play(playable, 0), [shuf, ...extra]))
+    v.appendChild(heroBlock(tracks.find(hasCoverOf), d.name, metaText, () => playable.length && player.play(playable, 0), [shuf, ...extra]))
     if (!tracks.length) {
       v.appendChild(el('div', 'empty', '歌单还是空的，去曲库添加喜欢的歌吧'))
       return
@@ -2461,6 +2464,76 @@ kuwo.cn/playlist_detail/280301309</pre>
       aboutGrid.appendChild(row)
     }).catch(() => {})
 
+    // 封面回填（在线源 → 本地缓存）
+    const cfSec = el('section', 'set-section')
+    cfSec.appendChild(el('h3', 'set-sec-h', '封面回填'))
+    cfSec.appendChild(el('p', 'set-hint', '为没有内嵌封面的曲目自动匹配在线封面。封面缓存在服务端 covers 目录，不改动原始音频；清空缓存即可完全还原。'))
+    const cfStats = el('div', 'cf-stats')
+    const cfBar = el('div', 'cf-bar')
+    const cfFill = el('i')
+    cfBar.appendChild(cfFill)
+    const cfLabel = el('div', 'cf-label', '')
+    const cfOps = el('div', 'cf-ops')
+    const cfStart = el('button', 'btn primary', '开始回填')
+    const cfCancel = el('button', 'btn', '取消')
+    const cfClear = el('button', 'btn ghost', '清空缓存')
+    cfOps.appendChild(cfStart); cfOps.appendChild(cfCancel); cfOps.appendChild(cfClear)
+    const cfAuto = el('label', 'cf-auto')
+    const cfAutoBox = el('input')
+    cfAutoBox.type = 'checkbox'
+    cfAuto.appendChild(cfAutoBox)
+    cfAuto.appendChild(el('span', null, '扫描完成后自动回填（增量，跳过已处理曲目）'))
+    cfSec.appendChild(cfStats); cfSec.appendChild(cfBar); cfSec.appendChild(cfLabel)
+    cfSec.appendChild(cfOps); cfSec.appendChild(cfAuto)
+    v.appendChild(cfSec)
+
+    const cfRender = (d) => {
+      const job = d.job || {}
+      cfStats.innerHTML = ''
+      const pills = [['曲库', d.total], ['无内嵌封面', d.noCover], ['已回填', (d.cache || {}).ok || 0], ['未匹配', (d.cache || {}).nomatch || 0]]
+      if ((d.cache || {}).error) pills.push(['抓取失败', d.cache.error])
+      for (const [k, n] of pills) {
+        const pill = el('span', 'cf-pill')
+        pill.appendChild(el('b', null, String(n)))
+        pill.appendChild(el('span', null, k))
+        cfStats.appendChild(pill)
+      }
+      const pct = job.total > 0 ? Math.round((job.done / job.total) * 100) : 0
+      cfFill.style.width = pct + '%'
+      cfBar.classList.toggle('on', !!job.running)
+      cfLabel.textContent = job.running
+        ? `进行中 ${job.done}/${job.total}　成功 ${job.ok}　未匹配 ${job.miss}　失败 ${job.fail}　${job.current || ''}`
+        : (job.finishedAt
+          ? `上次结束：成功 ${job.ok}、未匹配 ${job.miss}、失败 ${job.fail}${job.error ? '（' + job.error + '）' : ''}`
+          : `待回填 ${d.pending} 首`)
+      cfStart.disabled = !!job.running
+      cfCancel.disabled = !job.running
+    }
+    const cfLoad = () => api('/api/covers/state').then(cfRender).catch(() => {})
+    cfLoad()
+    api('/api/settings').then(s => { cfAutoBox.checked = !!s.coverAuto }).catch(() => {})
+    cfAutoBox.onchange = () => {
+      api('/api/settings', { method: 'PUT', body: { coverAuto: cfAutoBox.checked } }).catch(() => {})
+    }
+    cfStart.onclick = () => {
+      api('/api/covers/backfill', { method: 'POST', body: { limit: 2000, delayMs: 400 } }).then(cfLoad).catch(cfLoad)
+    }
+    cfCancel.onclick = () => { api('/api/covers/backfill/cancel', { method: 'POST' }).then(cfLoad).catch(cfLoad) }
+    cfClear.onclick = () => {
+      if (!confirm('清空已回填的封面缓存？曲目本身不受影响。')) return
+      api('/api/covers/cache/clear', { method: 'POST' }).then(cfLoad).catch(cfLoad)
+    }
+    if (window.__cfES) { window.__cfES.close(); window.__cfES = null }
+    const es = new EventSource(BASE + '/web/api/covers/events?k=' + encodeURIComponent(token))
+    let cfLast = 0
+    es.addEventListener('cover', () => {
+      const now = Date.now()
+      if (now - cfLast < 600) return
+      cfLast = now
+      cfLoad()
+    })
+    window.__cfES = es
+
     // 播放偏好
     const pbPref = el('section', 'set-section')
     pbPref.appendChild(el('h3', 'set-sec-h', '播放偏好'))
@@ -2746,7 +2819,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     const t = player.cur
     let url = 'assets/icon.png'
     if (t && t.kind === 'online') url = picProxy(t.pic) || 'assets/icon.png'
-    else if (t && t.hasCover) url = mediaUrl('cover', t.id)
+    else if (hasCoverOf(t)) url = mediaUrl('cover', t.id)
     if (bg) bg.style.backgroundImage = "url('" + url + "')"
     if (discCover) {
       discCover.src = url
@@ -2881,7 +2954,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       try {
         const slim = this.queue.map(t => ({
           id: t.id, kind: t.kind, source: t.source, rid: t.rid, name: t.name, singer: t.singer,
-          album: t.album, interval: t.interval, pic: t.pic, hasCover: t.hasCover,
+          album: t.album, interval: t.interval, pic: t.pic, hasCover: hasCoverOf(t),
         }))
         localStorage.setItem('gusi-q', JSON.stringify({ queue: slim, index: this.index, at: atSec || 0 }))
       } catch {}
@@ -3095,7 +3168,7 @@ kuwo.cn/playlist_detail/280301309</pre>
         npDl.style.pointerEvents = canOnlineDl ? '' : 'none'
         npDl.title = canOnlineDl ? '下载当前曲目（在线）' : '在线源暂不可下载'
       } else {
-        if (t.hasCover) {
+        if (hasCoverOf(t)) {
           img.src = mediaUrl('cover', t.id)
           img.onerror = () => { img.src = 'assets/icon.png' }
         } else img.src = 'assets/icon.png'
@@ -3123,7 +3196,7 @@ kuwo.cn/playlist_detail/280301309</pre>
         try {
           navigator.mediaSession.metadata = new MediaMetadata({
             title: t.name, artist: t.singer || '', album: t.album || (t.kind === 'online' ? '在线音乐' : '古四音乐'),
-            artwork: [{ src: t.kind === 'online' ? (picProxy(t.pic) || 'assets/icon.png') : (t.hasCover ? mediaUrl('cover', t.id) : 'assets/icon.png'), sizes: '256x256' }],
+            artwork: [{ src: t.kind === 'online' ? (picProxy(t.pic) || 'assets/icon.png') : (hasCoverOf(t) ? mediaUrl('cover', t.id) : 'assets/icon.png'), sizes: '256x256' }],
           })
         } catch {}
       }
