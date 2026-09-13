@@ -275,7 +275,8 @@
     opts = opts || {}
     const tr = el('tr', 'row')
     if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
-    tr.appendChild(selRowCell(t))
+    // 首页推荐类列表不做勾选下载，故可省去多选列
+    if (opts.noSelect !== true) tr.appendChild(selRowCell(t))
     tr.appendChild(el('td', 'num', String(idx + 1)))
     // NAS 曲库行内封面（hasCover 时懒加载；在线源行走 t.pic）
     const tdCov = el('td', 'cov')
@@ -368,9 +369,10 @@
   }
 
   function trackTable(musics, opts) {
-    const table = el('table', 'tracks')
+    const table = el('table', 'tracks' + (opts.compact ? ' compact' : ''))
     const thead = el('thead')
     const htr = el('tr')
+    if (opts.noSelect !== true) htr.appendChild(selHeadCell())
     htr.appendChild(el('th', 'num', '#'))
     htr.appendChild(el('th', 'cov', ''))
     htr.appendChild(el('th', null, '歌曲'))
@@ -390,6 +392,28 @@
       if (playingTr) setTimeout(() => playingTr.scrollIntoView({ block: 'nearest' }), 60)
     }
     return table
+  }
+
+  /**
+   * 首页推荐区块列表：默认 8 首紧凑行，多余部分原地「展开全部」（不跳页）。
+   * 这类列表不参与勾选下载，因此去掉多选列。
+   */
+  function sectionTracks(list, opts) {
+    opts = Object.assign({}, opts, { noSelect: true, compact: true })
+    const box = el('div', 'sec-tracks')
+    const LIMIT = 8
+    let expanded = false
+    const paint = () => {
+      box.innerHTML = ''
+      box.appendChild(trackTable(expanded ? list : list.slice(0, LIMIT), opts))
+      if (list.length > LIMIT) {
+        const b = el('button', 'btn ghost more-inline', expanded ? '收起' : `展开全部 ${list.length} 首`)
+        b.onclick = () => { expanded = !expanded; paint() }
+        box.appendChild(b)
+      }
+    }
+    paint()
+    return box
   }
 
   function openTrackMenu(btn, track, musics, idx) {
@@ -587,7 +611,8 @@
         btns.appendChild(bMore)
         rh.appendChild(btns)
         v.appendChild(rh)
-        const sc = el('div', 'hscroll')
+        // 自适应网格：去掉横向滚动容器（原底部滑动框会截断内容）
+        const sc = el('div', 'rec-grid')
         for (const rp of rec.list) {
           const card = el('div', 'card mini')
           const cov = el('div', 'cover')
@@ -619,7 +644,7 @@
       btns.appendChild(bAll); btns.appendChild(bShuf)
       rh.appendChild(btns)
       v.appendChild(rh)
-      v.appendChild(trackTable(discover.dailyMix.slice(0, 6), { menu: true }))
+      v.appendChild(sectionTracks(discover.dailyMix, { menu: true }))
     }
 
     // 猜你喜欢（基于最近播放的加权推荐）
@@ -636,7 +661,7 @@
       btns.appendChild(bAll); btns.appendChild(bShuf)
       rh.appendChild(btns)
       v.appendChild(rh)
-      v.appendChild(trackTable(recommend.tracks.slice(0, 6), { menu: true }))
+      v.appendChild(sectionTracks(recommend.tracks, { menu: true }))
     }
 
 
@@ -650,7 +675,7 @@
       btns.appendChild(bAll)
       rh.appendChild(btns)
       v.appendChild(rh)
-      v.appendChild(trackTable(discover.newArrivals.slice(0, 6), { menu: true, showAlbum: false }))
+      v.appendChild(sectionTracks(discover.newArrivals, { menu: true, showAlbum: false }))
     }
 
     // 热门歌手（按曲目数降序，横向卡片网格）
@@ -1931,17 +1956,14 @@ kuwo.cn/playlist_detail/280301309</pre>
       const t1 = el('button', 'otab' + (dlState.tab === 'search' ? ' on' : ''), '🔍 搜索')
       const t2 = el('button', 'otab' + (dlState.tab === 'queue' ? ' on' : ''), '⏬ 下载队列')
       t2.dataset.tab = 'queue'
-      const t3 = el('button', 'otab' + (dlState.tab === 'playlist' ? ' on' : ''), '📋 歌单导入')
       t1.onclick = () => { dlState.tab = 'search'; renderDlTabs(box); renderDlArea(area) }
       t2.onclick = () => { dlState.tab = 'queue'; renderDlTabs(box); renderDlArea(area) }
-      t3.onclick = () => { dlState.tab = 'playlist'; renderDlTabs(box); renderDlArea(area) }
-      box.appendChild(t1); box.appendChild(t2); box.appendChild(t3)
+      box.appendChild(t1); box.appendChild(t2)
       paintDlBadge()
     }
     function renderDlArea(box) {
-      if (dlState.tab === 'search') renderSearch(box)
-      else if (dlState.tab === 'queue') renderQueue(box)
-      else renderPlaylist(box)
+      if (dlState.tab === 'queue') renderQueue(box)
+      else renderSearch(box)
     }
 
     // ---- 搜索 ----
@@ -2292,79 +2314,6 @@ kuwo.cn/playlist_detail/280301309</pre>
     }
 
     // ---- 歌单导入 ----
-    function renderPlaylist(box) {
-      box.innerHTML = ''
-      const guide = el('div', 'dl-paste-guide')
-      guide.innerHTML = `
-        <div class="pg-title">粘贴歌单文本 · 批量入队</div>
-        <div class="pg-desc">每行一首，识别 <b>歌手 - 曲名</b> 或 <b>歌手⇥曲名</b>（Tab 分隔）；可带版本备注。</div>
-        <pre class="pg-sample">周杰伦 - 晴天
-周杰伦	稻香
-林俊杰 - 江南 - Live</pre>
-      `
-      box.appendChild(guide)
-
-      const chips = el('div', 'chips')
-      for (const s of dlState.sources.filter(s => s.enabled)) {
-        const c = el('button', 'chip' + (dlState.source === s.id ? ' on' : ''), s.name)
-        c.onclick = () => { dlState.source = s.id; paintPlaylists(box) }
-        chips.appendChild(c)
-      }
-      if (!chips.children.length) chips.appendChild(el('span', 'online-disabled', '⚠ 在线源已在管理后台停用'))
-      box.appendChild(chips)
-
-      const bar = el('div', 'dl-search-bar')
-      const ta = el('textarea', 'dl-paste-area')
-      ta.rows = 10
-      ta.placeholder = '粘贴歌单（每行一首）…\n支持：\n  周杰伦 - 晴天\n  周杰伦⇥稻香\n  林俊杰 - 江南 - Live'
-      ta.spellcheck = false
-      bar.appendChild(ta)
-      const btn = el('button', 'btn primary', '🚀 解析并入队')
-      btn.onclick = () => doParsePlaylists(ta.value)
-      bar.appendChild(btn)
-      box.appendChild(bar)
-
-      const preview = el('div', 'dl-paste-preview'); preview.id = 'dl-paste-preview'
-      box.appendChild(preview)
-    }
-
-    async function doParsePlaylists(text) {
-      const preview = document.getElementById('dl-paste-preview')
-      if (!preview) return
-      preview.innerHTML = ''
-      const wrap = el('div', 'dl-parse-wrap')
-      wrap.appendChild(el('p', 'hint', '🔍 正在逐行搜索…'))
-      preview.appendChild(wrap)
-      try {
-        const r = await api('/api/downloads/parse-text', {
-          method: 'POST',
-          body: { text, source: dlState.source, maxLines: 50 },
-        })
-        wrap.innerHTML = ''
-        const okN = r.accepted || 0
-        const skipN = r.skipped || 0
-        const notFound = r.notFound || []
-        const head = el('div', 'dl-parse-head')
-        head.innerHTML = `✅ 已入队 <b>${okN}</b> 首${skipN ? '，跳过 <b>' + skipN + '</b> 首' : ''}${notFound.length ? '，未匹配 <b>' + notFound.length + '</b> 首' : ''}`
-        wrap.appendChild(head)
-        if (notFound.length) {
-          const ul = el('ul', 'dl-parse-miss')
-          for (const it of notFound.slice(0, 20)) {
-            const li = el('li', null, `「${it.line}」 — ${it.reason}`)
-            ul.appendChild(li)
-          }
-          wrap.appendChild(ul)
-          if (notFound.length > 20) wrap.appendChild(el('p', 'hint', '… 还有 ' + (notFound.length - 20) + ' 条未列出'))
-        }
-        if (okN > 0) {
-          const goto = el('button', 'btn ghost mini', '→ 查看下载队列')
-          goto.onclick = () => { dlState.tab = 'queue'; const tabsBox = area.parentElement.querySelector('.otabs'); if (tabsBox) renderDlTabs(tabsBox); renderDlArea(area) }
-          wrap.appendChild(goto)
-        }
-        toast(`歌单解析完成：入队 ${okN} 首`)
-      } catch (e) { toast(e.message, true) }
-    }
-
     renderDlTabs(tabs); renderDlArea(area); refreshDlMeta()
 
     // SSE（指数退避重连）
@@ -2443,76 +2392,6 @@ kuwo.cn/playlist_detail/280301309</pre>
       aboutGrid.appendChild(el('span', 'set-k', '服务端版本'))
       aboutGrid.appendChild(row)
     }).catch(() => {})
-
-    // 封面回填（在线源 → 本地缓存）
-    const cfSec = el('section', 'set-section')
-    cfSec.appendChild(el('h3', 'set-sec-h', '封面回填'))
-    cfSec.appendChild(el('p', 'set-hint', '为没有内嵌封面的曲目自动匹配在线封面。封面缓存在服务端 covers 目录，不改动原始音频；清空缓存即可完全还原。'))
-    const cfStats = el('div', 'cf-stats')
-    const cfBar = el('div', 'cf-bar')
-    const cfFill = el('i')
-    cfBar.appendChild(cfFill)
-    const cfLabel = el('div', 'cf-label', '')
-    const cfOps = el('div', 'cf-ops')
-    const cfStart = el('button', 'btn primary', '开始回填')
-    const cfCancel = el('button', 'btn', '取消')
-    const cfClear = el('button', 'btn ghost', '清空缓存')
-    cfOps.appendChild(cfStart); cfOps.appendChild(cfCancel); cfOps.appendChild(cfClear)
-    const cfAuto = el('label', 'cf-auto')
-    const cfAutoBox = el('input')
-    cfAutoBox.type = 'checkbox'
-    cfAuto.appendChild(cfAutoBox)
-    cfAuto.appendChild(el('span', null, '扫描完成后自动回填（增量，跳过已处理曲目）'))
-    cfSec.appendChild(cfStats); cfSec.appendChild(cfBar); cfSec.appendChild(cfLabel)
-    cfSec.appendChild(cfOps); cfSec.appendChild(cfAuto)
-    v.appendChild(cfSec)
-
-    const cfRender = (d) => {
-      const job = d.job || {}
-      cfStats.innerHTML = ''
-      const pills = [['曲库', d.total], ['无内嵌封面', d.noCover], ['已回填', (d.cache || {}).ok || 0], ['未匹配', (d.cache || {}).nomatch || 0]]
-      if ((d.cache || {}).error) pills.push(['抓取失败', d.cache.error])
-      for (const [k, n] of pills) {
-        const pill = el('span', 'cf-pill')
-        pill.appendChild(el('b', null, String(n)))
-        pill.appendChild(el('span', null, k))
-        cfStats.appendChild(pill)
-      }
-      const pct = job.total > 0 ? Math.round((job.done / job.total) * 100) : 0
-      cfFill.style.width = pct + '%'
-      cfBar.classList.toggle('on', !!job.running)
-      cfLabel.textContent = job.running
-        ? `进行中 ${job.done}/${job.total}　成功 ${job.ok}　未匹配 ${job.miss}　失败 ${job.fail}　${job.current || ''}`
-        : (job.finishedAt
-          ? `上次结束：成功 ${job.ok}、未匹配 ${job.miss}、失败 ${job.fail}${job.error ? '（' + job.error + '）' : ''}`
-          : `待回填 ${d.pending} 首`)
-      cfStart.disabled = !!job.running
-      cfCancel.disabled = !job.running
-    }
-    const cfLoad = () => api('/api/covers/state').then(cfRender).catch(() => {})
-    cfLoad()
-    api('/api/settings').then(s => { cfAutoBox.checked = !!s.coverAuto }).catch(() => {})
-    cfAutoBox.onchange = () => {
-      api('/api/settings', { method: 'PUT', body: { coverAuto: cfAutoBox.checked } }).catch(() => {})
-    }
-    cfStart.onclick = () => {
-      api('/api/covers/backfill', { method: 'POST', body: { limit: 2000, delayMs: 400 } }).then(cfLoad).catch(cfLoad)
-    }
-    cfCancel.onclick = () => { api('/api/covers/backfill/cancel', { method: 'POST' }).then(cfLoad).catch(cfLoad) }
-    cfClear.onclick = () => {
-      if (!confirm('清空已回填的封面缓存？曲目本身不受影响。')) return
-      api('/api/covers/cache/clear', { method: 'POST' }).then(cfLoad).catch(cfLoad)
-    }
-    if (window.__cfES) { window.__cfES.close(); window.__cfES = null }
-    const es = new EventSource(BASE + '/web/api/covers/events?k=' + encodeURIComponent(token))
-    let cfLast = 0
-    es.addEventListener('cover', () => {
-      const now = Date.now()
-      if (now - cfLast < 600) return
-      cfLast = now
-      cfLoad()
-    })
-    window.__cfES = es
 
     // 播放偏好
     const pbPref = el('section', 'set-section')

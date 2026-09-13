@@ -783,20 +783,6 @@ img.ph {
   .lf-disc { animation-duration: 60s; }
 }
 
-/* ---- 首页推荐歌单横向滚动 ---- */
-.hscroll { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 12px; scrollbar-width: thin; }
-.hscroll .card { flex: 0 0 130px; width: 130px; }
-.hscroll .card .cover { width: 130px; height: 130px; border-radius: 10px; }
-.hscroll .card .cover img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
-.hscroll .card .cover svg { width: 42%; height: 42%; position: absolute; inset: 29%; color: #888; }
-.hscroll .card .t { font-size: 13px; font-weight: 600; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hscroll .card .s { font-size: 12px; color: #999; }
-.hscroll .card:hover .cover img { transform: scale(1.05); }
-@media (max-width: 720px) {
-  .hscroll .card { flex: 0 0 104px; width: 104px; }
-  .hscroll .card .cover { width: 104px; height: 104px; }
-}
-
 /* ============ 首页统计条（替代原先占满首屏的大卡片） ============ */
 .stat-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
 .stat-pill { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; min-width: 0;
@@ -848,3 +834,21 @@ img.ph {
 .dm-q-bar i.warn { background: linear-gradient(90deg, #4f9dff, #ffb84d); }
 .dm-q-bar i.full { background: linear-gradient(90deg, #ffb84d, #ff6b6b); }
 .dm-q-txt { font-variant-numeric: tabular-nums; }
+/* ============ 首页：推荐歌单自适应网格（替代横向滚动条） ============ */
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 16px 12px; margin-bottom: 22px; }
+.rec-grid .card { padding: 11px; }
+.rec-grid .card .cover img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; }
+.rec-grid .card .t { margin-top: 9px; font-size: 13px; }
+.rec-grid .card .s { font-size: 12px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 720px) { .rec-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px 10px; } }
+
+/* ============ 首页推荐区块：紧凑曲目表（默认 8 首 + 原地展开全部） ============ */
+.sec-tracks { margin-bottom: 20px; }
+.tracks.compact td { padding: 6px 10px; font-size: 13.5px; }
+.tracks.compact td.cov img { width: 34px; height: 34px; border-radius: 8px; }
+.tracks.compact td.cov.cov-empty::before { width: 34px; height: 34px; }
+.tracks.compact .sub { font-size: 11.5px; margin-top: 1px; }
+.tracks.compact .num { width: 30px; }
+.tracks.compact .dur { width: 52px; }
+.tracks.compact th { padding: 2px 10px 8px; }
+.more-inline { display: block; margin: 12px auto 0; }

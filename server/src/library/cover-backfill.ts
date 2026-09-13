@@ -240,7 +240,8 @@ export const runCoverBackfill = async (rawUser: string, opts: BackfillOptions = 
 // 扫描完成后：若租户开启了「自动回填封面」，则后台增量回填（已有记录的曲目自动跳过）
 onTenantScanDone((rawUser) => {
   try {
-    if (!getTenantSettings(rawUser).coverAuto) return
+    // 默认开启（UI 已不再暴露开关）：只有显式关闭过才跳过
+    if (getTenantSettings(rawUser).coverAuto === false) return
     const safeUser = safeUserName(rawUser)
     if (coverBackfillState(safeUser).running) return
     void runCoverBackfill(rawUser, { limit: 200 }).catch(() => { /* 状态已记录 */ })
