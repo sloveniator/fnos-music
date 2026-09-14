@@ -908,6 +908,8 @@ img.ph {
 }
 
 /* —— 2. 平台级修正 —— */
+/* 原生控件跟随深色：复选框/滑杆不再呈现浅色系统样式 */
+:root { color-scheme: dark; }
 /* 禁掉 iOS/安卓横竖屏切换时的字号自动放大 */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 /* 用 dvh 而非 % 计算高度：移动端浏览器工具栏收放时底栏不再被裁切 */
@@ -975,11 +977,16 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .menu { max-width: calc(100vw - 20px); }
   /* 操作按钮组窄屏换行：6 个按钮并排会把内容撑出屏幕（实测 390px 溢出 92px） */
   .page-head .btns { flex-wrap: wrap; row-gap: 8px; justify-content: flex-end; max-width: 100%; }
+  /* ≤560px 改成整齐两列，避免右对齐换行造成的阶梯状留白 */
+  .page-head .btns { width: 100%; }
   /* 源/Tab 横滑容器：不换行、不显示滚动条 */
   .otabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .otabs::-webkit-scrollbar { display: none; }
   .otab { flex-shrink: 0; }
   .nav a { padding: 12px 13px; }
+  /* 抽屉内小按钮补足触控尺寸（实测「＋新建歌单」只有 24px）*/
+  #pl-create { width: 38px; height: 38px; }
+  .side-links a, .side-links button { min-width: 38px; min-height: 38px; }
   .queue { max-height: 56vh; max-height: 56dvh; }
   /* 底栏质感 */
   .player { background: linear-gradient(180deg, rgba(19,23,34,.94), rgba(13,16,24,.97));
@@ -1001,6 +1008,17 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .login-card { padding: 30px 20px 24px; }
   .dialog-box { padding: 20px 16px; }
   .trash-tbl .t-size { display: none; }
+}
+
+/* —— 7.4 手机端操作按钮：等宽两列网格 + 触屏复选框放大 —— */
+@media (max-width: 560px) {
+  /* 批量操作收成单行横滑（与在线源 chips / Tab 同一套手势），不再占三行高度 */
+  /* 注意：横滑容器不能用 flex-end 对齐——溢出到左侧的按钮会滚不到（Chrome 不计入 scrollWidth） */
+  .page-head .btns { width: 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .page-head .btns::-webkit-scrollbar { display: none; }
+  .page-head .btns .btn { flex: 0 0 auto; padding: 9px 16px; min-height: var(--tap); }
+  input[type=checkbox] { width: 18px; height: 18px; }
 }
 
 /* —— 7.5 超窄屏底栏：收藏/下载移入播放页（#lyric-full 各有一个），歌名不再被挤成一两个字 —— */

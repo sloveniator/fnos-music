@@ -60,6 +60,9 @@ METRICS = """() => {
       d.style.cssText = 'position:absolute;left:-9999px;top:0;width:var(--grid-min)'
       document.body.appendChild(d); const w = Math.round(d.getBoundingClientRect().width); d.remove(); return w })(),
     sidebarRight: Math.round(document.getElementById('sidebar').getBoundingClientRect().right),
+    sideMinTap: (() => { const rs = [...document.querySelectorAll('#sidebar a, #sidebar button')]
+        .map(e => e.getBoundingClientRect()).filter(r => r.height > 0).map(r => Math.round(Math.min(r.width, r.height)))
+      return rs.length ? Math.min(...rs) : 0 })(),
     viewMax: Math.round(parseFloat(getComputedStyle(view).maxWidth)) || null,
     playerVisible: ps.display !== 'none' && pr.height > 0,
     playerH: Math.round(pr.height),
@@ -146,6 +149,7 @@ def main():
             check('%s 顶栏/底栏触控目标 ≥34px' % label, m['minTap'] >= 34, 'min=%s' % m['minTap'])
             check('%s 抽屉关闭时完全离屏（不挡汉堡键）' % label, m['sidebarRight'] <= 1,
                   'sidebarRight=%s' % m['sidebarRight'])
+            check('%s 抽屉内触控目标 ≥36px' % label, m['sideMinTap'] >= 36, 'min=%s' % m['sideMinTap'])
             check('%s shell 高度铺满视口（dvh）' % label, abs(m['shellH'] - m['vh']) <= 2,
                   'shell=%s vh=%s' % (m['shellH'], m['vh']))
             if w <= 360:
