@@ -794,7 +794,7 @@
       rh.appendChild(playedBtns)
       v.appendChild(rh)
       const list = played.tracks.slice(0, 10)
-      v.appendChild(trackTable(list, { menu: true }))
+      v.appendChild(trackTable(list, { menu: true, noSelect: true, compact: true }))
     }
     if (!stats.tracks) {
       const tip = el('div', 'empty', '曲库还是空的。到管理后台「音乐库」添加目录并扫描，或把音乐放进 NAS 共享目录后授权给本应用。')
@@ -2293,7 +2293,6 @@ kuwo.cn/playlist_detail/280301309</pre>
         // 清理已不存在或下载中的选择
         const valid = new Set(dlQueue.filter(t => t.status !== 'downloading').map(t => t.id))
         for (const id of Array.from(dlSelected)) if (!valid.has(id)) dlSelected.delete(id)
-        renderDlStats(d.stats)
         paintQueue(document.getElementById('dl-queue'))
       } catch (e) { toast(e.message, true) }
     }
