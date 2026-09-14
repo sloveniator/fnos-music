@@ -77,10 +77,13 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
   transition: color .15s, background .15s; }
 .nav .tab:hover { background: rgba(255,255,255,.04); color: var(--text); }
 .nav .tab.active { background: linear-gradient(135deg, rgba(79,140,255,.18), rgba(124,92,255,.12)); color: #fff; font-weight: 600; }
+/* 服务器名与「应用/退出」分两行：同行会让两侧互相挤压折行、垂直错位 */
 .side-foot { margin-top: auto; padding: 14px 6px 2px; border-top: 1px solid var(--line-soft);
-  display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); }
-.side-foot .side-links { display: flex; gap: 8px; align-items: center; }
-.side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 4px 8px; border-radius: 8px; }
+  display: flex; flex-direction: column; align-items: stretch; gap: 2px; font-size: 12px; color: var(--muted); }
+/* 服务器名超长时省略，而不是换行撑高整块 */
+.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px 4px; }
+.side-foot .side-links { display: flex; gap: 4px; align-items: center; margin-left: -4px; }
+.side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 4px 6px; border-radius: 8px; white-space: nowrap; }
 .side-foot a:hover, .side-foot button:hover { color: var(--text); background: rgba(255,255,255,.05); }
 .side-foot button { font: inherit; }
 
@@ -114,7 +117,18 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
 .stat b { display: block; font-size: 24px; font-weight: 800; margin: 4px 0 2px; }
 .stat span { color: var(--muted); font-size: 12px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
-@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } .main { padding: 18px 14px 50px; } .sidebar { width: 76px; } .brand span, .brand em, .side-foot span { display: none; } .nav .tab { font-size: 12px; padding: 10px 6px; text-align: center; } }
+@media (max-width: 900px) {
+  .grid-2 { grid-template-columns: 1fr; }
+  .main { padding: 18px 14px 50px; }
+  .sidebar { width: 76px; padding: 20px 8px 10px; }
+  /* 只藏服务器名（.side-links 同为 span，不能再用 .side-foot span 一刀切） */
+  .brand span, .brand em, .side-foot #who { display: none; }
+  .nav .tab { font-size: 12px; padding: 10px 4px; text-align: center; white-space: nowrap; }
+  /* 窄侧栏里链接竖排，否则「← 应用 + 退出」横向溢出被裁 */
+  .side-foot { align-items: center; padding: 10px 0 2px; }
+  .side-foot .side-links { flex-direction: column; gap: 2px; margin-left: 0; }
+  .side-foot a, .side-foot button { padding: 3px 5px; font-size: 11px; }
+}
 
 .in-row { display: flex; gap: 8px; align-items: center; }
 .in-row input, .in-row select { flex: 1; }
