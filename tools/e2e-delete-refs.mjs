@@ -30,7 +30,6 @@ const freePort = async () => new Promise((resolve, reject) => {
 const PORT = await freePort()
 const BASE = 'http://127.0.0.1:' + PORT
 const LIB = path.join(DATA, 'libraries', WEB_USER)
-const DEAD_ID = 'af204ed3400e6055' // 线上那条失效引用（gusi-final2）
 
 // 复制真实数据：这样索引/歌单形状与线上一致
 fs.cpSync(path.join(ROOT, 'server', 'data'), DATA, { recursive: true })
@@ -52,13 +51,65 @@ console.log('数据副本: ' + DATA)
   for (const t of idx.tracks || []) t.filePath = path.join(LIB, t.relPath)
   fs.writeFileSync(idxPath, JSON.stringify(idx))
 
-  const leaked = (JSON.stringify(idx).match(/"\/(?:[^"]*?)libraries\/[^"]*"/g) || [])
-    .filter((x) => !x.includes(TMP))
+  // 全副本清洗：文本级把「真实数据目录」前缀替换成副本目录。downloads.json 这类
+  // 历史任务记录里会残留真实文件的绝对路径，不清掉的话孤立实例会拿着真路径去动真文件
+  // ——2026-09-14 的事故正是这一类（副本实例把真实曲库整批搬进了回收站）。
+  const realData = path.join(ROOT, 'server', 'data')
+  const LEGACY_DIRS = ['/tmp/gusi-test-music', '/tmp/gusi-dl']
+  const sanitizeJson = (p) => {
+    let txt = fs.readFileSync(p, 'utf8')
+    const orig = txt
+    if (txt.includes(realData)) txt = txt.split(realData).join(DATA)
+    for (const d of LEGACY_DIRS) if (txt.includes(d)) txt = txt.split(d).join(LIB)
+    if (txt !== orig) fs.writeFileSync(p, txt)
+  }
+  const walkJson = (p) => {
+    let s2
+    try { s2 = fs.statSync(p) } catch { return }
+    if (s2.isDirectory()) { for (const f of fs.readdirSync(p)) walkJson(path.join(p, f)); return }
+    if (/\.json$/.test(p)) sanitizeJson(p)
+  }
+  walkJson(DATA)
+
+  // 硬校验：副本里任何文件都不允许再出现「真实数据目录」或我遗留的临时曲库目录
+  const leaked = (() => {
+    const out = []
+    const pat = new RegExp('(' + realData.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '|/tmp/gusi-test-music|/tmp/gusi-dl)')
+    const walk = (p) => {
+      let s2
+      try { s2 = fs.statSync(p) } catch { return }
+      if (s2.isDirectory()) { for (const f of fs.readdirSync(p)) walk(path.join(p, f)); return }
+      if (!/\.json$/.test(p)) return
+      const txt = fs.readFileSync(p, 'utf8')
+      if (pat.test(txt)) out.push(path.basename(p))
+    }
+    walk(DATA)
+    return [...new Set(out)]
+  })()
   if (leaked.length) {
-    console.error('!! 副本里仍有指向真实曲库的绝对路径，已中止: ' + leaked.slice(0, 2).join(' '))
+    console.error('!! 副本里仍有指向真实曲库的绝对路径，已中止: ' + leaked.join(', '))
     process.exit(3)
   }
-  console.log('副本隔离校验通过 (dirs=' + st.dirs[0] + ')')
+  console.log('数据副本: ' + DATA + '\n隔离校验通过 (dirs=' + st.dirs[0] + ', 全副本无真实路径泄漏)')
+}
+
+// 确定性夹具：往副本的「我的歌单」快照里注入一条指向不存在曲目的死引用。
+// 之前这条测试数据靠的是线上恰好有一条死引用（gusi-final2 的文件被移进了回收站），
+// 文件一还原测试就假失败——夹具必须自己造，不依赖线上残留状态。
+{
+  const usersDir = path.join(DATA, 'users')
+  const userDir = fs.readdirSync(usersDir).find((d) => d.startsWith(WEB_USER)) || fs.readdirSync(usersDir)[0]
+  const listDir = path.join(usersDir, userDir, 'list')
+  const info = JSON.parse(fs.readFileSync(path.join(listDir, 'snapshotInfo.json'), 'utf8'))
+  const snapPath = path.join(listDir, 'snapshot', 'snapshot_' + info.latest)
+  const snap = JSON.parse(fs.readFileSync(snapPath, 'utf8'))
+  const dead = {
+    id: 'local_deadbeefdeadbeef', name: '死引用测试曲', singer: '测试歌手', source: 'local', interval: null,
+    meta: { songId: 'deadbeefdeadbeef', albumName: '测试专辑', picUrl: '', filePath: 'deadbeefdeadbeef', ext: 'mp3' },
+  }
+  snap.defaultList = [dead]
+  fs.writeFileSync(snapPath, JSON.stringify(snap))
+  console.log('夹具: 我的歌单已注入 1 条死引用 (' + dead.id + ', 目标曲目不存在于索引)')
 }
 
 const child = spawn(process.execPath, [path.resolve('server/server/index.js')], {
