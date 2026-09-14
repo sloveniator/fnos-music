@@ -31,11 +31,17 @@ const mimeToExt = (mime?: string | null): string => {
   return MIME_EXT[base] ?? '.mp3'
 }
 
-/** 生成合法 Content-Disposition：ASCII filename + UTF-8 filename* 兜底 */
+/**
+ * 生成合法 Content-Disposition：ASCII filename + RFC 5987 filename* 兜底。
+ * 注意 filename= 的值必须是 ASCII —— 中文歌名直接放进去会让 Node 在 writeHead 时
+ * 抛「Invalid character in header content」，请求被中断，表现为「点下载没反应」。
+ * 中文名统一放进 filename*=UTF-8''<pct-encoded>，浏览器优先采用它。
+ */
 const contentDisposition = (filename: string): string => {
   const safe = (filename || 'download').replace(/[^\w\u4e00-\u9fff._-]/g, '_').substring(0, 180) || 'download'
+  const ascii = safe.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
   const encoded = encodeURIComponent(safe)
-  return `attachment; filename="${safe.replace(/"/g, '')}"; filename*=UTF-8''${encoded}`
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`
 }
 
 /**
@@ -66,7 +72,6 @@ export const pipeHttpStream = (
     res.end('Bad upstream protocol')
     return
   }
-  const mod = url.protocol == 'https:' ? https : http
   const method = req.method == 'HEAD' ? 'HEAD' : 'GET'
   const headers: http.OutgoingHttpHeaders = {
     'User-Agent': UA,
@@ -79,7 +84,10 @@ export const pipeHttpStream = (
     headers.Range = req.headers.range
   }
 
-  const upstream = mod.request(url, { method, headers, timeout: 15_000 }, (pr) => {
+  // 上游给的「直链」多为跳转链接（如酷我 antiserver → CDN 节点），必须跟随 3xx：
+  // 原样透传 302 时 <audio> 靠浏览器自动跳转仍能播放，但 a[download] 跳到跨源地址后
+  // 会丢弃 download 属性并被当成内联播放，表现为「点了下载却没有文件」。
+  const handleUpstream = (pr: http.IncomingMessage): void => {
     if (method == 'HEAD') {
       res.writeHead(pr.statusCode ?? 200, {
         'Content-Type': pr.headers['content-type'] ?? 'application/octet-stream',
@@ -91,6 +99,13 @@ export const pipeHttpStream = (
       return
     }
     const status = pr.statusCode ?? 502
+    if (status >= 300 && status < 400) {
+      // 还有 3xx 说明 Location 非法或超出跳数上限，此时没有可下载的内容
+      res.writeHead(502)
+      res.end('upstream redirect not followed')
+      pr.resume()
+      return
+    }
     if (status >= 400 && status < 600) {
       res.writeHead(status)
       res.end()
@@ -126,20 +141,51 @@ export const pipeHttpStream = (
       if (!/\.[A-Za-z0-9]{2,5}$/.test(baseName)) baseName += mimeToExt(ct)
       outHeaders['Content-Disposition'] = contentDisposition(baseName)
     }
-    res.writeHead(status, outHeaders)
-    pr.pipe(res)
-  })
-  upstream.on('timeout', () => upstream.destroy(new Error('upstream timeout')))
-  upstream.on('error', () => {
-    if (!res.headersSent) {
-      try {
-        res.writeHead(502)
-        res.end('upstream error')
-      } catch {}
-    } else {
-      res.destroy()
+    try {
+      res.writeHead(status, outHeaders)
+    } catch (e) {
+      // 兜底：任何非法响应头都不该变成 uncaughtException（连接会被直接掐断）
+      res.writeHead(502)
+      res.end('bad response headers: ' + (e as Error).message)
+      pr.resume()
+      return
     }
-  })
-  res.on('close', () => upstream.destroy())
-  upstream.end()
+    pr.pipe(res)
+  }
+
+  // 跟随 3xx（最多 5 跳，仅限 http/https，相对 Location 按当前跳解析）
+  let active: http.ClientRequest | null = null
+  const requestOnce = (u: URL, hops: number): void => {
+    const m = u.protocol == 'https:' ? https : http
+    const rq = m.request(u, { method, headers, timeout: 15_000 }, (pr) => {
+      const sc = pr.statusCode ?? 0
+      const loc = typeof pr.headers.location == 'string' ? pr.headers.location : ''
+      if (sc >= 300 && sc < 400 && loc && hops < 5) {
+        let next: URL | null = null
+        try { next = new URL(loc, u) } catch { next = null }
+        if (next && (next.protocol == 'http:' || next.protocol == 'https:')) {
+          active = null
+          pr.resume()
+          requestOnce(next, hops + 1)
+          return
+        }
+      }
+      handleUpstream(pr)
+    })
+    rq.on('timeout', () => rq.destroy(new Error('upstream timeout')))
+    rq.on('error', () => {
+      if (!res.headersSent) {
+        try {
+          res.writeHead(502)
+          res.end('upstream error')
+        } catch {}
+      } else {
+        res.destroy()
+      }
+    })
+    active = rq
+    rq.end()
+  }
+  res.on('close', () => { if (active) active.destroy() })
+  requestOnce(url, 0)
 }

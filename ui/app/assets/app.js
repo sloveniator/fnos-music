@@ -628,17 +628,31 @@
     if (n > 1) toast('已开始下载 ' + n + ' 个文件')
   }
 
+  /** 在线曲目原始 API 数据 → 在线行。幂等：已是在线行则原样返回。
+   *  在线列表存在两种形态（/api/online/* 的原始数据、toOnlineRows 转换后的行），
+   *  而 downloadLocal/saveToCloud/downloadUrl 都靠 kind+rid 判定在线，
+   *  故所有下载入口统一先过这里，避免把 source_id 当本地曲目 id 去下载。 */
+  function asOnlineRows(list) {
+    return (list || []).map(x => (x && x.kind === 'online' && x.rid) ? x : {
+      id: x.source + '_' + String(x.id == null ? '' : x.id).replace(/^MUSIC_/, ''),
+      kind: 'online', source: x.source, rid: x.id,
+      name: x.name, singer: x.singer, album: x.album,
+      interval: x.intervalMs, pic: x.pic,
+    })
+  }
+
   /** 点击下载 → 选择下载方式（本机 / 云盘） */
   function askDownload(tracks, anchor) {
     const list = (tracks || []).filter(Boolean)
     if (!list.length) return toast('无可用曲目', true)
-    const localN = list.filter(t => (t.kind === 'online' ? !!t.rid : !!t.id)).length
-    const cloudN = list.filter(t => t.kind !== 'online' && t.id).length
-    if (!localN && !cloudN) return toast('该曲目无法下载', true)
-    const tail = list.length > 1 ? (n) => '（' + n + ' 首）' : () => ''
+    // 本机与云盘支持的能力集一致：本地曲目直接直链/复制，在线曲目由服务端拉取后落盘。
+    // 此前云盘计数排除了在线曲目，批量在线下载时菜单会显示「保存到云盘（0 首）」。
+    const n = list.filter(t => (t.kind === 'online' ? !!t.rid : !!t.id)).length
+    if (!n) return toast('该曲目无法下载', true)
+    const tail = list.length > 1 ? (k) => '（' + k + ' 首）' : () => ''
     popMenu(anchor, [
-      ['💻 下载到本机' + tail(localN), () => downloadLocal(list)],
-      ['☁️ 保存到云盘' + tail(cloudN), () => saveToCloud(list)],
+      ['💻 下载到本机' + tail(n), () => downloadLocal(list)],
+      ['☁️ 保存到云盘' + tail(n), () => saveToCloud(list)],
     ])
   }
 
@@ -954,13 +968,9 @@ kuwo.cn/playlist_detail/280301309</pre>
           bPlay.onclick = () => { if (list.length) player.play(toOnlineRows(list), 0) }
           const bDl = el('button', 'btn')
           bDl.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg><span>下载全部</span>'
-          bDl.onclick = async () => {
-            bDl.disabled = true
-            try {
-              const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: list.map(t => ({ source: t.source, id: t.id, name: t.name, singer: t.singer, intervalMs: t.intervalMs, pic: t.pic, album: t.album })) } })
-              toast(`已加入 ${r.accepted || 0} 首到下载队列`, (r.accepted || 0) === 0)
-            } catch (e) { toast(e.message, true) }
-            bDl.disabled = false
+          bDl.onclick = () => {
+            if (!list.length) { toast('无可下载曲目', true); return }
+            askDownload(asOnlineRows(list), bDl)
           }
           btns.appendChild(bPlay); btns.appendChild(bDl)
           btns.appendChild(selDlBtn('btn'))
@@ -1385,21 +1395,16 @@ kuwo.cn/playlist_detail/280301309</pre>
     source: t.source, id: t.rid || t.id, name: t.name, singer: t.singer,
     intervalMs: t.interval, pic: t.pic, album: t.album,
   })
-  const enqueueList = async (items, btn) => {
-    if (!items.length) { toast('请先勾选要下载的歌曲', true); return }
-    if (btn) btn.disabled = true
-    try {
-      const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: items.map(toEnqueueItem) } })
-      toast('已加入 ' + (r.accepted || 0) + ' 首到下载队列', (r.accepted || 0) === 0)
-    } catch (e) { toast(e.message, true) }
-    syncSel()
-  }
   /** 「下载选中 (n)」按钮：读取当前列表的勾选项 */
   const selDlBtn = (cls) => {
     const b = el('button', (cls || 'btn mini ghost') + ' dl-sel')
     b.innerHTML = SVG.dl + '<span>下载选中 (0)</span>'
     b.disabled = true
-    b.onclick = () => enqueueList(selCtx.list.filter(t => selCtx.sel.has(selRid(t))), b)
+    b.onclick = () => {
+      const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)))
+      if (!items.length) { toast('请先勾选要下载的歌曲', true); return }
+      askDownload(asOnlineRows(items), b)
+    }
     return b
   }
   // 在线集合（专辑/歌单）详情缓存：{ source,type,id } -> OnlineCollectionDetail
@@ -1432,10 +1437,9 @@ kuwo.cn/playlist_detail/280301309</pre>
     const dbtn = el('button', 'iconbtn dl')
     dbtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>'
     dbtn.title = '下载'
-    dbtn.onclick = async (e) => {
+    dbtn.onclick = (e) => {
       e.stopPropagation()
-      const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: [{ source: t.source, id: t.rid || t.id, name: t.name, singer: t.singer, intervalMs: t.interval, pic: t.pic, album: t.album }] } })
-      toast((r.accepted || 0) > 0 ? '已加入下载队列' : '入队失败', (r.accepted || 0) === 0)
+      askDownload(asOnlineRows([t]), dbtn)
     }
     tdB.appendChild(pbtn)
     tdB.appendChild(nbtn)
@@ -1535,14 +1539,9 @@ kuwo.cn/playlist_detail/280301309</pre>
     const bDl = el('button', 'btn mini play-all dl-all')
     bDl.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>下载全部'
     bDl.hidden = !ostate.list.length
-    bDl.onclick = async () => {
+    bDl.onclick = () => {
       if (!ostate.list.length) return
-      bDl.disabled = true
-      try {
-        const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: ostate.list.map(t => ({ source: t.source, id: t.rid, name: t.name, singer: t.singer, intervalMs: t.interval, pic: t.pic, album: t.album })) } })
-        toast(`已加入 ${r.accepted || 0} 首到下载队列`, (r.accepted || 0) === 0)
-      } catch (e) { toast(e.message, true) }
-      bDl.disabled = false
+      askDownload(asOnlineRows(ostate.list), bDl)
     }
     hd.appendChild(bDl)
     hd.appendChild(selDlBtn('btn mini ghost'))
@@ -1804,14 +1803,9 @@ kuwo.cn/playlist_detail/280301309</pre>
     const bDl = el('button', 'btn')
     bDl.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg><span>下载全部</span>'
     bDl.disabled = !tracks.length
-    bDl.onclick = async () => {
+    bDl.onclick = () => {
       if (!tracks.length) return
-      bDl.disabled = true
-      try {
-        const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: tracks.map(t => ({ source: t.source, id: t.id, name: t.name, singer: t.singer, intervalMs: t.intervalMs, pic: t.pic, album: t.album })) } })
-        toast(`已加入 ${r.accepted || 0} 首到下载队列`, (r.accepted || 0) === 0)
-      } catch (e) { toast(e.message, true) }
-      bDl.disabled = false
+      askDownload(asOnlineRows(tracks), bDl)
     }
     btns.appendChild(bPlay); btns.appendChild(bDl)
     btns.appendChild(selDlBtn('btn'))
@@ -1881,13 +1875,9 @@ kuwo.cn/playlist_detail/280301309</pre>
         bPlay.onclick = () => { if (list.length) player.play(toOnlineRows(list), 0) }
         const bDl = el('button', 'btn')
         bDl.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg><span>下载全部</span>'
-        bDl.onclick = async () => {
-          bDl.disabled = true
-          try {
-            const r = await api('/api/downloads/enqueue', { method: 'POST', body: { items: list.map(t => ({ source: t.source, id: t.id, name: t.name, singer: t.singer, intervalMs: t.intervalMs, pic: t.pic, album: t.album })) } })
-            toast(`已加入 ${r.accepted || 0} 首到下载队列`, (r.accepted || 0) === 0)
-          } catch (e) { toast(e.message, true) }
-          bDl.disabled = false
+        bDl.onclick = () => {
+          if (!list.length) return
+          askDownload(asOnlineRows(list), bDl)
         }
         btns.appendChild(bPlay); btns.appendChild(bDl)
         btns.appendChild(selDlBtn('btn'))
