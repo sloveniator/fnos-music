@@ -477,6 +477,18 @@ const dropRunner = (id: string): void => {
   runners.delete(id)
 }
 
+/**
+ * 第三方音源的 hash 口径与本站内置 id 不一致：本站酷我 id 形如 `MUSIC_xxx`，
+ * 而洛雪生态的音源普遍按纯数字 rid 拼上游请求——带前缀会被上游判为非法参数，
+ * 返回「请输入歌曲id」这类空响应。此处按平台归一，其余源保持原样。
+ */
+const normalizeSourceId = (source: string, id: string): string => {
+  switch (source) {
+    case 'kw': return id.replace(/^MUSIC_/i, '')
+    default: return id
+  }
+}
+
 export interface ResolveAttempt { url: string; via: string; ms: number }
 
 /** 依序尝试启用的第三方源。返回 null 表示没有可尝试的源。 */
@@ -516,6 +528,8 @@ export const resolveFromUserSources = async (source: string, id: string, quality
 /** 构造脚本期望的 musicInfo：脚本普遍读 hash/songmid/songId；尽量多给已知字段 */
 export function buildMusicInfo(source: string, id: string, extra?: Record<string, any>): Record<string, any> {
   const e = extra && typeof extra === 'object' ? extra : {}
+  // 归一后再透出，避免脚本拿带前缀的 id 去请求上游
+  id = normalizeSourceId(source, id)
   const hash = typeof e.hash === 'string' && e.hash ? String(e.hash) : id
   const songmid = typeof e.songmid === 'string' && e.songmid ? String(e.songmid) : id
   const albumId = typeof e.albumId === 'string' ? String(e.albumId) : undefined
