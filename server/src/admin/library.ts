@@ -247,7 +247,7 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
     if (typeof body.proxyUrl == 'string') patch.proxyUrl = body.proxyUrl.trim()
     if (Array.isArray(body.proxySources)) patch.proxySources = (body.proxySources as unknown[]).map((s: unknown) => String(s)).filter((s: string) => ['wy', 'kw', 'tx', 'kg', 'mg'].includes(s))
     if (typeof body.autoScanAfterDownload == 'boolean') patch.autoScanAfterDownload = body.autoScanAfterDownload
-    if (Array.isArray(body.onlineSources)) patch.onlineSources = (body.onlineSources as unknown[]).map((s: unknown) => String(s)).filter((s: string) => ['kw', 'wy', 'mg'].includes(s))
+    if (Array.isArray(body.onlineSources)) patch.onlineSources = (body.onlineSources as unknown[]).map((s: unknown) => String(s)).filter((s: string) => ['kw', 'wy', 'mg', 'soda'].includes(s))
     ok(res, saveSettings(patch))
     return true
   }

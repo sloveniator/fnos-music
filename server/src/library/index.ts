@@ -140,7 +140,7 @@ export const saveSettings = (patch: Partial<LibrarySettings>): LibrarySettings =
   if (patch.autoScanAfterDownload !== undefined) settings.autoScanAfterDownload = !!patch.autoScanAfterDownload
   if (patch.onlineSources !== undefined) {
     settings.onlineSources = (Array.isArray(patch.onlineSources) ? patch.onlineSources : [])
-      .map(s => String(s)).filter(s => ['kw', 'wy', 'mg'].includes(s))
+      .map(s => String(s)).filter(s => ['kw', 'wy', 'mg', 'soda'].includes(s))
     if (!settings.onlineSources.length) settings.onlineSources = []
   } else if (!Array.isArray(settings.onlineSources)) settings.onlineSources = []
   writeJsonAtomic(settingsFile(), settings)

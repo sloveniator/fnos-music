@@ -10,6 +10,10 @@ import { kwSearch, kwPlayUrl, kwParseJSON, kwSearchAlbums, kwSearchPlaylists } f
 import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult, OnlineCollectionDetail } from './kw'
 import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wyAlbumDetail, wyPlaylistDetail, wyRecPlaylists } from './wy'
 import { mgSearch, mgPlayUrl, mgLyric } from './mg'
+import {
+  sodaSearch, sodaPlayUrl, sodaLyric, sodaSearchAlbums, sodaSearchPlaylists,
+  sodaAlbumDetail, sodaPlaylistDetail, SODA_REFERER, SODA_AUDIO_EXT,
+} from './soda'
 import { getSettings } from '@/library'
 import { resolveFromUserSources } from './user-source'
 
@@ -33,6 +37,11 @@ export interface OnlineSourceDef {
   albumDetail?: (id: string) => Promise<OnlineCollectionDetail>
   /** 可选：歌单曲目详情 */
   playlistDetail?: (id: string) => Promise<OnlineCollectionDetail>
+  /**
+   * 可选：音频容器扩展名（不带点），落盘/下载命名用；缺省 mp3。
+   * 汽水免登录档位是 m4a，必须显式声明，否则会被存成 .mp3 的 m4a 内容。
+   */
+  audioExt?: string
 }
 
 const REGISTRY: Record<string, OnlineSourceDef> = {
@@ -53,6 +62,17 @@ const REGISTRY: Record<string, OnlineSourceDef> = {
     albumDetail: wyAlbumDetail, playlistDetail: wyPlaylistDetail,
   },
   mg: { id: 'mg', name: '咪咕音乐', search: mgSearch, resolvePlayUrl: mgPlayUrl, lyric: mgLyric },
+  soda: {
+    id: 'soda',
+    name: '汽水音乐',
+    search: sodaSearch,
+    resolvePlayUrl: sodaPlayUrl,
+    lyric: sodaLyric,
+    searchAlbums: sodaSearchAlbums, searchPlaylists: sodaSearchPlaylists,
+    albumDetail: sodaAlbumDetail, playlistDetail: sodaPlaylistDetail,
+    audioExt: SODA_AUDIO_EXT,
+    // 免登录无公开榜单接口，故不注册 boards/boardList 能力（见 soda.ts 头注释）
+  },
 }
 
 const KNOWN_IDS = Object.keys(REGISTRY)
@@ -149,6 +169,18 @@ export const onlineBoardList = async (source: string, bid: string, limit: number
  */
 export const importOnlineUrl = async (rawUrl: string): Promise<{ source: string; type: 'album' | 'playlist'; info: any; list: OnlineItem[] }> => {
   const url = String(rawUrl).trim()
+
+  // 汽水（Soda）：分享页 music.douyin.com/qishui/share/{playlist,album}?xxx_id=… / www.qishui.com/{playlist,album}/{id}
+  const soda =
+    /(?:music\.douyin\.com\/qishui\/share|(?:www\.)?qishui\.com)\/(playlist|album)(?:\?[^#]*?|\/)(?:playlist_id|album_id)=(\d{1,24})/i.exec(url) ||
+    /(?:www\.)?qishui\.com\/(playlist|album)\/(\d{1,24})/i.exec(url)
+  if (soda) {
+    if (!isOnlineSource('soda')) throw new Error('汽水音乐源未启用（管理后台「在线音乐源」可开启）')
+    const type: 'album' | 'playlist' = soda[1].toLowerCase() === 'album' ? 'album' : 'playlist'
+    const detail = await (type === 'album' ? sodaAlbumDetail : sodaPlaylistDetail)(soda[2])
+    return { source: 'soda', type, info: detail.info, list: detail.list }
+  }
+
   const m =
     // 网易云网页/移动
     /(?:music\.163\.com\/(?:#\/)?|y\.music\.163\.com\/m\/)(playlist|album)\?(?:[^#]*&)?id=(\d{1,16})/i.exec(url) ||
@@ -158,7 +190,7 @@ export const importOnlineUrl = async (rawUrl: string): Promise<{ source: string;
     // 咪咕
     /music\.migu\.cn\/v3\/music\/(playlist|album)\/(\d{1,16})/i.exec(url)
 
-  if (!m) throw new Error('无法识别的分享链接（支持网易云/酷我/咪咕的歌单或专辑链接）')
+  if (!m) throw new Error('无法识别的分享链接（支持网易云/酷我/咪咕/汽水的歌单或专辑链接）')
 
   let source = 'wy'
   let type: 'album' | 'playlist' = 'playlist'
@@ -186,3 +218,21 @@ export const importOnlineUrl = async (rawUrl: string): Promise<{ source: string;
 
 export { kwParseJSON }
 export type { OnlineItem, OnlineCollection }
+
+/**
+ * 拉流（<audio> 经 NAS 代理）时上游需要的 Referer。
+ * 缺省沿用酷我（历史行为，网易云/咪咕直链也接受）；汽水直链在 douyinvod，
+ * 实测会 403 拒绝酷我/网易 Referer，只有不带或带抖音自家 Referer 才放行。
+ */
+export const onlineStreamReferer = (source: string): string =>
+  source === 'soda' ? SODA_REFERER : 'http://www.kuwo.cn/'
+
+/**
+ * 服务端下载时上游需要的 Referer。
+ * 缺省沿用网易云（历史行为）；汽水同上必须换成抖音 Referer。
+ */
+export const onlineDownloadReferer = (source: string): string =>
+  source === 'soda' ? SODA_REFERER : 'https://music.163.com/'
+
+/** 该在线源的音频容器扩展名（落盘 / 下载命名用），缺省 mp3 */
+export const onlineAudioExt = (source: string): string => REGISTRY[source]?.audioExt ?? 'mp3'

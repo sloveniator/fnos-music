@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import ID3 from 'node-id3'
-import { onlineResolvePlayUrl, onlineSearch } from '@/online'
+import { onlineResolvePlayUrl, onlineSearch, onlineAudioExt, onlineDownloadReferer } from '@/online'
 import type { OnlineItem } from '@/online/kw'
 import { getSettings } from '@/library'
 import { getTenantSettings, startTenantScan } from '@/library/tenant'
@@ -21,7 +21,7 @@ import { getQuota } from '@/user/quota'
 export interface DownloadTask {
   id: string
   userName: string
-  source: string       // kw | wy | mg
+  source: string       // kw | wy | mg | soda
   rid: string
   name: string
   singer: string
@@ -121,11 +121,15 @@ const safeName = (s: string, max = 120): string => {
 const targetPath = (dir: string, task: DownloadTask): string => {
   // 落盘结构：<下载根>/<歌手>/<专辑>/<曲名>.<ext>，与曲库扫描目录结构一致，
   // 扫描后自动按歌手/专辑分类；缺歌手或专辑时退化为根目录散文件。
-  const name = safeName(task.name) || task.rid || 'unknown'
+  // 扩展名按源声明：汽水免登录档位是 m4a，其余源沿用 mp3。
+  const ext = onlineAudioExt(task.source)
+  // 曲名里可能自带扩展名（文本导入等），先剥掉避免出现 xxx.m4a.m4a
+  const name = (safeName(task.name) || task.rid || 'unknown').replace(/\.(mp3|m4a|flac|aac|wav|ogg|opus)$/i, '')
   const album = safeName(task.album)
   const singer = safeName(task.singer)
   const sub = [singer, album].filter(Boolean)
-  return sub.length ? path.join(dir, ...sub, name + '.mp3') : path.join(dir, name + '.mp3')
+  const file = name + '.' + ext
+  return sub.length ? path.join(dir, ...sub, file) : path.join(dir, file)
 }
 
 // ---------- 已存在检测 ----------
@@ -240,7 +244,6 @@ const downloadTask = async (task: DownloadTask): Promise<void> => {
   const tmp = target + '.part'
   // 子目录（歌手/专辑）可能不存在，落盘前先创建
   try { fs.mkdirSync(path.dirname(target), { recursive: true }) } catch {}
-  const ext = task.name.toLowerCase().endsWith('.m4a') ? '.m4a' : '.mp3'
 
   try {
     // 用 fetch 直接下：自带 TLS/HTTP2/跟随重定向；比 http.request 稳。
@@ -259,7 +262,7 @@ const downloadTask = async (task: DownloadTask): Promise<void> => {
           'Accept-Language': 'zh-CN,zh;q=0.9',
           'Referer': task.url.includes('kuwo') ? 'https://www.kuwo.cn/'
                     : task.url.includes('126.net') || task.url.includes('music.163.com') ? 'https://music.163.com/'
-                    : 'https://music.163.com/',
+                    : onlineDownloadReferer(task.source),
         },
       })
     } catch (e: any) {
@@ -340,8 +343,10 @@ const downloadTask = async (task: DownloadTask): Promise<void> => {
     }
     // 试听片段检测：上游对 VIP/版权曲目常返回十几秒的片段。
     // 以 128kbps 估算期望体积，实际不足 55% 且时长明显偏短时给出提示（不改变 done 状态）。
+    // 只对 mp3 生效：这个 128kbps 基准是 mp3 的；m4a 源（汽水免登录档位约 64kbps）
+    // 会被误报，而它自己的直链解析已按流时长拒绝了试听片段。
     try {
-      if (task.duration > 1000 && stat.size > 0) {
+      if (target.toLowerCase().endsWith('.mp3') && task.duration > 1000 && stat.size > 0) {
         const expected = task.duration / 1000 * 16000
         if (stat.size < expected * 0.55) {
           const estSec = Math.round(stat.size / 16000)

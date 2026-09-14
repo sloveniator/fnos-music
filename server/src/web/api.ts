@@ -20,7 +20,7 @@ import {
 import { getUserSpace } from '@/user'
 import { LIST_IDS } from '@/constants'
 import { lyricWithFallback } from '@/online/lyric-fallback'
-import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists } from '@/online'
+import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists, onlineAudioExt, onlineStreamReferer } from '@/online'
 import { pipeHttpStream } from '@/utils/httpPipe'
 import {
   enqueue, enqueueMany, listTasks, getTask, removeTask, retryTask, batchOperate, parsePlaylistText,
@@ -115,6 +115,7 @@ const PIC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.
 const PIC_HOST_ALLOW = [
   /(^|\.)music\.126\.net$/, /(^|\.)126\.net$/, /(^|\.)music\.163\.com$/,
   /(^|\.)kuwo\.cn$/, /(^|\.)migu\.cn$/, /(^|\.)qq\.com$/, /(^|\.)gtimg\.cn$/,
+  /(^|\.)douyinpic\.com$/, // 汽水音乐图床（p3/p6-luna.douyinpic.com）
 ]
 const PIC_TTL = 6 * 60 * 60 * 1000
 const picCache = new Map<string, { ct: string, buf: Buffer, ts: number }>()
@@ -209,8 +210,16 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     if (!isOnlineSource(oSource)) return fail(res, 400, '未知的在线源：' + oSource), true
     const asDownload = url.searchParams.get('dl') == '1'
     const fileName = (url.searchParams.get('name') ?? '').substring(0, 180)
+    // 容器扩展名按源声明（汽水 m4a）；上游 Content-Type 不可信——汽水返回 video/mp4，
+    // 既不合适给 <audio>，也会让下载文件名被补成 .mp3，这里统一覆盖成音频 MIME
+    const oExt = onlineAudioExt(oSource)
+    const oCt = oExt == 'm4a' ? 'audio/mp4' : oExt == 'flac' ? 'audio/flac' : oExt == 'aac' ? 'audio/aac' : undefined
     void onlineResolvePlayUrl(oSource, oRid).then(
-      (playUrl) => pipeHttpStream(req, res, playUrl, { Referer: 'http://www.kuwo.cn/' }, asDownload ? { download: true, filename: fileName } : {}),
+      (playUrl) => pipeHttpStream(
+        req, res, playUrl,
+        { Referer: onlineStreamReferer(oSource) },
+        { ...(asDownload ? { download: true, filename: fileName } : {}), ...(oCt ? { contentType: oCt } : {}) },
+      ),
       (e) => fail(res, 502, (e as Error).message),
     )
     return true

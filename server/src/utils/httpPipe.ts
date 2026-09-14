@@ -49,8 +49,11 @@ const contentDisposition = (filename: string): string => {
  * @param extraHeaders  需要带的 Referer 等
  * @param opts.download 附加 Content-Disposition: attachment；filename 由
  *                      opts.filename 提供（未提供时按上游 Content-Type 推断扩展名）
+ * @param opts.contentType 强制覆盖上游 Content-Type（下载时也按它推断扩展名）。
+ *                      汽水上游给的是 video/mp4，但她是纯音频 m4a，必须改成 audio/mp4，
+ *                      否则 <audio> 拿到视频 MIME，下载也会被补成 .mp3。
  */
-export interface PipeOptions { download?: boolean, filename?: string }
+export interface PipeOptions { download?: boolean, filename?: string, contentType?: string }
 
 export const pipeHttpStream = (
   req: http.IncomingMessage,
@@ -90,7 +93,7 @@ export const pipeHttpStream = (
   const handleUpstream = (pr: http.IncomingMessage): void => {
     if (method == 'HEAD') {
       res.writeHead(pr.statusCode ?? 200, {
-        'Content-Type': pr.headers['content-type'] ?? 'application/octet-stream',
+        'Content-Type': opts.contentType ?? pr.headers['content-type'] ?? 'application/octet-stream',
         'Accept-Ranges': pr.headers['accept-ranges'] ?? 'bytes',
         'Content-Length': pr.headers['content-length'] ?? '',
       })
@@ -112,7 +115,7 @@ export const pipeHttpStream = (
       pr.resume()
       return
     }
-    const ct = pr.headers['content-type'] ?? 'application/octet-stream'
+    const ct = opts.contentType ?? pr.headers['content-type'] ?? 'application/octet-stream'
     const outHeaders: Record<string, string> = {
       'Content-Type': ct,
       'Accept-Ranges': pr.headers['accept-ranges'] ?? 'bytes',
