@@ -1030,16 +1030,63 @@ $('#btn-us-add').addEventListener('click', () => openUserSourceModal(null))
 const openUserSourceModal = (src) => {
   openModal(src ? '编辑音源：' + src.name : '添加第三方 JS 音源', `
     <label>名称<input type="text" id="us-name" value="${esc(src?.name || '')}" placeholder="如：Flower 音源"></label>
-    <label>脚本内容（.js）<textarea id="us-script" placeholder="粘贴音源脚本">${esc(src?.script || '')}</textarea></label>
+    <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px">
+      <label style="flex:1;margin:0">① 从网址导入（.js 直链）<input type="text" id="us-url" placeholder="https://raw.githubusercontent.com/…/source.js"></label>
+      <button class="btn" id="us-fetch" style="flex:0 0 auto">导入</button>
+    </div>
+    <label>② 或上传本地脚本文件（.js / .mjs / .txt）<input type="file" id="us-file" accept=".js,.mjs,.txt,text/javascript,application/javascript"></label>
+    <label>③ 脚本内容（.js，可粘贴 / 编辑）<textarea id="us-script" placeholder="可直接粘贴，或用上方网址 / 文件导入">${esc(src?.script || '')}</textarea></label>
+    <p class="muted-note" id="us-info"></p>
     <div class="btns">
       <button class="btn" data-close>取消</button>
       <button class="btn" id="us-save-no">保存（不启用）</button>
       <button class="btn primary" id="us-save-on">保存并启用</button>
     </div>
   `, (body) => {
+    const infoEl = body.querySelector('#us-info')
+    const scriptEl = body.querySelector('#us-script')
+    const nameEl = body.querySelector('#us-name')
+    const setInfo = (text, kind) => {
+      const color = kind === 'ok' ? 'var(--ok, #22c55e)' : kind === 'err' ? 'var(--danger, #ef4444)' : 'inherit'
+      infoEl.innerHTML = text ? '<span style="color:' + color + '">' + esc(text) + '</span>' : ''
+    }
+    const applyScript = (text, suggestName, label) => {
+      if (!text || !text.trim()) return setInfo('内容为空，未导入', 'err')
+      scriptEl.value = text
+      if (suggestName && !nameEl.value.trim()) nameEl.value = suggestName
+      setInfo('✅ ' + label + ' · ' + (new TextEncoder().encode(text).length / 1024).toFixed(1) + 'KB', 'ok')
+    }
+    // —— 网址导入：交给服务端代取（浏览器直连会被 CORS 拦下）
+    const fetchBtn = body.querySelector('#us-fetch')
+    const urlEl = body.querySelector('#us-url')
+    const doFetch = async () => {
+      const url = urlEl.value.trim()
+      if (!url) return toast('请填写脚本直链')
+      fetchBtn.disabled = true
+      setInfo('⏳ 正在下载…', '')
+      try {
+        const r = await api('/admin/api/library/user-sources/fetch', { method: 'POST', body: { url } })
+        applyScript(String(r?.data?.script ?? ''), String(r?.data?.name ?? ''), '已从网址导入')
+      } catch (err) {
+        setInfo('❌ ' + err.message, 'err')
+      } finally {
+        fetchBtn.disabled = false
+      }
+    }
+    fetchBtn.addEventListener('click', doFetch)
+    urlEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doFetch() } })
+    // —— 本地文件上传：读为文本填入编辑框，可先过目再保存
+    body.querySelector('#us-file').addEventListener('change', (ev) => {
+      const f = ev.target.files && ev.target.files[0]
+      if (!f) return
+      const rd = new FileReader()
+      rd.onload = () => applyScript(String(rd.result || ''), f.name.replace(/\.(js|mjs|txt)$/i, ''), '已读取 ' + f.name)
+      rd.onerror = () => setInfo('❌ 读取文件失败', 'err')
+      rd.readAsText(f)
+    })
     const save = async (enabled) => {
-      const name = body.querySelector('#us-name').value.trim()
-      const script = body.querySelector('#us-script').value
+      const name = nameEl.value.trim()
+      const script = scriptEl.value
       if (!name || !script.trim()) return toast('名称与脚本不能为空')
       try {
         await api('/admin/api/library/user-sources', { method: 'POST', body: { id: src?.id, name, script, enabled } })
@@ -1052,7 +1099,6 @@ const openUserSourceModal = (src) => {
     body.querySelector('#us-save-on').addEventListener('click', () => save(true))
   })
 }
-
 // ==================== 上传 ====================
 $('#btn-upload').addEventListener('click', () => {
   openModal('上传音频到曲库', `

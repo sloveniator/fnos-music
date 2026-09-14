@@ -647,6 +647,67 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
     return true
   }
 
+
+  // 从网址导入脚本：服务端代取（浏览器直连会被 CORS / 源站 UA 校验挡下）
+  if (method == 'POST' && p == '/admin/api/library/user-sources/fetch') {
+    let body: any
+    try {
+      body = JSON.parse(await readBody(req))
+    } catch {
+      fail(res, 400, 'invalid body')
+      return true
+    }
+    const raw = String(body.url ?? '').trim()
+    if (!/^https?:\/\/\S+$/i.test(raw)) {
+      fail(res, 400, '请填写 http/https 脚本直链')
+      return true
+    }
+    const FETCH_MAX = 2 * 1024 * 1024
+    const doFetch = async (u: string) => {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 20000)
+      try {
+        const resp = await fetch(u, {
+          signal: ctrl.signal,
+          redirect: 'follow',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+          },
+        })
+        if (!resp.ok) throw new Error('HTTP ' + resp.status)
+        const buf = Buffer.from(await resp.arrayBuffer())
+        if (!buf.length) throw new Error('返回内容为空')
+        if (buf.length > FETCH_MAX) throw new Error('脚本过大（>2MB）')
+        const text = buf.toString('utf8')
+        const head = text.slice(0, 500)
+        if (/<html[\s>]/i.test(head) || /^\s*<!doctype/i.test(head)) throw new Error('返回的是网页而非脚本，请改用 raw 直链')
+        let name = ''
+        try {
+          const pn = decodeURIComponent(new URL(resp.url || u).pathname)
+          name = (pn.split('/').filter(Boolean).pop() || '').replace(/\.(js|mjs|txt)$/i, '').slice(0, 60)
+        } catch {}
+        return { finalUrl: resp.url || u, size: buf.length, name, script: text }
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+    try {
+      let got: any
+      try {
+        got = await doFetch(raw)
+      } catch (e1: any) {
+        // http 源站常常只支持 https，原样失败后再升一次
+        if (/^http:\/\//i.test(raw)) got = await doFetch(raw.replace(/^http:\/\//i, 'https://'))
+        else throw e1
+      }
+      ok(res, got)
+    } catch (e: any) {
+      fail(res, 400, '导入失败：' + (e?.name === 'AbortError' ? '下载超时（20 秒）' : (e?.message || String(e))))
+    }
+    return true
+  }
+
   if ((seg = /^\/admin\/api\/library\/user-sources\/([\w-]{1,40})$/.exec(p)) && method == 'GET') {
     const m = getUserSource(seg[1])
     const script = readScript(seg[1])
