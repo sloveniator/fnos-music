@@ -886,3 +886,171 @@ img.ph {
   .trash-tbl .t-album { display: none; }
   .trash-tbl .t-name { max-width: 140px; }
 }
+
+/* ============================================================================
+   v3 · 响应式缩放 / 移动端精修                                    2026-09-14
+   思路：把「随屏幕变化的那几个尺寸」抽成 clamp 流式令牌，覆盖 320px 窄屏手机
+   → 2K/4K 高分屏；断点只留给「结构变化」（抽屉、堆叠、列取舍），不做尺寸微调。
+   ============================================================================ */
+
+/* —— 1. 流式令牌：随视口宽/高连续缩放 —— */
+:root {
+  --pad-x: clamp(14px, 2.1vw, 34px);              /* 主内容左右留白 */
+  --view-max: min(1240px, 100%);                  /* 内容栏最大宽度 */
+  --fs-h2: clamp(19px, .55vw + 16px, 27px);       /* 页面主标题 */
+  --sidebar-w: clamp(212px, 6vw + 175px, 258px);  /* 侧栏宽度 */
+  --player-h: clamp(62px, 4.4vh + 36px, 86px);    /* 底栏高度：矮屏变矮、大屏变高 */
+  --grid-min: clamp(112px, 9vw + 40px, 180px);    /* 卡片最小宽度 */
+  --grid-gap: clamp(10px, 1.05vw, 18px);
+  --radius: clamp(12px, .5vw + 9px, 16px);
+  --topbar-h: 56px;                               /* 移动端顶栏内容高度（不含安全区） */
+  --tap: 40px;                                    /* 最小触控目标 */
+}
+
+/* —— 2. 平台级修正 —— */
+/* 禁掉 iOS/安卓横竖屏切换时的字号自动放大 */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* 用 dvh 而非 % 计算高度：移动端浏览器工具栏收放时底栏不再被裁切 */
+.shell, .login { height: 100vh; height: 100dvh; }
+/* 下拉不再触发整页橡皮筋 */
+body { overscroll-behavior-y: none; }
+a, button, .nav a, .icon-btn, .chip, .otab, .tracks tr, .card { touch-action: manipulation; }
+button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: none; }
+
+/* —— 3. 底栏进度线：移动端没有 seek 轴，用它给播放进度反馈 —— */
+.np-progress { position: absolute; left: 0; top: 0; height: 2.5px; width: 0;
+  border-radius: 0 2px 2px 0; background: linear-gradient(90deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 8px rgba(79,140,255,.55); transition: width .2s linear; display: none; }
+@media (max-width: 900px) { .np-progress { display: block; } }
+
+/* —— 3.5 底栏按钮禁止被 flex 挤压（实测 390px 下收藏/下载只剩 19px 宽）—— */
+#player .np .icon-btn, #player .ctrls .icon-btn, #player .right .icon-btn { flex-shrink: 0; }
+
+/* —— 4. 触屏反馈：没有 hover，改用按压态 —— */
+@media (hover: none), (pointer: coarse) {
+  .icon-btn:active { background: rgba(255,255,255,.09); transform: scale(.94); }
+  .btn:active, .chip:active, .otab:active, .tabs button:active, .load-more:active {
+    background: rgba(255,255,255,.08); transform: scale(.97); }
+  .nav a:active { background: rgba(255,255,255,.07); color: var(--text); }
+  .tracks tr.row:active { background: rgba(79,140,255,.10); }
+  .card:active, .bcard:active { transform: scale(.985); }
+}
+
+/* —— 5. 桌面/平板横屏：布局跟着视口缩放 —— */
+@media (min-width: 901px) {
+  .sidebar { width: var(--sidebar-w); }
+  .main { padding: clamp(22px, 1.1vw + 14px, 34px) var(--pad-x) calc(var(--player-h) + 30px); }
+  .view { max-width: var(--view-max); }
+  h2.page { font-size: var(--fs-h2); }
+  .grid, .board-grid { grid-template-columns: repeat(auto-fill, minmax(var(--grid-min), 1fr)); gap: var(--grid-gap); }
+  .hero .cover { width: clamp(130px, 12vw + 20px, 196px); height: clamp(130px, 12vw + 20px, 196px); }
+  .tracks .ell { max-width: clamp(150px, 18vw, 300px); }
+  .card, .bcard, .queue { border-radius: var(--radius); }
+}
+
+/* —— 6. 移动端：结构、安全区、触控目标 —— */
+@media (max-width: 900px) {
+  /* 顶栏高度确定化 + 刘海安全区（PWA 独立窗口下状态栏不再压住按钮） */
+  .topbar { height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 12px 0; align-items: center;
+    background: linear-gradient(180deg, rgba(15,18,27,.97), rgba(15,18,27,.86));
+    border-bottom-color: rgba(255,255,255,.05); }
+  .topbar .tb-btn { width: 40px; height: 40px; }
+  .topbar #top-title { font-size: 16px; }
+  /* 内容起始位置由顶栏高度令牌推导，改顶栏高度不会串位 */
+  .main { padding: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 14px) var(--pad-x)
+                   calc(var(--player-h) + 78px); }
+  /* 抽屉在手机上更宽（好点），退场位移与之等宽 */
+  .sidebar { width: min(78vw, 300px); margin-left: calc(-1 * min(78vw, 300px)); }
+  .sidebar.open { margin-left: 0; }
+  .grid, .board-grid { grid-template-columns: repeat(auto-fill, minmax(var(--grid-min), 1fr)); gap: var(--grid-gap); }
+  h2.page { font-size: var(--fs-h2); }
+  .hero .cover { width: clamp(110px, 34vw, 140px); height: clamp(110px, 34vw, 140px); }
+  .tracks .ell { max-width: clamp(96px, 30vw, 220px); }
+  /* iOS：输入框字号 <16px 时聚焦会强制放大整页 */
+  input, select, textarea { font-size: max(16px, 1em); }
+  /* 触控目标下限 */
+  .dlg-btns button, .tabs button, .otab, .load-more { min-height: var(--tap); }
+  .chip { min-height: 34px; }
+  .menu { max-width: calc(100vw - 20px); }
+  /* 操作按钮组窄屏换行：6 个按钮并排会把内容撑出屏幕（实测 390px 溢出 92px） */
+  .page-head .btns { flex-wrap: wrap; row-gap: 8px; justify-content: flex-end; max-width: 100%; }
+  /* 源/Tab 横滑容器：不换行、不显示滚动条 */
+  .otabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .otabs::-webkit-scrollbar { display: none; }
+  .otab { flex-shrink: 0; }
+  .nav a { padding: 12px 13px; }
+  .queue { max-height: 56vh; max-height: 56dvh; }
+  /* 底栏质感 */
+  .player { background: linear-gradient(180deg, rgba(19,23,34,.94), rgba(13,16,24,.97));
+    border-top-color: rgba(255,255,255,.07); }
+}
+
+/* —— 7. 窄屏手机（≤420px）：让歌名说话，次要列收起 —— */
+@media (max-width: 420px) {
+  :root { --pad-x: 12px; --grid-min: 102px; --grid-gap: 10px; }
+  .tracks th.cov, .tracks td.cov { display: none; }
+  /* 歌名列由表格自适应占满剩余宽度，这里不再限制 max-width */
+  .tracks td { padding: 11px 6px; }
+  .tracks .num { width: 26px; }
+  .tracks .dur { width: 48px; }
+  /* 专辑/歌单详情：封面居中堆叠，不再和标题抢横向空间 */
+  .hero { flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+  .hero .cover { width: min(58vw, 190px); height: min(58vw, 190px); border-radius: 20px; }
+  .hero .btns { justify-content: center; }
+  .login-card { padding: 30px 20px 24px; }
+  .dialog-box { padding: 20px 16px; }
+  .trash-tbl .t-size { display: none; }
+}
+
+/* —— 7.5 超窄屏底栏：收藏/下载移入播放页（#lyric-full 各有一个），歌名不再被挤成一两个字 —— */
+@media (max-width: 480px) { #np-love, #np-download { display: none; } }
+
+/* —— 7.6 320~380px：底栏再压缩一档，歌名区不至于只剩两个字 —— */
+@media (max-width: 380px) {
+  .np-cover { width: 46px; height: 46px; border-radius: 11px; }
+  .np { gap: 10px; }
+  .icon-btn { width: 38px; height: 38px; }
+  .icon-btn.play { width: 46px; height: 46px; }
+}
+
+/* —— 8. 横屏手机 / 矮窗口：竖向空间优先 —— */
+@media (max-height: 540px) and (orientation: landscape) {
+  :root { --player-h: 58px; --topbar-h: 48px; }
+  .topbar .tb-btn { width: 36px; height: 36px; }
+  .topbar #top-title { font-size: 15px; }
+  .main { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 10px); }
+  .hero { flex-direction: row; align-items: flex-end; text-align: left; gap: 20px; }
+  .hero .cover { width: min(120px, 26vh); height: min(120px, 26vh); }
+  .lf-disc { width: min(180px, 46vh); height: min(180px, 46vh); }
+  .lf-body { padding: 4vh 18px calc(18vh + env(safe-area-inset-bottom, 0px)); }
+  .queue { max-height: 74vh; max-height: 74dvh; }
+}
+
+/* —— 9. 横屏刘海安全区（左右） —— */
+@media (orientation: landscape) {
+  .topbar { padding-left: max(12px, env(safe-area-inset-left, 0px));
+            padding-right: max(12px, env(safe-area-inset-right, 0px)); }
+  .main, .player { padding-left: max(var(--pad-x), env(safe-area-inset-left, 0px));
+                   padding-right: max(var(--pad-x), env(safe-area-inset-right, 0px)); }
+}
+@media (orientation: landscape) and (max-width: 900px) {
+  .player { padding-left: max(10px, env(safe-area-inset-left, 0px));
+            padding-right: max(10px, env(safe-area-inset-right, 0px)); }
+}
+
+/* —— 10. 高分屏 / 大屏（2K 以上）：内容不再缩在中间一小条 —— */
+@media (min-width: 1500px) {
+  :root { --view-max: 1340px; --grid-min: 172px; }
+  .hero { gap: 30px; }
+  .hero .cover { width: clamp(170px, 10vw, 212px); height: clamp(170px, 10vw, 212px); }
+}
+@media (min-width: 2000px) {
+  :root { --view-max: 1560px; --pad-x: clamp(36px, 2.2vw, 72px); --grid-min: 188px;
+          --fs-h2: 28px; --sidebar-w: 268px; --player-h: 90px; }
+  .tracks td { font-size: 15px; }
+  .tracks th { font-size: 12.5px; }
+  .np-cover { width: 58px; height: 58px; }
+  .np-name { font-size: 15.5px; }
+  .login-card { width: min(420px, 92vw); }
+}

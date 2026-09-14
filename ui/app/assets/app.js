@@ -3455,6 +3455,9 @@ kuwo.cn/playlist_detail/280301309</pre>
       $('#t-cur').textContent = fmtDur(c)
       $('#t-dur').textContent = fmtDur(d)
       $('#seek-fill').style.width = (d ? (c / d * 100) : 0) + '%'
+      // v3：移动端底栏没有 seek 轴，用顶栏进度线给反馈（同源百分比）
+      const npBar = document.getElementById('np-progress')
+      if (npBar) npBar.style.width = (d ? (c / d * 100) : 0) + '%'
       const lfFill = document.getElementById('lf-seek-fill')
       if (lfFill && !document.getElementById('lyric-full').hidden) {
         lfFill.style.width = (d ? (c / d * 100) : 0) + '%'
