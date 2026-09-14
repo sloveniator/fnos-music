@@ -863,3 +863,26 @@ img.ph {
 .tracks.compact .dur { width: 52px; }
 .tracks.compact th { padding: 2px 10px 8px; }
 .more-inline { display: block; margin: 12px auto 0; }
+
+/* 回收站 */
+.trash-hint { color: var(--muted); font-size: 13px; margin: -6px 0 14px; }
+.trash-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.trash-bar .btn { padding: 7px 16px; font-size: 13px; }
+.trash-bar .btn.ghost { margin-left: auto; }
+.trash-bar .btn[disabled] { opacity: .45; cursor: not-allowed; }
+.trash-count { color: var(--muted); font-size: 13px; }
+.trash-selall { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.trash-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.trash-tbl th { text-align: left; font-weight: 500; color: var(--muted); padding: 9px 10px;
+  border-bottom: 1px solid var(--line); white-space: nowrap; }
+.trash-tbl td { padding: 9px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.trash-tbl tbody tr:hover td { background: rgba(255,255,255,.035); }
+.trash-tbl .t-sel { width: 34px; }
+.trash-tbl .t-name { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-tbl .t-size, .trash-tbl .t-time { white-space: nowrap; color: var(--muted); }
+.trash-tbl .t-acts { text-align: right; white-space: nowrap; }
+.trash-tbl .t-acts .btn { padding: 4px 12px; font-size: 12px; margin-left: 6px; }
+@media (max-width: 760px) {
+  .trash-tbl .t-album { display: none; }
+  .trash-tbl .t-name { max-width: 140px; }
+}

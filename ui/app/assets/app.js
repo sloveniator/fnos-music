@@ -1489,8 +1489,8 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
   /**
    * 删除本地曲目。
-   * 服务端做的是软删除：文件被移入所在曲库目录下的 .gusi-trash/，并非抹除，
-   * 所以文案如实说明「可从 NAS 找回」，而不是含糊的「已删除」。
+   * 服务端做的是软删除：文件被移入所在曲库目录下的 .gusi-trash/，并非抹除。
+   * 应用内有「回收站」页可恢复/彻底删除，文案如实说明去向，而不是含糊的「已删除」。
    */
   async function askDeleteTracks(items, onDone) {
     if (!items || !items.length) return
@@ -1498,7 +1498,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     const rest = items.length > 3 ? ' 等 ' + items.length + ' 首' : ''
     const okDel = await confirm2(
       '删除 ' + items.length + ' 首歌曲',
-      head + rest + ' —— 文件将移入曲库目录下的 .gusi-trash 回收站（可从 NAS 手动找回）。'
+      head + rest + ' —— 文件将移入「回收站」，可在应用内随时恢复（也可以从 NAS 手动找回）。'
     )
     if (!okDel) return
     let r
@@ -1506,7 +1506,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       r = await api('/api/tracks/delete', { method: 'POST', body: { ids: items.map(t => t.id) } })
     } catch (e) { toast(e.message, true); return }
     if (r.removed) {
-      let msg = '已删除 ' + r.removed + ' 首（移入 ' + r.trashDir + ' 回收站）'
+      let msg = '已删除 ' + r.removed + ' 首，可在「回收站」恢复'
       if (r.playlists && r.playlists.length) msg += '，并已从「' + r.playlists.join('」「') + '」移除引用'
       if (r.failed && r.failed.length) msg += '，' + r.failed.length + ' 首已跳过'
       toast(msg)
@@ -2632,6 +2632,187 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
 
   // ---------------- 设置 ----------------
+  // 回收站：软删除的文件都在这，可恢复（搬回原路径并重扫）或彻底删除（不可恢复）
+  routes.trash = async () => {
+    setActiveNav('trash')
+    const v = $('#view')
+    v.appendChild(el('h2', 'page', '回收站'))
+    v.appendChild(el('p', 'trash-hint', '在「全部歌曲」删除的歌曲会先移到这里，可随时恢复；彻底删除后无法找回。'))
+
+    const box = el('div', 'trash-box')
+    v.appendChild(box)
+    const sel = new Set()
+    let rows = []
+    let items = []
+
+    const fmtSize = (n) => {
+      if (!n || n < 0) return '0 B'
+      if (n < 1024) return n + ' B'
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+      if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
+      return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB'
+    }
+    const fmtTime = (ts) => {
+      if (!ts) return '-'
+      const d = new Date(ts)
+      const p2 = (n) => String(n).padStart(2, '0')
+      return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+    }
+
+    const selAll = el('input')
+    selAll.type = 'checkbox'
+    const cnt = el('span', 'trash-count', '')
+    const bRes = el('button', 'btn', '↩ 恢复选中')
+    const bPurge = el('button', 'btn danger', '✕ 彻底删除选中')
+    const bClear = el('button', 'btn ghost', '清空回收站')
+
+    function sync() {
+      for (const r of rows) r.cb.checked = sel.has(r.relPath)
+      selAll.checked = items.length > 0 && sel.size === items.length
+      const bytes = items.reduce((s, x) => s + (x.size || 0), 0)
+      cnt.textContent = items.length
+        ? '共 ' + items.length + ' 个文件 · ' + fmtSize(bytes) + (sel.size ? ' · 已选 ' + sel.size : '')
+        : '回收站是空的'
+      bRes.disabled = !sel.size
+      bPurge.disabled = !sel.size
+      bClear.disabled = !items.length
+    }
+
+    async function load() {
+      let d
+      try { d = await api('/api/trash') } catch (e) {
+        box.innerHTML = ''
+        box.appendChild(el('div', 'empty', '加载失败：' + e.message))
+        return
+      }
+      items = (d && d.list) || []
+      // 已被外部清理的条目要从选中集合摘掉，否则会去恢复/删除一个幽灵路径
+      const alive = new Set(items.map(x => x.relPath))
+      for (const p2 of [...sel]) if (!alive.has(p2)) sel.delete(p2)
+
+      box.innerHTML = ''
+      rows = []
+      const bar = el('div', 'trash-bar')
+      const allWrap = el('label', 'trash-selall')
+      allWrap.appendChild(selAll)
+      allWrap.appendChild(document.createTextNode('全选'))
+      allWrap.hidden = !items.length
+      bar.appendChild(bRes)
+      bar.appendChild(bPurge)
+      bar.appendChild(bClear)
+      bar.appendChild(cnt)
+      box.appendChild(bar)
+      if (!items.length) {
+        box.appendChild(el('div', 'empty', '回收站是空的。删除歌曲后可以在这里找回。'))
+        sync()
+        return
+      }
+      bar.insertBefore(allWrap, bar.firstChild)
+
+      const tbl = el('table', 'trash-tbl')
+      const thead = el('thead')
+      const htr = el('tr')
+      htr.appendChild(el('th', 't-sel', ''))
+      htr.appendChild(el('th', null, '歌曲'))
+      htr.appendChild(el('th', 't-artist', '歌手'))
+      htr.appendChild(el('th', 't-album', '专辑'))
+      htr.appendChild(el('th', 't-size', '大小'))
+      htr.appendChild(el('th', 't-time', '文件时间'))
+      htr.appendChild(el('th', 't-acts', '操作'))
+      thead.appendChild(htr)
+      tbl.appendChild(thead)
+      const tbody = el('tbody')
+      for (const it of items) {
+        const tr = el('tr')
+        const tdSel = el('td', 't-sel')
+        const cb = el('input')
+        cb.type = 'checkbox'
+        cb.onchange = () => { if (cb.checked) sel.add(it.relPath); else sel.delete(it.relPath); sync() }
+        tdSel.appendChild(cb)
+        tr.appendChild(tdSel)
+        const tdName = el('td', 't-name', it.name || it.relPath)
+        tdName.title = it.relPath
+        tr.appendChild(tdName)
+        tr.appendChild(el('td', 't-artist', it.singer || '-'))
+        tr.appendChild(el('td', 't-album', it.album || '-'))
+        tr.appendChild(el('td', 't-size', fmtSize(it.size || 0)))
+        tr.appendChild(el('td', 't-time', fmtTime(it.mtime)))
+        const tdActs = el('td', 't-acts')
+        const bR = el('button', 'btn', '恢复')
+        bR.onclick = async () => {
+          bR.disabled = true
+          try {
+            const r = await api('/api/trash/restore', { method: 'POST', body: { paths: [it.relPath] } })
+            if (r.ok) { toast('已恢复「' + it.name + '」，曲库正在重新扫描'); sel.delete(it.relPath); await load() }
+            else { toast('恢复失败：' + ((r.failed && r.failed[0] && r.failed[0].reason) || '未知原因'), true); bR.disabled = false }
+          } catch (e) { toast('恢复失败：' + e.message, true); bR.disabled = false }
+        }
+        const bD = el('button', 'btn danger', '删除')
+        bD.onclick = async () => {
+          if (!await confirm2('彻底删除', '将永久删除「' + it.name + '」，无法恢复。确定继续？')) return
+          bD.disabled = true
+          try {
+            const r = await api('/api/trash/purge', { method: 'POST', body: { paths: [it.relPath] } })
+            sel.delete(it.relPath)
+            if (r.ok) toast('已彻底删除')
+            await load()
+          } catch (e) { toast('删除失败：' + e.message, true); bD.disabled = false }
+        }
+        tdActs.appendChild(bR)
+        tdActs.appendChild(bD)
+        tr.appendChild(tdActs)
+        tbody.appendChild(tr)
+        rows.push({ relPath: it.relPath, cb })
+      }
+      tbl.appendChild(tbody)
+      box.appendChild(tbl)
+      sync()
+    }
+
+    selAll.onchange = () => {
+      sel.clear()
+      if (selAll.checked) for (const x of items) sel.add(x.relPath)
+      sync()
+    }
+    bRes.onclick = async () => {
+      const paths = [...sel]
+      if (!paths.length) return
+      bRes.disabled = true
+      try {
+        const r = await api('/api/trash/restore', { method: 'POST', body: { paths } })
+        const bad = (r.failed && r.failed.length) || 0
+        toast('已恢复 ' + r.ok + ' 个文件，曲库正在重新扫描' + (bad ? '（' + bad + ' 个失败）' : ''), r.ok === 0)
+        sel.clear()
+        await load()
+      } catch (e) { toast('恢复失败：' + e.message, true); sync() }
+    }
+    bPurge.onclick = async () => {
+      const paths = [...sel]
+      if (!paths.length) return
+      if (!await confirm2('彻底删除', '将永久删除选中的 ' + paths.length + ' 个文件，无法恢复。确定继续？')) return
+      bPurge.disabled = true
+      try {
+        const r = await api('/api/trash/purge', { method: 'POST', body: { paths } })
+        sel.clear()
+        toast('已彻底删除 ' + r.ok + ' 个文件')
+        await load()
+      } catch (e) { toast('删除失败：' + e.message, true); sync() }
+    }
+    bClear.onclick = async () => {
+      if (!items.length) return
+      if (!await confirm2('清空回收站', '将永久删除回收站里的 ' + items.length + ' 个文件，无法恢复。确定继续？')) return
+      bClear.disabled = true
+      try {
+        const r = await api('/api/trash/purge', { method: 'POST', body: { paths: ['*'] } })
+        sel.clear()
+        toast('已清空回收站（' + r.ok + ' 个文件）')
+        await load()
+      } catch (e) { toast('清空失败：' + e.message, true); sync() }
+    }
+
+    await load()
+  }
+
   routes.settings = async () => {
     setActiveNav('settings')
     const v = $('#view')

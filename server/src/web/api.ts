@@ -3,7 +3,8 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { serveAudio } from '@/library/stream'
 import { extractCover } from '@/library/metadata'
-import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags, startTenantScan, removeTenantTracks, renameTenantTrack, updateTenantTrackTags } from '@/library/tenant'
+import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags, startTenantScan, removeTenantTracks, renameTenantTrack, updateTenantTrackTags,
+  listTenantTrash, restoreTenantTrash, purgeTenantTrash } from '@/library/tenant'
 import { coverCacheStats, readCachedCover, clearCoverCache } from '@/library/cover-cache'
 import { runCoverBackfill, cancelCoverBackfill, coverBackfillState, subscribeCoverBackfill } from '@/library/cover-backfill'
 import {
@@ -638,6 +639,33 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
         .catch((err: any) => { console.error('drop track refs error:', err?.message); return [] as string[] })
       : []
     ok(res, { ...r, playlists })
+    return true
+  }
+
+  // 回收站：软删除后的文件在这里可见、可恢复、可彻底删除
+  if (method == 'GET' && p == '/web/api/trash') {
+    const list = listTenantTrash(userName)
+    ok(res, { list, count: list.length, bytes: list.reduce((s, x) => s + x.size, 0) })
+    return true
+  }
+
+  if (method == 'POST' && p == '/web/api/trash/restore') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const paths: string[] = Array.isArray(body?.paths) ? body.paths.map((x: unknown) => String(x)) : []
+    if (!paths.length) return fail(res, 400, '请选择要恢复的文件'), true
+    if (paths.length > 500) return fail(res, 400, '单次最多恢复 500 个'), true
+    ok(res, restoreTenantTrash(userName, paths))
+    return true
+  }
+
+  if (method == 'POST' && p == '/web/api/trash/purge') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const paths: string[] = Array.isArray(body?.paths) ? body.paths.map((x: unknown) => String(x)) : []
+    if (!paths.length) return fail(res, 400, '请选择要删除的文件'), true
+    if (paths.length > 500) return fail(res, 400, '单次最多删除 500 个'), true
+    ok(res, purgeTenantTrash(userName, paths))
     return true
   }
 
