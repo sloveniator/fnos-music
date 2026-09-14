@@ -64,7 +64,8 @@ const walk = async (root: string, dir: string, depth: number, out: FileEntry[]):
 }
 
 /** 稳定 ID：相对路径 hash（同路径重扫 ID 不变，歌单导入不失效） */
-const trackId = (relPath: string): string => {
+/** 曲目 id 由扫描根下的相对路径决定（小写 md5 前 16 位）；重命名文件会改变 id */
+export const trackId = (relPath: string): string => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const crypto = require('node:crypto') as typeof import('node:crypto')
   return crypto.createHash('md5').update(relPath.toLowerCase()).digest('hex').substring(0, 16)

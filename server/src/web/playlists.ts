@@ -98,6 +98,116 @@ export const toggleLove = async(userName: string, trackId: string): Promise<bool
   await applyAction(userName, { action: 'list_music_add', data: { id: LIST_IDS.LOVE, musicInfos: [music], addMusicLocationType: 'top' } })
   return true
 }
+/**
+ * 冷启动竞态：ListDataManage 在构造函数里 fire-and-forget 读快照，用户空间刚
+ * 创建时首个请求可能读到空列表（症状：歌单显示「一首都没有」、删歌后发现引用
+ * 没清干净）。先 await ready，再保留一轮短重试兜底。
+ */
+const waitListData = async(userSpace: ReturnType<typeof getUserSpace>): Promise<LX.Sync.List.ListData> => {
+  await userSpace.listManage.listDataManage.ready.catch(() => { /* 读快照失败时按空列表处理 */ })
+  let data = await userSpace.listManage.getListData()
+  for (let i = 0; i < 6; i++) {
+    if (data.defaultList.length || data.loveList.length || data.userList.length) break
+    await new Promise(r => setTimeout(r, 40))
+    data = await userSpace.listManage.getListData()
+  }
+  return data
+}
+/**
+ * 冷启动竞态：ListDataManage 在构造函数里 fire-and-forget 读快照，用户空间刚创建
+ * 或服务刚启动时，首个请求可能读到空列表——表现就是歌单突然「一首都没有」。
+ * 凡是要把列表内容展示给用户的读取都走这里，别直接 getListData()。
+ */
+export const getListDataStable = async(userName: string): Promise<LX.Sync.List.ListData> =>
+  waitListData(getUserSpace(userName))
+
+/**
+ * 曲目文件名变化后迁移引用。
+ * 曲目 id 由相对路径决定（scan.trackId），重命名会让 id 变化，而歌单里存的是
+ * local_<id>；不迁移的话该曲目在歌单里会变成失效项。返回被改动的歌单名。
+ * 「最近播放」是 Web 端本地记录、不参与同步，直接改内存并落盘。
+ */
+export const migrateTrackRefs = async(userName: string, oldId: string, newId: string): Promise<string[]> => {
+  if (!oldId || !newId || oldId === newId) return []
+  const oldMusicId = 'local_' + oldId
+  const newMusicId = 'local_' + newId
+  const touched: string[] = []
+  const userSpace = getUserSpace(userName)
+  // 直接取 getListData() 的数组（与 GET /web/api/playlists 同源）。
+  // 「我的歌单」「我喜欢」是内置列表，不出现在 userList 里，必须单独并入，
+  // 否则往内置歌单里加过的曲目在重命名后会变成失效项。
+  const data = await waitListData(userSpace)
+  const targets: Array<{ id: string, name: string, list: LX.Music.MusicInfo[] }> = [
+    { id: LIST_IDS.DEFAULT, name: '我的歌单', list: data.defaultList as LX.Music.MusicInfo[] },
+    { id: LIST_IDS.LOVE, name: '我喜欢', list: data.loveList as LX.Music.MusicInfo[] },
+    ...data.userList.map(l => ({ id: l.id, name: l.name, list: l.list as LX.Music.MusicInfo[] })),
+  ]
+  for (const item of targets) {
+    const list = item.list
+    if (!Array.isArray(list) || !list.some(m => m?.id === oldMusicId)) continue
+    // 顺带把显示名/歌手/专辑同步成新曲目的值，否则歌单里仍是旧名，看着像没重命名成功
+    const fresh = getTenantTrack(userName, newId)
+    const next = list.map(m => (
+      m.id === oldMusicId
+        ? {
+            ...m,
+            id: newMusicId,
+            name: fresh?.name || m.name,
+            singer: fresh?.singer || m.singer,
+            meta: { ...((m as any).meta || {}), songId: newId, albumName: fresh?.album ?? (m as any).meta?.albumName, filePath: newId },
+          }
+        : m
+    )) as typeof list
+    await applyAction(userName, { action: 'list_music_overwrite', data: { listId: item.id, musicInfos: next } })
+    touched.push(item.name || item.id)
+  }
+  const played = loadPlayed(userName)
+  if (played.includes(oldId)) {
+    playedCache.set(userName, played.map(x => (x === oldId ? newId : x)))
+    flushPlayed(userName)
+  }
+  return touched
+}
+
+/**
+ * 曲目从曲库删除后清理引用（与 migrateTrackRefs 对称的反向操作）。
+ * 歌单/收藏里存的是 local_<id>，曲目没了就成了死引用：歌单里会留下一行
+ * 「看着能点、点了就报错」的幽灵曲目——内置歌单（我的歌单/我喜欢）没有移除
+ * 入口，用户只能点「删除」，而服务端查不到该 id 只会回「曲目不存在」。
+ * 所以删除曲目时必须顺手把引用摘掉，别再制造新的死引用。
+ * 返回被改动的歌单名，供前端如实提示。
+ */
+export const dropTrackRefs = async(userName: string, trackIds: string[]): Promise<string[]> => {
+  const gone = new Set((trackIds || []).map(String).filter(Boolean))
+  if (!gone.size) return []
+  const isGoneRef = (m: any): boolean =>
+    !!m && m.source == 'local' && typeof m.id == 'string' && m.id.startsWith('local_') && gone.has(m.id.substring(6))
+  const touched: string[] = []
+  const userSpace = getUserSpace(userName)
+  // 与 migrateTrackRefs 同源：内置列表不在 userList 里，必须单独并入
+  const data = await waitListData(userSpace)
+  const targets: Array<{ id: string, name: string, list: LX.Music.MusicInfo[] }> = [
+    { id: LIST_IDS.DEFAULT, name: '我的歌单', list: data.defaultList as LX.Music.MusicInfo[] },
+    { id: LIST_IDS.LOVE, name: '我喜欢', list: data.loveList as LX.Music.MusicInfo[] },
+    ...data.userList.map(l => ({ id: l.id, name: l.name, list: l.list as LX.Music.MusicInfo[] })),
+  ]
+  for (const item of targets) {
+    const list = item.list
+    if (!Array.isArray(list)) continue
+    const dead = list.filter(isGoneRef).map((m: any) => m.id as string)
+    if (!dead.length) continue
+    await applyAction(userName, { action: 'list_music_remove', data: { listId: item.id, ids: dead } })
+    touched.push(item.name || item.id)
+  }
+  // 最近播放是 Web 端本地记录，不参与同步
+  const played = loadPlayed(userName)
+  const next = played.filter(id => !gone.has(id))
+  if (next.length != played.length) {
+    playedCache.set(userName, next)
+    flushPlayed(userName)
+  }
+  return touched
+}
 
 // ---------------------------------------------------------------------------
 // 最近播放（Web 端本地记录，每用户一份，不参与同步）

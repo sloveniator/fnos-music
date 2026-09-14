@@ -7,11 +7,19 @@ export class ListDataManage {
   userLists: LX.List.UserListInfo[] = []
   allMusicList = new Map<string, LX.Music.MusicInfo[]>()
 
+  /**
+   * 首次快照加载完成的信号。
+   * 构造函数里的加载是 fire-and-forget，此前没有任何可等待的信号，于是
+   * 「刚启动服务 / 刚创建用户空间」时的第一批读取会拿到空的初始状态——
+   * 表现就是歌单突然「一首都没有」、收藏心形全灭。读取方请 await 它。
+   */
+  readonly ready: Promise<void>
+
   constructor(snapshotDataManage: SnapshotDataManage) {
     this.snapshotDataManage = snapshotDataManage
 
     let listData: LX.Sync.List.ListData | null
-    void this.snapshotDataManage.getSnapshotInfo().then(async(snapshotInfo) => {
+    this.ready = this.snapshotDataManage.getSnapshotInfo().then(async(snapshotInfo) => {
       if (snapshotInfo.latest) listData = await this.snapshotDataManage.getSnapshot(snapshotInfo.latest)
       if (!listData) listData = { defaultList: [], loveList: [], userList: [] }
       this.allMusicList.set(LIST_IDS.DEFAULT, listData.defaultList)

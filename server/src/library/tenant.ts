@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { runScanWithState, type ScanState, type TrackInfo } from './scan'
+import ID3 from 'node-id3'
+import { runScanWithState, trackId, type ScanState, type TrackInfo } from './scan'
 import { hasCachedCover, dropCoverCache } from './cover-cache'
 
 // ---------------------------------------------------------------------------
@@ -239,6 +240,8 @@ const stampName = (p: string, stamp: number): string => {
 
 export interface RemoveTracksResult {
   removed: number
+  /** 实际移出索引的 id（含「文件已不存在」这种只清索引的）——调用方据此清理歌单里的死引用 */
+  removedIds: string[]
   failed: Array<{ id: string, name?: string, reason: string }>
   total: number
   trashDir: string
@@ -282,7 +285,156 @@ export const removeTenantTracks = (rawUser: string, ids: string[]): RemoveTracks
     applyCoverFlags(t)
     persistTenant(t)
   }
-  return { removed: removed.length, failed, total: t.tracks.length, trashDir: TENANT_TRASH_DIRNAME }
+  return { removed: removed.length, removedIds: removed.map(r => r.id), failed, total: t.tracks.length, trashDir: TENANT_TRASH_DIRNAME }
+}
+// ---------------------------------------------------------------------------
+// 重命名 / 编辑标签
+//   - 重命名改的是磁盘文件名，并同步写回 title 标签：列表显示名优先取标签，
+//     只改文件名的话用户会觉得「改了没生效」。
+//   - id 由相对路径决定（scan.trackId），重命名后 id 会变；歌单里的
+//     local_<id> 引用须由调用方迁移（web/playlists.migrateTrackRefs），否则失效。
+//   - 编辑标签走 node-id3 的 update（合并式），未提交的字段（含内嵌封面）原样保留。
+//   - 安全阀与删除一致：只认本人索引中的 id，且文件必须在扫描目录内。
+// ---------------------------------------------------------------------------
+
+/** 安全阀：曲目所属的最深扫描目录；不在任何目录内返回 null */
+const ownerDirOf = (t: TenantState, filePath: string): string | null =>
+  t.settings.dirs.filter(d => !!d).filter(d => isInside(filePath, d)).sort((a, b) => b.length - a.length)[0] ?? null
+
+/** 提交曲目变更：重算 maxMtime（grouping 缓存键）→ 回填封面标记 → 落盘 */
+const commitTracks = (t: TenantState): void => {
+  let max = 0
+  for (const tr of t.tracks) if (tr.mtime > max) max = tr.mtime
+  t.maxMtime = max
+  applyCoverFlags(t)
+  persistTenant(t)
+}
+
+/** 文件名合法化：剔除路径分隔与控制字符，禁止首尾点，缺扩展名时沿用原扩展名 */
+const safeBaseName = (input: string, oldFilePath: string): { base: string, stem: string } => {
+  const raw = String(input ?? '').trim()
+  if (!raw) throw new Error('文件名不能为空')
+  // 路径分隔符一律替换，避免用 ../ 跳出所在目录
+  let name = raw.replace(/[\\/]/g, '_').replace(/[\u0000-\u001f<>:"|?*]/g, '_').trim()
+  name = name.replace(/^\.+/, '').replace(/\.+$/, '').trim()
+  if (!name) throw new Error('文件名不能为空')
+  if (!path.extname(name)) {
+    const oldExt = path.extname(oldFilePath)
+    if (oldExt) name += oldExt
+  }
+  const ext = path.extname(name)
+  const stem = ext ? name.slice(0, -ext.length) : name
+  if (!stem) throw new Error('文件名不能为空')
+  if (Buffer.byteLength(name, 'utf8') > 200) throw new Error('文件名过长（上限 200 字节）')
+  return { base: name, stem }
+}
+
+export interface RenameTrackResult {
+  track: TrackInfo
+  oldId: string
+  newId: string
+  renamed: string
+  tagUpdated: boolean
+  warning?: string
+}
+
+export const renameTenantTrack = (rawUser: string, id: string, newName: string): RenameTrackResult => {
+  const t = loadTenant(rawUser)
+  const tr = t.tracksById.get(String(id))
+  if (!tr) throw new Error('曲目不存在')
+  const owner = ownerDirOf(t, tr.filePath)
+  if (!owner) throw new Error('文件不在该用户曲库目录内')
+  if (!fs.existsSync(tr.filePath)) throw new Error('文件已不存在，请重新扫描曲库后再试')
+  const { base, stem } = safeBaseName(newName, tr.filePath)
+  const dest = path.join(path.dirname(tr.filePath), base)
+  if (dest === tr.filePath) throw new Error('文件名没有变化')
+  if (fs.existsSync(dest)) throw new Error('同目录下已存在同名文件：' + base)
+  fs.renameSync(tr.filePath, dest)
+
+  // 同步 title 标签（仅 mp3）；写标签失败不回滚重命名，如实告知即可
+  let tagUpdated = false
+  let warning: string | undefined
+  if (dest.toLowerCase().endsWith('.mp3')) {
+    try {
+      const r = ID3.update({ title: stem }, dest) as true | Error
+      if (r === true) tagUpdated = true
+      else warning = '文件名已修改，但标签写入失败：' + (r?.message || String(r))
+    } catch (e: any) {
+      warning = '文件名已修改，但标签写入失败：' + (e?.message || String(e))
+    }
+  } else {
+    const fmt = path.extname(dest).replace(/^\./, '').toUpperCase() || '该'
+    warning = '文件名已修改；' + fmt + ' 格式暂不支持写标签，列表显示名可能仍取自原标签'
+  }
+
+  const oldId = tr.id
+  const newRel = path.relative(owner, dest)
+  const newId = trackId(newRel)
+  if (newId !== oldId && t.tracksById.has(newId)) {
+    // 极端情况才可能走到：目标 id 已被曲库中另一曲目占用
+    fs.renameSync(dest, tr.filePath)
+    throw new Error('目标文件名与曲库中已有曲目冲突，请换一个名字')
+  }
+  const st = fs.statSync(dest)
+  const next: TrackInfo = {
+    ...tr,
+    id: newId,
+    filePath: dest,
+    relPath: newRel,
+    size: st.size,
+    mtime: Math.floor(st.mtimeMs),
+    name: stem,
+  }
+  t.tracks = t.tracks.filter(x => x.id !== oldId).concat([next])
+  // 沿用扫描的排序口径，避免重命名后该曲目跳到列表末尾
+  t.tracks.sort((a, b) => a.singer.localeCompare(b.singer) || a.album.localeCompare(b.album) || (a.trackNum ?? 999) - (b.trackNum ?? 999) || a.name.localeCompare(b.name))
+  t.tracksById.delete(oldId)
+  t.tracksById.set(newId, next)
+  commitTracks(t)
+  return { track: next, oldId, newId, renamed: base, tagUpdated, warning }
+}
+
+export interface TrackTagPatch {
+  title?: string
+  artist?: string
+  album?: string
+  year?: string
+  trackNum?: string
+}
+
+export const updateTenantTrackTags = (rawUser: string, id: string, patch: TrackTagPatch): { track: TrackInfo } => {
+  const t = loadTenant(rawUser)
+  const tr = t.tracksById.get(String(id))
+  if (!tr) throw new Error('曲目不存在')
+  if (!ownerDirOf(t, tr.filePath)) throw new Error('文件不在该用户曲库目录内')
+  if (!fs.existsSync(tr.filePath)) throw new Error('文件已不存在，请重新扫描曲库后再试')
+  const ext = path.extname(tr.filePath).replace(/^\./, '').toLowerCase()
+  if (ext !== 'mp3') throw new Error((ext.toUpperCase() || '该') + ' 格式暂不支持写入标签，请用其他工具编辑')
+
+  // 留空 = 不修改；未提交的字段由 node-id3 合并式更新原样保留（含内嵌封面）
+  const tags: Record<string, string> = {}
+  const pick = (v?: string): string => String(v ?? '').trim()
+  if (pick(patch.title)) tags.title = pick(patch.title)
+  if (pick(patch.artist)) tags.artist = pick(patch.artist)
+  if (pick(patch.album)) tags.album = pick(patch.album)
+  if (pick(patch.year)) tags.year = pick(patch.year)
+  if (pick(patch.trackNum)) tags.trackNumber = pick(patch.trackNum)
+  if (!Object.keys(tags).length) throw new Error('没有需要保存的修改')
+
+  const r = ID3.update(tags, tr.filePath) as true | Error
+  if (r !== true) throw new Error('标签写入失败：' + (r?.message || String(r)))
+
+  const st = fs.statSync(tr.filePath)
+  const next: TrackInfo = { ...tr, size: st.size, mtime: Math.floor(st.mtimeMs) }
+  if (tags.title) next.name = tags.title
+  if (tags.artist) next.singer = tags.artist
+  if (tags.album !== undefined) next.album = tags.album
+  if (tags.year !== undefined) next.year = tags.year
+  if (tags.trackNumber !== undefined) next.trackNum = parseInt(tags.trackNumber, 10) || null
+  t.tracks = t.tracks.map(x => (x.id === tr.id ? next : x))
+  t.tracksById.set(tr.id, next)
+  commitTracks(t)
+  return { track: next }
 }
 
 /** 触发该用户的扫描（若已在扫描则忽略） */

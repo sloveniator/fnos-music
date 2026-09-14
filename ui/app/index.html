@@ -148,6 +148,7 @@
 
   <div id="toast" class="toast" hidden></div>
   <div id="dialog" class="dialog" hidden><div class="dialog-box"><h3 id="dlg-title"></h3><input id="dlg-input"><p id="dlg-msg" hidden></p><div class="dlg-btns"><button id="dlg-cancel">取消</button><button id="dlg-ok" class="primary">确定</button></div></div></div>
+<div id="tag-dialog" class="dialog" hidden><div class="dialog-box"><h3>编辑标签</h3><div class="tag-form"><label><span>歌名</span><input id="tag-title" maxlength="200"></label><label><span>歌手</span><input id="tag-artist" maxlength="200"></label><label><span>专辑</span><input id="tag-album" maxlength="200"></label><label><span>年份</span><input id="tag-year" maxlength="10" placeholder="如 2024"></label><label><span>音轨号</span><input id="tag-track" maxlength="6" placeholder="如 3"></label></div><p id="tag-msg" class="tag-hint err" hidden></p><p class="tag-hint">留空表示不修改该字段；仅 mp3 支持写入标签</p><div class="dlg-btns"><button id="tag-cancel">取消</button><button id="tag-ok" class="primary">保存</button></div></div></div>
 
 <script src="assets/app.js"></script>
 </body>

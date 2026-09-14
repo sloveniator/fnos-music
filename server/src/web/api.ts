@@ -3,7 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { serveAudio } from '@/library/stream'
 import { extractCover } from '@/library/metadata'
-import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags, startTenantScan, removeTenantTracks } from '@/library/tenant'
+import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags, startTenantScan, removeTenantTracks, renameTenantTrack, updateTenantTrackTags } from '@/library/tenant'
 import { coverCacheStats, readCachedCover, clearCoverCache } from '@/library/cover-cache'
 import { runCoverBackfill, cancelCoverBackfill, coverBackfillState, subscribeCoverBackfill } from '@/library/cover-backfill'
 import {
@@ -14,7 +14,8 @@ import {
 } from './session'
 import {
   createPlaylist, renamePlaylist, removePlaylists, addTrackIds, removeMusicIds,
-  clearPlaylist, toggleLove, recordPlayed, getPlayed, overwritePlaylistOrder,
+  clearPlaylist, toggleLove, recordPlayed, getPlayed, overwritePlaylistOrder, migrateTrackRefs, dropTrackRefs,
+  getListDataStable,
 } from './playlists'
 import { getUserSpace } from '@/user'
 import { LIST_IDS } from '@/constants'
@@ -82,15 +83,25 @@ const parseJson = (raw: string): any => {
   }
 }
 
-/** MusicInfo → 带 NAS trackId 的 Web 视图（前端据此取封面/流） */
-const toWebMusic = (m: any) => ({
-  ...m,
-  trackId: m.source == 'local' && typeof m.id == 'string' && m.id.startsWith('local_') ? m.id.substring(6) : null,
-})
+/**
+ * MusicInfo → 带 NAS trackId 的 Web 视图（前端据此取封面/流）
+ * missing：source=local 但曲库里已经没有这个 id（文件被删/改名/外部移动后重扫）。
+ * 这类是「死引用」，前端要把它显示成不可播放的幽灵行、只给「从歌单移除」，
+ * 否则用户点「删除」只会得到「曲目不存在」。
+ */
+const toWebMusic = (userName: string, m: any) => {
+  const trackId = m.source == 'local' && typeof m.id == 'string' && m.id.startsWith('local_') ? m.id.substring(6) : null
+  return {
+    ...m,
+    trackId,
+    missing: m.source == 'local' && !(trackId && getTenantTrack(userName, trackId)),
+  }
+}
 
 const playlistSummary = async(userName: string) => {
-  const userSpace = getUserSpace(userName)
-  const data = await userSpace.listManage.getListData()
+  // 走稳定读取：刚启动/刚建用户空间时 getListData() 可能读到空列表，
+  // 会让侧栏歌单数显示 0、点进去「一首都没有」
+  const data = await getListDataStable(userName)
   return [
     { id: LIST_IDS.DEFAULT, name: '我的歌单', count: data.defaultList.length, fixed: true },
     { id: LIST_IDS.LOVE, name: '我喜欢', count: data.loveList.length, fixed: true },
@@ -610,7 +621,49 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: unknown) => String(x)) : []
     if (!ids.length) return fail(res, 400, '请提供要删除的曲目'), true
     if (ids.length > 500) return fail(res, 400, '单次最多删除 500 首'), true
-    ok(res, removeTenantTracks(userName, ids))
+    const r = removeTenantTracks(userName, ids)
+    // 曲目没了，歌单/收藏里的 local_<id> 就是死引用，必须一并摘掉：
+    // 否则歌单里会留一行「看着能点、点了只会报曲目不存在」的幽灵曲目。
+    const playlists = r.removedIds.length
+      ? await dropTrackRefs(userName, r.removedIds)
+        .catch((err: any) => { console.error('drop track refs error:', err?.message); return [] as string[] })
+      : []
+    ok(res, { ...r, playlists })
+    return true
+  }
+
+  // 重命名曲目文件。曲目 id 由相对路径决定，改完文件名 id 就变了，所以歌单/
+  // 我喜欢/最近播放里存的 local_<id> 必须一并迁移，否则这些引用会变成失效项。
+  if (method == 'POST' && p == '/web/api/tracks/rename') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const id = String(body?.id ?? '')
+    const name = String(body?.name ?? '')
+    if (!id) return fail(res, 400, '请提供曲目'), true
+    if (!name.trim()) return fail(res, 400, '请提供新的文件名'), true
+    let r: ReturnType<typeof renameTenantTrack>
+    try { r = renameTenantTrack(userName, id, name) } catch (e: any) { return fail(res, 400, e?.message || '重命名失败'), true }
+    const playlists = await migrateTrackRefs(userName, r.oldId, r.newId)
+      .catch((err: any) => { console.error('migrate track refs error:', err?.message); return [] as string[] })
+    ok(res, {
+      track: { ...r.track, filePath: undefined },
+      renamed: r.renamed,
+      tagUpdated: r.tagUpdated,
+      warning: r.warning,
+      playlists,
+    })
+    return true
+  }
+  // 编辑标签：node-id3 的 update 是合并式写入，未提交的字段（含内嵌封面）原样保留
+  if (method == 'POST' && p == '/web/api/tracks/tags') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const id = String(body?.id ?? '')
+    if (!id) return fail(res, 400, '请提供曲目'), true
+    const tags = body?.tags && typeof body.tags == 'object' ? body.tags : {}
+    let r: ReturnType<typeof updateTenantTrackTags>
+    try { r = updateTenantTrackTags(userName, id, tags) } catch (e: any) { return fail(res, 400, e?.message || '保存失败'), true }
+    ok(res, { track: { ...r.track, filePath: undefined } })
     return true
   }
   if (method == 'GET' && p == '/web/api/albums') {
@@ -818,8 +871,7 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
   }
   if (method == 'GET' && (seg = /^\/web\/api\/playlists\/([\w-]{1,64})$/.exec(p))) {
     const listId = seg[1]
-    const userSpace = getUserSpace(userName)
-    const data = await userSpace.listManage.getListData()
+    const data = await getListDataStable(userName)
     let musics: any[] | null = null
     let name = ''
     if (listId == LIST_IDS.DEFAULT) {
@@ -836,7 +888,7 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
       }
     }
     if (!musics) return fail(res, 404, '歌单不存在'), true
-    ok(res, { id: listId, name, tracks: musics.map(toWebMusic) })
+    ok(res, { id: listId, name, tracks: musics.map(m => toWebMusic(userName, m)) })
     return true
   }
   if (method == 'POST' && p == '/web/api/playlists') {
@@ -971,9 +1023,9 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
   if (method == 'GET' && p == '/web/api/love-ids') {
-    const userSpace = getUserSpace(userName)
-    const love = await userSpace.listManage.listDataManage.getListMusics(LIST_IDS.LOVE)
-    ok(res, { ids: love.map(m => m.id) })
+    // 同样走稳定读取：否则冷启动时返回空集合，收藏心形会全部显示成未收藏
+    const data = await getListDataStable(userName)
+    ok(res, { ids: data.loveList.map(m => m.id) })
     return true
   }
 

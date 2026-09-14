@@ -331,10 +331,12 @@
         lb.classList.toggle('loved', d.loved)
       } catch (err) { toast(err.message, true) }
     }
-    love.appendChild(lb)
+    // 死引用（歌单里指向已被删/改名的曲库文件）：灰显，只留菜单里的「从歌单移除」
+    love.appendChild(t.missing ? el('span', 'iconbtn', '·') : lb)
+    if (t.missing) tr.classList.add('disabled')
     tr.appendChild(love)
     tr.appendChild(el('td', 'dur', t.interval || ''))
-    if (opts.order) appendOrderBtns(tr, t, musics, idx)
+    if (opts.order && !t.missing) appendOrderBtns(tr, t, musics, idx)
     if (opts.menu) {
       const acts = el('td', 'acts')
       const wrap = el('span', 'more-wrap')
@@ -343,6 +345,10 @@
       wrap.appendChild(mb)
       acts.appendChild(wrap)
       tr.appendChild(acts)
+    }
+    if (t.missing) {
+      tr.onclick = () => toast('「' + t.name + '」的文件已不在曲库，用右侧「…」→「从歌单移除」清理', true)
+      return tr
     }
     tr.ondblclick = () => player.play(musics, idx)
     tr.onclick = () => { player.play(musics, idx) }
@@ -436,26 +442,37 @@
       }
       menu.appendChild(b)
     }
+    const mount = () => {
+      const wrap = btn.parentElement
+      wrap.appendChild(menu)
+      const off = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', off) } }
+      setTimeout(() => document.addEventListener('click', off), 0)
+    }
+    // 死引用（曲库已无这首）：播放/收藏/下载/删除全是死路，只给「从歌单移除」
+    if (track.missing) {
+      if (track._listId && track._musicId) {
+        mk('从歌单移除', async () => {
+          try {
+            await api('/api/playlists/' + encodeURIComponent(track._listId) + '/remove', { method: 'POST', body: { musicIds: [track._musicId] } })
+            toast('已从歌单移除')
+            route()
+            refreshPlaylists()
+          } catch (e) { toast(e.message, true) }
+        })
+      } else {
+        menu.appendChild(el('div', 'menu-note', '该曲目已不在曲库'))
+      }
+      mount()
+      return
+    }
     mk('立即播放', () => player.play(musics, idx))
     mk('下一首播放', () => { player.insertNext(track); toast('已插入下一首') })
     mk('加入我喜欢', async () => {
       if (loveIds.has('local_' + track.id)) return toast('已在我喜欢中')
       try { await api('/api/love/toggle', { method: 'POST', body: { trackId: track.id } }); loveIds.add('local_' + track.id); toast('已收藏'); route() } catch (e) { toast(e.message, true) }
     })
-    mk('添加到歌单…', async () => {
-      await refreshPlaylists()
-      const targets = playlistsCache.filter(p => p.id !== 'love')
-      if (!targets.length) return toast('还没有歌单，先在侧栏新建一个')
-      const names = targets.map((p, i) => (i + 1) + '. ' + p.name).join('\n')
-      const input = await prompt2('添加到歌单（输入序号）\n' + names, '1')
-      const n = parseInt(input || '0', 10) - 1
-      if (n < 0 || n >= targets.length) return
-      try {
-        await api('/api/playlists/' + encodeURIComponent(targets[n].id) + '/add', { method: 'POST', body: { trackIds: [track.id] } })
-        toast('已添加到「' + targets[n].name + '」')
-        refreshPlaylists()
-      } catch (e) { toast(e.message, true) }
-    })
+    // 歌单目前只能存曲库内的曲目，所以只对本地曲目显示（与「删除…」一致）
+    if (!track.online && track.id) mk('添加到歌单…', () => askAddToPlaylist([track]))
     // 下载到本地：
     //   本地曲目（track.id）走 /web/media/download/<id>
     //   在线曲目（kind==='online' 且有 rid）走 /web/media/online/<source>/<rid>?dl=1
@@ -464,12 +481,14 @@
     if (canDl) {
       mk('下载…', (pt) => askDownload([track], pt))
     }
+    // 重命名 / 编辑标签：改的是磁盘文件名与内嵌标签，只对本地曲库曲目有意义
+    if (!track.online && track.id) {
+      mk('重命名…', () => askRenameTrack(track))
+      mk('编辑标签…', () => askEditTags(track))
+    }
     // 删除：仅本地曲库曲目（在线曲目属于音源，服务端无对应文件）
     if (!track.online && track.id) mk('删除…', () => askDeleteTracks([track]))
-    const wrap = btn.parentElement
-    wrap.appendChild(menu)
-    const off = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', off) } }
-    setTimeout(() => document.addEventListener('click', off), 0)
+    mount()
   }
 
   // 无内嵌封面时的占位配色（按标题哈希取色，同一专辑颜色稳定）
@@ -859,6 +878,7 @@
     // 勾选列一直存在，但此前没有任何批量操作接上去；补齐「下载/删除选中」
     btns.appendChild(selDlBtn())
     btns.appendChild(selDelBtn())
+    btns.appendChild(selPlBtn())
     head.appendChild(meta); head.appendChild(btns)
     v.appendChild(head)
     tracksPage = { page: 0, size: 60, total: 0, list: [], loading: false }
@@ -1181,11 +1201,14 @@ kuwo.cn/playlist_detail/280301309</pre>
       name: m.name, singer: m.singer, album: (m.meta && m.meta.albumName) || '',
       interval: m.interval,
       online: !m.trackId, // 非 NAS 曲库曲目（第三方音源）：Web 不可播
-      hasCover: !!m.trackId,
+      // 曲库里已没有这个 id（文件被删/改名/外部移动后重扫）：引用失效，只能从歌单移除
+      missing: !!m.missing,
+      hasCover: !!m.trackId && !m.missing,
       _musicId: m.id,
       _listId: id,
     }))
-    const playable = tracks.filter(t => !t.online)
+    const playable = tracks.filter(t => !t.online && !t.missing)
+    const deadCount = tracks.filter(t => t.missing).length
     const rmBtn = el('button', 'btn')
     rmBtn.textContent = '🗑 删除歌单'
     rmBtn.onclick = async () => {
@@ -1221,7 +1244,10 @@ kuwo.cn/playlist_detail/280301309</pre>
     if (!isFixed) extra.push(rnBtn)
     extra.push(clrBtn)
     if (!isFixed) extra.push(rmBtn)
-    const metaText = tracks.length + ' 首' + (playable.length < tracks.length ? '（' + (tracks.length - playable.length) + ' 首在线源歌曲需手机端播放）' : '')
+    const thirdCount = tracks.length - playable.length - deadCount
+    const metaText = tracks.length + ' 首'
+      + (thirdCount > 0 ? '（' + thirdCount + ' 首在线源歌曲需手机端播放）' : '')
+      + (deadCount > 0 ? '（' + deadCount + ' 首引用已失效，可从行内 × 移除）' : '')
     const shuf = shuffleBtn('随机播放')
     shuf.onclick = () => { if (playable.length) player.shufflePlay(playable); else toast('歌单里没有可在网页端播放的曲目', true) }
     v.appendChild(heroBlock(tracks.find(hasCoverOf), d.name, metaText, () => playable.length && player.play(playable, 0), [shuf, ...extra]))
@@ -1230,14 +1256,16 @@ kuwo.cn/playlist_detail/280301309</pre>
       return
     }
     const table = trackTable(tracks, { menu: true, order: !isFixed, autoScroll: true })
-    if (!isFixed) {
-      // 歌单内支持移除
+    // 内置歌单（我的歌单/我喜欢）平时不给移除按钮，但失效引用必须能清掉：
+    // 否则它是一行永远删不掉的幽灵曲目（点「删除」只会得到「曲目不存在」）
+    if (!isFixed || deadCount > 0) {
       const tbody = table.querySelector('tbody')
       tbody.querySelectorAll('tr').forEach((tr, i) => {
+        if (isFixed && !tracks[i].missing) return
         const acts = tr.querySelector('.acts .more-wrap')
         if (!acts) return
         const b = el('button', 'iconbtn', '×')
-        b.title = '从歌单移除'
+        b.title = tracks[i].missing ? '从歌单移除此失效引用' : '从歌单移除'
         b.style.marginLeft = '4px'
         b.onclick = async (e) => {
           e.stopPropagation()
@@ -1376,6 +1404,12 @@ kuwo.cn/playlist_detail/280301309</pre>
       const sp = b.querySelector('span')
       if (sp) sp.textContent = '删除选中 (' + nLocal + ')'
     })
+    // 加入歌单同样只认本地曲目，与删除共用一个计数
+    document.querySelectorAll('.pl-sel').forEach(b => {
+      b.disabled = nLocal === 0
+      const sp = b.querySelector('span')
+      if (sp) sp.textContent = '加入歌单 (' + nLocal + ')'
+    })
     const boxes = document.querySelectorAll('.row-sel')
     const hdr = document.querySelector('.all-sel')
     if (hdr) {
@@ -1445,6 +1479,14 @@ kuwo.cn/playlist_detail/280301309</pre>
     }
     return b
   }
+  /** 「加入歌单 (n)」按钮：歌单目前只存曲库内曲目，故与删除共用「本地曲目」计数 */
+  const selPlBtn = (cls) => {
+    const b = el('button', (cls || 'btn mini ghost') + ' pl-sel')
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.6"/><circle cx="16.6" cy="15.5" r="2.6"/></svg><span>加入歌单 (0)</span>'
+    b.disabled = true
+    b.onclick = () => askAddToPlaylist(selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online))
+    return b
+  }
   /**
    * 删除本地曲目。
    * 服务端做的是软删除：文件被移入所在曲库目录下的 .gusi-trash/，并非抹除，
@@ -1465,6 +1507,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     } catch (e) { toast(e.message, true); return }
     if (r.removed) {
       let msg = '已删除 ' + r.removed + ' 首（移入 ' + r.trashDir + ' 回收站）'
+      if (r.playlists && r.playlists.length) msg += '，并已从「' + r.playlists.join('」「') + '」移除引用'
       if (r.failed && r.failed.length) msg += '，' + r.failed.length + ' 首已跳过'
       toast(msg)
     } else {
@@ -1473,6 +1516,94 @@ kuwo.cn/playlist_detail/280301309</pre>
     }
     selCtx.sel.clear()
     if (onDone) onDone(r); else route()
+  }
+  /** 选一个目标歌单（排除内置的「我喜欢」）；取消返回 null */
+  async function pickPlaylist() {
+    await refreshPlaylists()
+    const targets = playlistsCache.filter(p => p.id !== 'love')
+    if (!targets.length) { toast('还没有歌单，先在侧栏新建一个', true); return null }
+    const names = targets.map((p, i) => (i + 1) + '. ' + p.name).join('\n')
+    const input = await prompt2('添加到歌单（输入序号）\n' + names, '1')
+    const n = parseInt(input || '0', 10) - 1
+    if (n < 0 || n >= targets.length) return null
+    return targets[n]
+  }
+  /** 把若干本地曲目加入歌单；行内单曲入口与页头批量入口共用 */
+  async function askAddToPlaylist(items) {
+    const list = (items || []).filter(t => !t.online && t.id)
+    if (!list.length) { toast('请先勾选要加入歌单的本地歌曲', true); return }
+    const target = await pickPlaylist()
+    if (!target) return
+    try {
+      await api('/api/playlists/' + encodeURIComponent(target.id) + '/add', { method: 'POST', body: { trackIds: list.map(t => String(t.id)) } })
+      toast('已把 ' + list.length + ' 首加入「' + target.name + '」')
+      refreshPlaylists()
+    } catch (e) { toast(e.message, true) }
+  }
+  /**
+   * 重命名曲目文件。服务端会把新名字同步写回 title 标签（列表显示名优先取标签，
+   * 只改文件名的话看着像没生效），并迁移歌单/我喜欢/最近播放里对旧 id 的引用。
+   */
+  async function askRenameTrack(track) {
+    const def = track.name || ''
+    const name = await prompt2('重命名（改文件名，并同步写回标题标签）', def, '重命名')
+    if (!name || name === def) return
+    let r
+    try {
+      r = await api('/api/tracks/rename', { method: 'POST', body: { id: track.id, name } })
+    } catch (e) { toast(e.message, true); return }
+    const parts = ['已重命名为「' + (r.renamed || name) + '」']
+    const pls = r.playlists || []
+    if (pls.length) parts.push('已同步 ' + pls.length + ' 个歌单的引用')
+    if (r.warning) toast(parts.join('，') + '；' + r.warning, true)
+    else toast(parts.join('，'))
+    route()
+  }
+  /** 标签编辑表单：返回各字段值对象，取消返回 null */
+  function tagForm(init) {
+    return new Promise((resolve) => {
+      const box = $('#tag-dialog')
+      const map = { title: '#tag-title', artist: '#tag-artist', album: '#tag-album', year: '#tag-year', trackNum: '#tag-track' }
+      Object.keys(map).forEach(k => { $(map[k]).value = init[k] || '' })
+      const msg = $('#tag-msg')
+      msg.hidden = true
+      box.hidden = false
+      $('#tag-title').focus()
+      $('#tag-title').select()
+      const done = (v) => {
+        box.hidden = true
+        $('#tag-ok').onclick = $('#tag-cancel').onclick = null
+        resolve(v)
+      }
+      $('#tag-ok').onclick = () => {
+        const out = {}
+        Object.keys(map).forEach(k => { out[k] = $(map[k]).value.trim() })
+        // 留空 = 不修改；全空则没有可提交的内容
+        if (!Object.keys(out).some(k => out[k])) {
+          msg.textContent = '请至少填写一项（留空表示不修改）'
+          msg.hidden = false
+          return
+        }
+        done(out)
+      }
+      $('#tag-cancel').onclick = () => done(null)
+    })
+  }
+  /** 编辑标签：留空 = 不修改，服务端合并式写入，内嵌封面等未提交字段原样保留 */
+  async function askEditTags(track) {
+    const v = await tagForm({
+      title: track.name || '',
+      artist: (track.singer && track.singer !== '未知歌手') ? track.singer : '',
+      album: (!track.album || track.album === '未知专辑') ? '' : track.album,
+      year: track.year || '',
+      trackNum: track.trackNum ? String(track.trackNum) : '',
+    })
+    if (!v) return
+    try {
+      await api('/api/tracks/tags', { method: 'POST', body: { id: track.id, tags: v } })
+      toast('标签已保存')
+    } catch (e) { toast(e.message, true); return }
+    route()
   }
   // 在线集合（专辑/歌单）详情缓存：{ source,type,id } -> OnlineCollectionDetail
   let onlColl = null
