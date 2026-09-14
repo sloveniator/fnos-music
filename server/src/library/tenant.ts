@@ -216,6 +216,75 @@ const persistTenant = (t: TenantState): void => {
     .catch(err => console.error(`[tenant-library:${t.safeUser}] persist failed:`, err?.message ?? err))
 }
 
+// ---------------------------------------------------------------------------
+// 曲目删除：软删除（文件移入曲库根下的 .gusi-trash/，可人工恢复）
+//   安全阀 1：只接受本用户索引里已存在的 id（前端无法传任意路径）
+//   安全阀 2：文件必须落在该用户的某个扫描目录内，否则跳过
+//   回收站目录以 . 开头 —— scan.ts 会跳过所有点目录，故不会被重新扫回索引
+// ---------------------------------------------------------------------------
+
+/** 回收站目录名（点开头 = 扫描器不进入） */
+export const TENANT_TRASH_DIRNAME = '.gusi-trash'
+
+const isInside = (child: string, parent: string): boolean => {
+  const rel = path.relative(parent, child)
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+
+/** 同名冲突时在扩展名前插时间戳，避免覆盖回收站里的旧文件 */
+const stampName = (p: string, stamp: number): string => {
+  const ext = path.extname(p)
+  return ext ? p.slice(0, -ext.length) + '.' + stamp + ext : p + '.' + stamp
+}
+
+export interface RemoveTracksResult {
+  removed: number
+  failed: Array<{ id: string, name?: string, reason: string }>
+  total: number
+  trashDir: string
+}
+
+export const removeTenantTracks = (rawUser: string, ids: string[]): RemoveTracksResult => {
+  const t = loadTenant(rawUser)
+  const dirs = t.settings.dirs.filter(d => !!d)
+  const removed: TrackInfo[] = []
+  const failed: RemoveTracksResult['failed'] = []
+  for (const raw of ids) {
+    const id = String(raw)
+    const tr = t.tracksById.get(id)
+    if (!tr) { failed.push({ id, reason: '曲目不存在' }); continue }
+    // 取最深匹配的扫描目录作为该文件的归属根
+    const owner = dirs.filter(d => isInside(tr.filePath, d)).sort((a, b) => b.length - a.length)[0]
+    if (!owner) { failed.push({ id, name: tr.name, reason: '文件不在该用户曲库目录内，已跳过' }); continue }
+    if (!fs.existsSync(tr.filePath)) {
+      // 文件已被外部删除：仅清理索引，仍算删除成功
+      removed.push(tr)
+      failed.push({ id, name: tr.name, reason: '文件已不存在（已清理索引）' })
+      continue
+    }
+    try {
+      const dest = path.join(owner, TENANT_TRASH_DIRNAME, path.relative(owner, tr.filePath))
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.renameSync(tr.filePath, fs.existsSync(dest) ? stampName(dest, Date.now()) : dest)
+      removed.push(tr)
+    } catch (e) {
+      failed.push({ id, name: tr.name, reason: (e as Error).message })
+    }
+  }
+  if (removed.length) {
+    const gone = new Set(removed.map(r => r.id))
+    t.tracks = t.tracks.filter(x => !gone.has(x.id))
+    for (const id of gone) t.tracksById.delete(id)
+    // maxMtime 是 grouping 的缓存键，删除后必须重算，否则专辑/歌手分组不刷新
+    let max = 0
+    for (const tr of t.tracks) if (tr.mtime > max) max = tr.mtime
+    t.maxMtime = max
+    applyCoverFlags(t)
+    persistTenant(t)
+  }
+  return { removed: removed.length, failed, total: t.tracks.length, trashDir: TENANT_TRASH_DIRNAME }
+}
+
 /** 触发该用户的扫描（若已在扫描则忽略） */
 export const startTenantScan = (rawUser: string): { accepted: boolean, reason?: string, scanState: ScanState } => {
   const t = loadTenant(rawUser)

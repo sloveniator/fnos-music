@@ -10,6 +10,7 @@
     shuffle: '<svg viewBox="0 0 24 24"><path d="M3 7h3.6c1.5 0 2.9.8 3.6 2.1l1.5 2.7c.7 1.3 2.1 2.1 3.6 2.1H21"/><path d="M17.5 4.5 21 7l-3.5 2.5"/><path d="M3 17h3.6c1.5 0 2.9-.8 3.6-2.1l1.5-2.7c.7-1.3 2.1-2.1 3.6-2.1H21"/><path d="M17.5 14.5 21 17l-3.5 2.5"/></svg>',
     dl: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.2 7l.9 12c.05.66.6 1.17 1.26 1.17h7.28c.66 0 1.21-.51 1.26-1.17l.9-12"/><path d="M10.3 10.8v6.2"/><path d="M13.7 10.8v6.2"/></svg>',
   }
   const $ = (s) => document.querySelector(s)
   // 网关前缀自适应：页面部署在 <base>/ 下（'/' → ''；'/app/xxx/' → '/app/xxx'）
@@ -217,8 +218,12 @@
     const [pathPart, queryPart] = hash.substring(2).split('?')
     const seg = pathPart.split('/')
     const fn = routes[seg[0]]
-    const view = $('#view')
-    view.innerHTML = ''
+    // 每次导航都换成全新节点：上一页未完成的异步渲染持有的是旧节点引用，
+    // 其后续 append 会落在已脱离文档的节点上，不再串进新页面
+    //（此前首页数据晚到时会把自己的区块混进当前页）
+    const oldView = $('#view')
+    const view = oldView.cloneNode(false)
+    oldView.replaceWith(view)
     // 路由切换淡入动画
     view.classList.remove('route-in')
     void view.offsetWidth // 强制 reflow 重启动画
@@ -459,6 +464,8 @@
     if (canDl) {
       mk('下载…', (pt) => askDownload([track], pt))
     }
+    // 删除：仅本地曲库曲目（在线曲目属于音源，服务端无对应文件）
+    if (!track.online && track.id) mk('删除…', () => askDeleteTracks([track]))
     const wrap = btn.parentElement
     wrap.appendChild(menu)
     const off = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', off) } }
@@ -849,9 +856,14 @@
     btnAll.onclick = () => { if (tracksPage.list.length) player.play(tracksPage.list, 0); else toast('暂无曲目', true) }
     btnShuf.onclick = () => { if (tracksPage.list.length) player.shufflePlay(tracksPage.list); else toast('暂无曲目', true) }
     btns.appendChild(btnAll); btns.appendChild(btnShuf)
+    // 勾选列一直存在，但此前没有任何批量操作接上去；补齐「下载/删除选中」
+    btns.appendChild(selDlBtn())
+    btns.appendChild(selDelBtn())
     head.appendChild(meta); head.appendChild(btns)
     v.appendChild(head)
     tracksPage = { page: 0, size: 60, total: 0, list: [], loading: false }
+    // 本页此前从未绑定多选上下文，勾选框形同虚设（批量按钮读不到列表）
+    initSel([])
     const table = trackTable([], { menu: true, autoScroll: true })
     const tbody = table.querySelector('tbody')
     const more = el('button', 'load-more', '加载更多')
@@ -867,6 +879,7 @@
         tracksPage.list = tracksPage.list.concat(d.tracks)
         tbody.innerHTML = ''
         tracksPage.list.forEach((t, i) => tbody.appendChild(trackRow(t, tracksPage.list, i, { menu: true })))
+        rebindSel(tracksPage.list)
         more.hidden = tracksPage.list.length >= d.total
         more.textContent = '加载更多（已加载 ' + tracksPage.list.length + ' / ' + d.total + '）'
         meta.textContent = '共 ' + d.total + ' 首 · 已加载 ' + tracksPage.list.length
@@ -1342,6 +1355,12 @@ kuwo.cn/playlist_detail/280301309</pre>
     selCtx = { list: rows || [], sel: new Set() }
     setTimeout(syncSel, 0)
   }
+  /**
+   * 列表原地扩容/刷新时重新绑定引用，保留已勾选项。
+   * initSel 会清空选中，只适合切换视图；而 list.concat() 会产生新数组，
+   * 不重绑的话批量按钮的 filter 会落在旧数组上（表现为「勾了却说没勾」）。
+   */
+  const rebindSel = (rows) => { selCtx.list = rows || []; syncSel() }
   const selRid = (t) => String(t.rid || t.id || '')
   const syncSel = () => {
     const n = selCtx.sel.size
@@ -1349,6 +1368,13 @@ kuwo.cn/playlist_detail/280301309</pre>
       b.disabled = n === 0
       const sp = b.querySelector('span')
       if (sp) sp.textContent = '下载选中 (' + n + ')'
+    })
+    // 删除只对本地曲目有效（在线曲目属于音源，删不了），故单独计数
+    const nLocal = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online).length
+    document.querySelectorAll('.del-sel').forEach(b => {
+      b.disabled = nLocal === 0
+      const sp = b.querySelector('span')
+      if (sp) sp.textContent = '删除选中 (' + nLocal + ')'
     })
     const boxes = document.querySelectorAll('.row-sel')
     const hdr = document.querySelector('.all-sel')
@@ -1406,6 +1432,47 @@ kuwo.cn/playlist_detail/280301309</pre>
       askDownload(asOnlineRows(items), b)
     }
     return b
+  }
+  /** 「删除选中 (n)」按钮：只对本地曲目生效（在线曲目属于音源，删不了） */
+  const selDelBtn = (cls) => {
+    const b = el('button', (cls || 'btn mini ghost') + ' del-sel')
+    b.innerHTML = SVG.trash + '<span>删除选中 (0)</span>'
+    b.disabled = true
+    b.onclick = () => {
+      const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online)
+      if (!items.length) { toast('请先勾选要删除的本地歌曲', true); return }
+      askDeleteTracks(items)
+    }
+    return b
+  }
+  /**
+   * 删除本地曲目。
+   * 服务端做的是软删除：文件被移入所在曲库目录下的 .gusi-trash/，并非抹除，
+   * 所以文案如实说明「可从 NAS 找回」，而不是含糊的「已删除」。
+   */
+  async function askDeleteTracks(items, onDone) {
+    if (!items || !items.length) return
+    const head = items.slice(0, 3).map(t => '「' + t.name + '」').join('、')
+    const rest = items.length > 3 ? ' 等 ' + items.length + ' 首' : ''
+    const okDel = await confirm2(
+      '删除 ' + items.length + ' 首歌曲',
+      head + rest + ' —— 文件将移入曲库目录下的 .gusi-trash 回收站（可从 NAS 手动找回）。'
+    )
+    if (!okDel) return
+    let r
+    try {
+      r = await api('/api/tracks/delete', { method: 'POST', body: { ids: items.map(t => t.id) } })
+    } catch (e) { toast(e.message, true); return }
+    if (r.removed) {
+      let msg = '已删除 ' + r.removed + ' 首（移入 ' + r.trashDir + ' 回收站）'
+      if (r.failed && r.failed.length) msg += '，' + r.failed.length + ' 首已跳过'
+      toast(msg)
+    } else {
+      const why = (r.failed && r.failed[0] && r.failed[0].reason) || '未知原因'
+      toast('未能删除：' + why, true)
+    }
+    selCtx.sel.clear()
+    if (onDone) onDone(r); else route()
   }
   // 在线集合（专辑/歌单）详情缓存：{ source,type,id } -> OnlineCollectionDetail
   let onlColl = null
@@ -1491,7 +1558,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       ostate.total = d.total
       if (isColl) {
         ostate.list = ostate.page === 1 ? d.list : ostate.list.concat(d.list)
-        if (ostate.page === 1) initSel(ostate.list)
+        if (ostate.page === 1) initSel(ostate.list); else rebindSel(ostate.list)
         paintCollectionGrid(container)
       } else {
         const rows = d.list.map(x => ({
@@ -1501,7 +1568,7 @@ kuwo.cn/playlist_detail/280301309</pre>
           interval: x.intervalMs, pic: x.pic,
         }))
         ostate.list = ostate.page === 1 ? rows : ostate.list.concat(rows)
-        if (ostate.page === 1) initSel(ostate.list)
+        if (ostate.page === 1) initSel(ostate.list); else rebindSel(ostate.list)
         paintSearchTable(container)
       }
     } catch (e) { toast(e.message, true) }

@@ -3,7 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { serveAudio } from '@/library/stream'
 import { extractCover } from '@/library/metadata'
-import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags, startTenantScan } from '@/library/tenant'
+import { tenantGroupingSeed, listTenantTracks, getTenantTrack, getTenantTracks, tenantLibraryStats, getTenantScanState, getTenantSettings, saveTenantSettings, safeUserName, refreshCoverFlags, startTenantScan, removeTenantTracks } from '@/library/tenant'
 import { coverCacheStats, readCachedCover, clearCoverCache } from '@/library/cover-cache'
 import { runCoverBackfill, cancelCoverBackfill, coverBackfillState, subscribeCoverBackfill } from '@/library/cover-backfill'
 import {
@@ -601,6 +601,16 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
       page: parseInt(url.searchParams.get('page') ?? '1', 10),
       size: parseInt(url.searchParams.get('size') ?? '50', 10),
     }))
+    return true
+  }
+  // 删除曲目：软删除，文件移入曲库根下 .gusi-trash/（扫描器跳过点目录，不会回流索引）
+  if (method == 'POST' && p == '/web/api/tracks/delete') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: unknown) => String(x)) : []
+    if (!ids.length) return fail(res, 400, '请提供要删除的曲目'), true
+    if (ids.length > 500) return fail(res, 400, '单次最多删除 500 首'), true
+    ok(res, removeTenantTracks(userName, ids))
     return true
   }
   if (method == 'GET' && p == '/web/api/albums') {
