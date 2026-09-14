@@ -571,8 +571,16 @@
     }
     menu.style.position = 'fixed'
     menu.style.right = 'auto'
-    menu.style.top = Math.min(y, Math.max(8, window.innerHeight - menu.offsetHeight - 10)) + 'px'
-    menu.style.left = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 10)) + 'px'
+    // 此刻菜单已挂进 DOM，能量到真实尺寸
+    const mh = menu.offsetHeight, mw = menu.offsetWidth
+    // 锚点在视口下半部（底部播放栏、全屏歌词页）时向上弹，
+    // 否则菜单只会被 clamp 到贴底，压住播放栏点不到
+    if (anchor && anchor.getBoundingClientRect) {
+      const ar = anchor.getBoundingClientRect()
+      if (ar.bottom + 6 + mh > window.innerHeight - 8 && ar.top - 6 - mh > 8) y = ar.top - mh - 6
+    }
+    menu.style.top = Math.max(8, Math.min(y, window.innerHeight - mh - 10)) + 'px'
+    menu.style.left = Math.max(8, Math.min(x, window.innerWidth - mw - 10)) + 'px'
     setTimeout(() => document.addEventListener('click', onDoc, true), 0)
     return menu
   }

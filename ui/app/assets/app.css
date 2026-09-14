@@ -175,6 +175,8 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   box-shadow: 0 16px 44px rgba(0,0,0,.6); backdrop-filter: blur(16px); }
 .menu button { display: block; width: 100%; text-align: left; padding: 10px 13px; border-radius: 9px; font-size: 13px; color: #cdd3e4; }
 .menu button:hover { background: rgba(79,140,255,.16); color: #fff; }
+/* 浮动菜单需盖住播放栏(40)/全屏歌词(50)/模态(60)，但不能越过 dialog(70) */
+.menu.pop { z-index: 65; }
 
 .hero { display: flex; gap: 26px; align-items: flex-end; margin-bottom: 24px; }
 .hero .cover { width: 178px; height: 178px; border-radius: 16px; object-fit: cover; flex-shrink: 0;
