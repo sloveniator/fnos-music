@@ -128,7 +128,22 @@ const post = (o: unknown): void => {
   try { parentPort!.postMessage(o) } catch { /* dying */ }
 }
 
-function buildLx(): any {
+function parseScriptHeader(raw: string): { name: string; description: string; version: string; author: string; homepage: string } {
+  const pick = (key: string): string => {
+    const m = new RegExp('@' + key + '[ \\t]+([^\\r\\n]+)').exec(raw)
+    return m ? m[1].replace(/[*\s]+$/, '').trim() : ''
+  }
+  return {
+    name: pick('name'),
+    description: pick('description'),
+    version: pick('version'),
+    author: pick('author'),
+    homepage: pick('homepage'),
+  }
+}
+
+function buildLx(script: string): any {
+  const scriptMeta = parseScriptHeader(script)
   const EVENT_NAMES = Object.freeze({ request: 'request', inited: 'inited', updateAlert: 'updateAlert' })
   const lxRequest = (url: string, optsIn: any, cb?: (err: Error | null, resp?: any, body?: any) => void): (() => void) => {
     const opts = optsIn || {}
@@ -147,12 +162,12 @@ function buildLx(): any {
         try {
           if (cb.length >= 3) cb(null, resp, parsed)
           else cb(null, resp)
-        } catch (e) { post({ t: 'log', level: 'error', msg: 'script cb error: ' + String((e as Error).message || e) }) }
+        } catch (e) { post({ t: 'log', level: 'error', msg: 'script cb error: ' + errText(e) }) }
       }
     }).catch((err) => {
       if (cancelled) return
       if (typeof cb === 'function') {
-        try { cb(err instanceof Error ? err : new Error(String(err))) } catch { /* ignore */ }
+        try { cb(err instanceof Error ? err : new Error(errText(err))) } catch { /* ignore */ }
       }
     })
     return () => { cancelled = true }
@@ -162,7 +177,14 @@ function buildLx(): any {
     EVENT_NAMES,
     env: 'server',
     version: '2.0.0',
-    currentScriptInfo: Object.freeze({ name: '', version: '', author: '', homepage: '', rawScript: '' }),
+    currentScriptInfo: Object.freeze({
+      name: scriptMeta.name,
+      description: scriptMeta.description,
+      version: scriptMeta.version,
+      author: scriptMeta.author,
+      homepage: scriptMeta.homepage,
+      rawScript: script,
+    }),
     request: lxRequest,
     on: (event: string, handler: any): Promise<void> => {
       if (event === EVENT_NAMES.request) {
@@ -208,7 +230,7 @@ function buildLx(): any {
 
 // ============================== 执行脚本（vm 沙箱） ==============================
 function boot(script: string, sourceId: string): void {
-  const lx = buildLx()
+  const lx = buildLx(script)
   const log = (level: string) => (...args: any[]) => post({ t: 'log', level, msg: args.map((a) => (typeof a === 'object' ? safeStr(a) : String(a))).join(' ') })
   const sandbox: any = {
     lx,
@@ -235,12 +257,24 @@ function boot(script: string, sourceId: string): void {
     vm.runInContext(script, ctx, { timeout: 5000, filename: 'gusi-user-source://' + sourceId + '.js' })
     post({ t: 'scriptBooted' })
   } catch (e) {
-    post({ t: 'sourceError', error: String((e as Error).message || e) })
+    post({ t: 'sourceError', error: errText(e) })
   }
 }
 
 function safeStr(v: any): string {
   try { return JSON.stringify(v) } catch { return String(v) }
+}
+
+/** 提取脚本异常的可读信息。vm 内的 Error 常常 message 为空，且 stack 会夹带
+ *  整行混淆源码；这里只保留 message 与前若干 frame 行，避免上报成 "Error"。 */
+function errText(e: any): string {
+  try {
+    const msg = String((e && e.message) || e || '').trim()
+    const raw = String((e && e.stack) || '')
+    const frames = raw.split('\n').filter((l) => /^\s+at /.test(l)).slice(0, 3).map((l) => l.trim()).join(' | ')
+    const base = msg || 'Error'
+    return frames ? base + '  @ ' + frames : base
+  } catch { return 'unknown error' }
 }
 
 // ============================== invoke ==============================
@@ -266,10 +300,10 @@ function invoke(payload: { requestKey: string; source: string; action: string; i
           post({ t: 'done', requestKey, ok: true, data, ms: Date.now() - t0 })
         }
       },
-      (err: any) => post({ t: 'done', requestKey, ok: false, error: String((err && err.message) || err), ms: Date.now() - t0 }),
+      (err: any) => post({ t: 'done', requestKey, ok: false, error: errText(err), ms: Date.now() - t0 }),
     )
   } catch (e) {
-    post({ t: 'done', requestKey, ok: false, error: String((e as Error).message || e), ms: Date.now() - t0 })
+    post({ t: 'done', requestKey, ok: false, error: errText(e), ms: Date.now() - t0 })
   }
 }
 
@@ -281,7 +315,7 @@ parentPort!.on('message', (msg: any) => {
     else if (msg.t === 'invoke') invoke(msg)
     else if (msg.t === 'ping') post({ t: 'pong' })
   } catch (e) {
-    post({ t: 'sourceError', error: String((e as Error).message || e) })
+    post({ t: 'sourceError', error: errText(e) })
   }
 })
 

@@ -369,6 +369,9 @@ export const setUserSourceEnabled = async (id: string, enabled: boolean): Promis
   const r = getRunner(id)
   const bootErr = await r.ensureBoot()
   if (bootErr) return { ok: false, error: bootErr }
+  // 部分音源要先异步向远端拉配置才会 send(inited)；给宽限，
+  // 否则开启动作会抢在注册之前返回空 capabilities，看起来像"静默失败"。
+  await waitInited(r, 8000)
   return { ok: true, capabilities: r.capabilities }
 }
 
