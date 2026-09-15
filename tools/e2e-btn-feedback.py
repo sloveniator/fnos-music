@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""验证：播放/暂停键改乳白 + 「点按只给即时动画，不留残影」。
+"""验证：播放/暂停键玻璃质感 + 「点按只给即时动画，不留残影」。
+（2026-09-15 前是乳白实心；当轮主人反馈底栏那颗「太突兀」，底栏改成玻璃按键，
+  歌词全屏那颗仍是乳白 —— 断言按这个分工更新。）
 
 覆盖：
-  A 桌面(真 hover)：乳白配色 / 无 accent 蓝紫外发光 / 近黑图标；按压→松手后的计算样式回到基态；
+  A 桌面(真 hover)：底栏玻璃配色 / accent 只剩极淡光晕环 / 亮白图标；按压→松手后的计算样式回到基态；
     hover 只提亮不加阴影，指针移开即无痕。
   B 手机仿真(hover:none)：CDP 强制 :hover，逐个比对按钮/卡片的计算样式与基态是否完全一致
-    （一致 = 点按后不会黏住高亮/位移/阴影）；tap 之后再量一次。
+    （一致 = 点按后不会黏住高亮/位移/阴影）；tap 之后再量一次。歌词全屏乳白不变。
   C 布局回归：底栏不出屏、无横向溢出、播放键 ≥42px 正圆；歌词全屏同款乳白。
 截图证据：tools/shot-milky-*.png
 """
@@ -143,7 +145,7 @@ try:
     with sync_playwright() as p:
         br = p.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox'])
 
-        # ============ A 桌面：乳白配色 + 按压无残留 ============
+        # ============ A 桌面：底栏玻璃配色 + 按压无残留 ============
         print('\n== A 桌面 1280x800（真 hover）==')
         ctx = br.new_context(viewport={'width': 1280, 'height': 800})
         pg = ctx.new_page()
@@ -163,14 +165,18 @@ try:
         base_shadow = d['shadow']
         print('   desktop play: %dx%d %s' % (d['w'], d['h'], d['color']))
 
-        check('A 乳白底：radial 高光 + 暖白渐变', 'radial-gradient' in d['bgImage'] and 'linear-gradient' in d['bgImage'], d['bgImage'][:70] + '…')
-        check('A 底色偏乳白（暖白 RGB 出现在渐变里）',
-              ('255, 253, 249' in d['bgImage'] and '232, 228, 220' in d['bgImage']) or '255, 254, 251' in d['bgImage'],
-              'found' if '255, 253, 249' in d['bgImage'] else 'missing')
-        check('A 不再有 accent 蓝紫外发光', '79, 140, 255' not in d['shadow'] and '124, 92, 255' not in d['shadow'], d['shadow'][:70])
-        check('A 保留柔和暗投影（有 depth）', 'rgba(3, 6, 14' in d['shadow'], d['shadow'][:70])
-        check('A 图标近黑（浅底对比）', d['color'] == 'rgb(27, 32, 43)', d['color'])
-        check('A 图标投影不再是白色重影', 'drop-shadow' in d['iconFilter'], d['iconFilter'])
+        # 2026-09-15 主人反馈「底栏播放键太突兀」：乳白实心 → 玻璃按键（#player .icon-btn.play）。
+        # 歌词全屏那颗仍是乳白，下面 B 段继续盯它。
+        check('A 玻璃底：半透明白渐变 + 细描边（不是乳白实心）',
+              'linear-gradient' in d['bgImage'] and 'rgba(255, 255, 255, 0.19)' in d['bgImage']
+              and '255, 253, 249' not in d['bgImage'], d['bgImage'][:70] + '…')
+        check('A 图标亮白（深色玻璃底上对比稳）', d['color'] == 'rgb(241, 245, 255)', d['color'])
+        check('A accent 只剩极淡光晕环，不是外发光块',
+              'rgba(79, 140, 255, 0.07) 0px 0px 0px 4px' in d['shadow'] and '124, 92, 255' not in d['shadow'],
+              d['shadow'][:70])
+        check('A 保留柔和暗投影（有 depth）', 'rgba(2, 5, 12' in d['shadow'], d['shadow'][:70])
+        check('A 图标投影是深色投影（不是白色重影）', 'drop-shadow' in d['iconFilter'], d['iconFilter'])
+        check('A 1px 半透明高光描边', 'rgba(255, 255, 255, 0.24)' in d['border'], d['border'])
         check('A 仍是正圆、尺寸 ≥42px', d['w'] == d['h'] and d['w'] >= 42 and d['radius'] == '50%', '%dx%d %s' % (d['w'], d['h'], d['radius']))
 
         # hover：只提亮，不加阴影、不改位移
@@ -276,9 +282,11 @@ try:
         play_after = pg.evaluate(SAMPLE, ['#btn-play', PROPS])
         diff = {k: (play_base[k], play_after[k]) for k in PROPS if play_base[k] != play_after[k]}
         check('B tap 播放键后无残留（样式不因点击而停留）', not diff, str(diff)[:140] if diff else '与基态一致')
-        # 乳白配色在手机上同样生效 + 布局
+        # 玻璃配色在手机上同样生效 + 布局
         d = pg.evaluate(PLAY_PROBE)
-        check('B 手机底栏播放键同款乳白', 'radial-gradient' in d['bgImage'] and '79, 140, 255' not in d['shadow'], d['bgImage'][:60] + '…')
+        check('B 手机底栏播放键同款玻璃',
+              'linear-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage']
+              and 'rgba(79, 140, 255, 0.07)' in d['shadow'], d['bgImage'][:60] + '…')
         check('B 手机底栏不出屏', 0 < d['barBottom'] <= d['vh'] + 1, '%d/%d' % (d['barBottom'], d['vh']))
         check('B 手机无横向溢出', d['overflow'] <= 0, 'overflow=%d' % d['overflow'])
         check('B 手机播放键 ≥44px 正圆', d['w'] == d['h'] and d['w'] >= 44, '%dx%d' % (d['w'], d['h']))
@@ -313,7 +321,8 @@ try:
             check('C %s 播放键 ≥42px 正圆' % label, d['w'] == d['h'] and d['w'] >= 42, '%dx%d' % (d['w'], d['h']))
             check('C %s 底栏不出屏 / 无横向溢出' % label, 0 < d['barBottom'] <= d['vh'] + 1 and d['overflow'] <= 0,
                   'bar=%d/%d ovf=%d' % (d['barBottom'], d['vh'], d['overflow']))
-            check('C %s 乳白配色生效' % label, 'radial-gradient' in d['bgImage'] and '79, 140, 255' not in d['shadow'], d['bgImage'][:48] + '…')
+            check('C %s 玻璃配色生效' % label,
+                  'linear-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage'], d['bgImage'][:48] + '…')
             ctx.close()
         br.close()
     print('\n== %d passed, %d failed ==' % (P, F))

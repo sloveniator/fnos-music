@@ -13,6 +13,8 @@
   --danger: #ff5f6d;
   --ok: #3ecf8e;
   --player-h: 78px;
+  /* 底栏离屏幕底边的浮起量：桌面贴边（0），移动端 = 安全区 + 10px 呼吸（见 ≤900px 媒体查询） */
+  --player-lift: 0px;
   --radius: 14px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -282,6 +284,23 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
 .icon-btn.play:active { transform: scale(.92); filter: brightness(.94);
   box-shadow: 0 2px 7px rgba(3,6,14,.4), inset 0 1px 0 rgba(255,255,255,.7),
               inset 0 -2px 6px rgba(122,116,102,.22); }
+/* 2026-09-15 主人反馈「底栏那个播放按钮现在太突兀了」：乳白实心圆盘落在深色玻璃底栏上像贴了张贴纸。
+   底栏（#player）内改为与其它图标同族的玻璃按键：淡白渐变 + 细描边 + 极淡 accent 光晕，图标留白。
+   歌词全屏（#lyric）仍保留乳白实心 —— 那是主人上一次点名要的，不动。 */
+#player .icon-btn.play { color: #f1f5ff;
+  background: linear-gradient(160deg, rgba(255,255,255,.19), rgba(255,255,255,.05));
+  border: 1px solid rgba(255,255,255,.24);
+  box-shadow: 0 6px 18px rgba(2,5,12,.42), 0 0 0 4px rgba(79,140,255,.07),
+              inset 0 1px 0 rgba(255,255,255,.16); }
+#player .icon-btn.play svg { filter: drop-shadow(0 1px 2px rgba(2,5,12,.45)); }
+@media (hover: hover) and (pointer: fine) {
+  #player .icon-btn.play:hover { filter: none;
+    background: linear-gradient(160deg, rgba(255,255,255,.26), rgba(255,255,255,.09));
+    border-color: rgba(255,255,255,.32); }
+}
+#player .icon-btn.play:active { transform: scale(.94); filter: none;
+  background: linear-gradient(160deg, rgba(255,255,255,.14), rgba(255,255,255,.04));
+  box-shadow: 0 3px 10px rgba(2,5,12,.45), inset 0 1px 0 rgba(255,255,255,.12); }
 .seek-row { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 620px; }
 .time { font-size: 11px; color: var(--muted); width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 .seek { flex: 1; height: 5px; border-radius: 99px; background: #232b3d; position: relative; cursor: pointer; }
@@ -440,8 +459,8 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .right { display: none; }
   .np { order: 1; min-width: 0; }
   .ctrls { gap: 2px; flex-shrink: 0; }
-  /* 0016：底栏只留 上一首/播放/下一首/队列，模式键移入歌词全屏 */
-  #btn-mode { display: none; }
+  /* 主人 2026-09-15：模式键必须留在底栏 —— 播放界面缩小成底栏后也要能切「顺序/单曲/随机」，不再只藏在歌词全屏里。窄屏放不下时由下方 ≤480px 的两行布局腾位置。 */
+  .ctrls { gap: 4px; }
   .icon-btn { width: 38px; height: 38px; }
   .icon-btn.play { width: 44px; height: 44px; flex-shrink: 0; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
@@ -490,17 +509,26 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .lf-body p { font-size: 15px; line-height: 2.3; }
   .lf-body p.on { font-size: 18px; }
 
-  /* 播放器底栏：点击信息区展开歌词（交互在 JS 绑定），触控目标 ≥40px */
-  .player { height: calc(var(--player-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  /* 播放器底栏：点击信息区展开歌词（交互在 JS 绑定），触控目标 ≥40px。
+     2026-09-15 主人反馈：底栏贴死屏幕下沿、两行挤在一起不好看 —— 改成离底浮起的圆角胶囊，
+     下边距吃掉安全区再留 10px 呼吸，进度线依旧贴胶囊顶边（e2e 有断言）。 */
+  :root { --player-lift: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+  .player { bottom: var(--player-lift); height: var(--player-h);
+    left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px));
+    padding: 0 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 22px;
+    overflow: hidden; box-shadow: 0 18px 44px rgba(2,5,12,.55), inset 0 1px 0 rgba(255,255,255,.06); }
   .np { flex: 1; cursor: pointer; }
+  /* 单行布局（481~900px）下歌名区撑满左列，收藏/下载才贴到左列右缘，
+     不会像以前那样挤在歌名后、左半条留一大块空档（768px 平板上一眼就能看出歪） */
+  .np-meta { flex: 1 1 auto; }
   .np-art:active { transform: scale(.94); }
   .icon-btn { width: 40px; height: 40px; }
   .icon-btn.play { width: 48px; height: 48px; }
   .ctrls { gap: 2px; }
 
-  /* 队列/弹层安全区 */
-  .queue { bottom: calc(var(--player-h) + env(safe-area-inset-bottom, 0px) + 8px); max-height: 56vh; }
-  .toast { bottom: calc(var(--player-h) + env(safe-area-inset-bottom, 0px) + 18px); max-width: 86vw; text-align: center; }
+  /* 队列/弹层/浮条：跟着底栏一起抬（lift 已含安全区） */
+  .queue { bottom: calc(var(--player-h) + var(--player-lift) + 8px); max-height: 56vh; }
+  .toast { bottom: calc(var(--player-h) + var(--player-lift) + 18px); max-width: 86vw; text-align: center; }
 
   /* 搜索框/历史 chips */
   .search-box input { padding: 12px 16px; }
@@ -758,7 +786,12 @@ img.ph {
 /* ---- 在线音乐三合一：类型 chips / 集合卡片 / 详情 / 导入 ---- */
 .type-chips { margin-bottom: 8px; }
 .type-chips .chip { font-size: 12.5px; padding: 5px 13px; }
+.coll-card { position: relative; }
 .coll-card .cover { position: relative; overflow: hidden; }
+/* 歌单卡角标：该源的详情接口受限，只能看卡片不能展开（别让人点了才发现） */
+.coll-card .coll-lock { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 11px;
+  padding: 2px 7px; border-radius: 999px; color: #e7c98a; background: rgba(0,0,0,.55);
+  border: 1px solid rgba(231,201,138,.35); backdrop-filter: blur(6px); }
 .coll-card .cover svg { width: 46%; height: 46%; position: absolute; inset: 27%; color: #888; }
 .coll-card .cover img { transition: transform .35s ease; }
 .coll-card:hover .cover img { transform: scale(1.06); }
@@ -1051,7 +1084,7 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .topbar #top-title { font-size: 16px; }
   /* 内容起始位置由顶栏高度令牌推导，改顶栏高度不会串位 */
   .main { padding: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 14px) var(--pad-x)
-                   calc(var(--player-h) + 78px); }
+                   calc(var(--player-h) + var(--player-lift) + 68px); }
   /* 抽屉在手机上更宽（好点），退场位移与之等宽 */
   .sidebar { width: min(78vw, 300px); margin-left: calc(-1 * min(78vw, 300px)); }
   .sidebar.open { margin-left: 0; }
@@ -1110,18 +1143,29 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   input[type=checkbox] { width: 18px; height: 18px; }
 }
 
-/* —— 7.5 ≤480px 底栏：不藏按钮，改用「压缩封面 + 收紧间距」把宽度还给歌名 —— */
-/* 主人 2026-09-15 决定：保留收藏/下载，换压缩封面方案 */
+/* —— 7.5 ≤480px 底栏：改两行（信息行 + 控制行）—— */
+/* 主人 2026-09-15 决定：模式键回到缩小的播放条里。
+   算过账：单行要塞「封面 + 歌名 + 收藏 + 下载 + 模式 + 上一曲 + 播放 + 下一曲 + 队列」9 个元素，
+   390px 下歌名只剩 42px（≈3 字）、320px 直接归零 —— 所以窄屏改两行：
+   上行给歌名和收藏/下载，下行给全部传输键（含模式键），谁都不被牺牲。 */
 @media (max-width: 480px) {
-  .player { padding: 0 6px; gap: 4px; }
-  .ctrls { gap: 0; }
-  .np { gap: 6px; }
+  :root { --player-h: 104px; }
+  /* 单列两行：.np 在上、.center（.ctrls）在下；安全区已上移到 --player-lift，这里只留呼吸间距 */
+  .player { grid-template-columns: minmax(0, 1fr); row-gap: 7px; padding: 7px 10px 8px; }
+  .np { order: 1; gap: 8px; }
+  /* 上行铺满：歌名占满剩余宽度，收藏/下载贴右边缘，跟下行的居中控制行对齐观感 */
+  #player .np-meta { flex: 1 1 auto; }
+  .center { order: 2; width: 100%; }
+  .ctrls { gap: 8px; justify-content: center; }
   .np-cover { width: 34px; height: 34px; border-radius: 9px; }
   /* 收藏/下载：压缩但仍守住 34px 触控下限（e2e-responsive.py 的下限断言） */
   #np-love, #np-download { width: 34px; height: 34px; flex-shrink: 0; }
   #np-love svg, #np-download svg { width: 17px; height: 17px; }
-  /* 封面缩小后播放中角标按比例收一档，否则会盖住半个封面 */
-  .np-eq { width: 17px; height: 17px; right: -4px; bottom: -4px; }
+  /* 封面缩小后播放中角标按比例收一档，否则会盖住半个封面。
+     角标原来是实心黑方块，贴在封面上像贴纸 —— 改成半透明玻璃片，跟新底栏质感一致。 */
+  .np-eq { width: 17px; height: 17px; right: -4px; bottom: -4px;
+    background: rgba(10,12,19,.62); backdrop-filter: blur(6px) saturate(1.4);
+    border-color: rgba(255,255,255,.14); }
   .np-eq i { width: 2.5px; }
 }
 
@@ -1149,6 +1193,12 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .page-head .btns .btn { padding: 8px 14px; min-height: 34px; font-size: 13px; }
   .tracks td { padding-top: 8px; padding-bottom: 8px; }
   h2.page { font-size: 19px; }
+}
+
+/* 窄屏横屏（例如 480×320）：底栏仍是 ≤480px 的两行结构，上面那条 58px 会把控制行裁掉
+   （底栏现在带 overflow:hidden，裁掉就是真的看不见了），所以这里把高度还原成两行的值。 */
+@media (max-height: 540px) and (orientation: landscape) and (max-width: 480px) {
+  :root { --player-h: 104px; }
 }
 
 /* —— 9. 横屏刘海安全区（左右） —— */
@@ -1205,7 +1255,7 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(79,140,255,.4); }
 .fm-loading, .fm-empty { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 13px; padding: 22px 0; }
 .fm-unlock { position: fixed; left: 50%; transform: translateX(-50%); z-index: 45; display: none;
-  bottom: calc(var(--player-h) + env(safe-area-inset-bottom, 0px) + 22px);
+  bottom: calc(var(--player-h) + var(--player-lift, 0px) + 22px);
   padding: 11px 20px; border-radius: 999px; font-size: 13px; max-width: 88vw;
   background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
   box-shadow: 0 10px 28px rgba(79,140,255,.42); }
@@ -1294,3 +1344,10 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .share-item-acts { width: 100%; }
   .share-item-acts .btn { flex: 1; }
 }
+
+/* —— 搜索页：一次搜全部平台的合并结果表 —— */
+/* 复用下载中心的 .dl-* 行样式（源下拉/源标签），这里只补这张表的列宽与摘要行 */
+.sr-tbl td.acts { width: auto; text-align: right; white-space: nowrap; }
+.sr-tbl td.acts .iconbtn { margin-left: 8px; }
+.sr-tbl td.acts .iconbtn.dl { margin-left: 2px; }
+.sr-meta { font-size: 12px; color: var(--muted); margin: 2px 0 12px; }

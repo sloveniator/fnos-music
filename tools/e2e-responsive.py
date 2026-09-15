@@ -17,12 +17,75 @@
 """
 import sys
 import json
+import os
+import random
+import shutil
+import string
+import time
+import urllib.error
+import urllib.request
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
+ROOT = '/app/working/workspaces/fnos-music/project/fnos-music'
+DATA = os.path.join(ROOT, 'server', 'data')
+FIX_DIR = '/tmp/gusi-test-music/周杰伦/范特西'
+# 主人账号的曲库是有意清空的（自己下载的歌自己放），底栏根本不会出现 →
+# 所以这里自建一个临时账号 + 塞两首样本曲，参数化矩阵测的是真实底栏而不是空状态。
+_RND = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(6))
+USER, PASSWORD = 'sresp' + _RND, 'Resp' + _RND + '!9'
+
+_op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 PASS = FAIL = 0
+
+
+def web_post(path, body, token=None):
+    r = urllib.request.Request(BASE + '/web' + path, method='POST')
+    r.add_header('Content-Type', 'application/json')
+    if token:
+        r.add_header('X-Web-Token', token)
+    with _op.open(r, json.dumps(body).encode(), timeout=60) as x:
+        return json.loads(x.read().decode())
+
+
+def web_get(path, token=None):
+    r = urllib.request.Request(BASE + '/web' + path)
+    if token:
+        r.add_header('X-Web-Token', token)
+    with _op.open(r, timeout=60) as x:
+        return json.loads(x.read().decode())
+
+
+def seed_account():
+    """注册临时账号并塞样本曲，等扫描入库；返回 (token)。"""
+    token = web_post('/register', {'name': USER, 'email': USER + '@e.com',
+                                   'password': PASSWORD, 'confirm': PASSWORD})['data']['token']
+    dd = os.path.join(DATA, 'library', USER, '周杰伦', '范特西')
+    os.makedirs(dd, exist_ok=True)
+    for fn in sorted(os.listdir(FIX_DIR)):
+        shutil.copy(os.path.join(FIX_DIR, fn), os.path.join(dd, fn))
+    for _ in range(40):
+        if web_get('/api/stats', token)['data'].get('tracks', 0) > 0:
+            break
+        time.sleep(1)
+    return token
+
+
+def cleanup_account():
+    shutil.rmtree(os.path.join(DATA, 'library', USER), ignore_errors=True)
+    shutil.rmtree(os.path.join(DATA, 'libraries', USER), ignore_errors=True)
+    try:
+        r = urllib.request.Request(BASE + '/admin/login', method='POST')
+        r.add_header('Content-Type', 'application/json')
+        with _op.open(r, json.dumps({'password': 'REDACTED'}).encode(), timeout=30) as x:
+            at = json.loads(x.read().decode())['token']
+        r = urllib.request.Request(BASE + '/admin/api/users/' + USER + '?purge=1', method='DELETE')
+        r.add_header('X-Admin-Token', at)
+        with _op.open(r, timeout=30) as x:
+            print('临时账号已清理:', x.status)
+    except Exception as e:
+        print('清理失败（手动删 %s）:' % os.path.join(DATA, 'library', USER), e)
 
 
 def check(name, ok, detail=''):
@@ -112,6 +175,14 @@ def login(page):
 
 
 def main():
+    seed_account()
+    try:
+        return _run()
+    finally:
+        cleanup_account()
+
+
+def _run():
     with sync_playwright() as pw:
         b = pw.chromium.launch(executable_path='/usr/bin/chromium', headless=True,
                                args=['--autoplay-policy=no-user-gesture-required'])
@@ -288,6 +359,15 @@ def main():
             if (page.evaluate("() => parseFloat(document.getElementById('np-progress').style.width) || 0")) <= p0:
                 page.click('#btn-play')
             page.wait_for_timeout(1500)
+            # 「在推进」改成连续采样：曲子放完了会自动切下一首（进度归零），
+            # 只比对首尾两个点会误判成「没在走」。这里只在同一首曲目内看是否有一对相邻采样递增。
+            samples = []
+            for _ in range(12):
+                samples.append(page.evaluate("""() => ({ p: parseFloat(document.getElementById('np-progress').style.width) || 0,
+                                                          n: document.getElementById('np-name').textContent })"""))
+                page.wait_for_timeout(250)
+            grew = [(a, b) for a, b in zip(samples, samples[1:])
+                    if a['n'] == b['n'] and a['p'] > 0 and b['p'] > a['p']]
             play = page.evaluate("""() => {
               const bar = document.getElementById('np-progress')
               const fill = document.getElementById('seek-fill')
@@ -298,10 +378,9 @@ def main():
                        playerTop: Math.round(document.getElementById('player').getBoundingClientRect().top),
                        npName: document.getElementById('np-name').textContent }
             }""")
-            page.wait_for_timeout(2500)
-            later = page.evaluate("() => parseFloat(document.getElementById('np-progress').style.width) || 0")
-            check('播放推进（进度 2.5s 内持续增长）', later > play['pct'] > 0,
-                  '%s%% → %s%% 曲目=%s' % (play['pct'], later, play['npName']))
+            check('播放推进（3s 内进度持续增长）', bool(grew),
+                  '采样 %s 次，递增 %s 对，末尾 %s%% 曲目=%s'
+                  % (len(samples), len(grew), samples[-1]['p'], samples[-1]['n']))
             check('底栏进度线随播放前进', play['barPx'] > 0, 'width=%s' % play['barW'])
             check('进度线与 seek 轴同源同步', play['barW'] == play['fillW'],
                   'bar=%s seek=%s' % (play['barW'], play['fillW']))

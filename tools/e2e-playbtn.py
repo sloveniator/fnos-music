@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""定向验证：播放/暂停按钮乳白改造（带真实曲目）。
-断言：乳白底 + 近黑图标 + 无 accent 蓝紫外发光 + 底栏各视口布局未被影响。
+"""定向验证：播放/暂停按钮配色（带真实曲目）。
+断言：底栏（#btn-play）玻璃质感 + 亮白图标 + 极淡 accent 光晕环；
+      歌词全屏（#lf-play）仍为乳白实心（那是上一次主人点名要的，本轮没动）；
+      底栏各视口布局未被影响。
 """
 import json, os, random, shutil, string, sys, time, urllib.request, urllib.error
 
@@ -112,20 +114,24 @@ try:
             pg.wait_for_timeout(800)
             pg.mouse.move(4, 4)
             d = pg.evaluate(PROBE)
-            # —— 毛玻璃本体 ——
-            check('%s 乳白层（radial 高光 + 暖白渐变）' % label,
-                  'radial-gradient' in d['bgImage'] and 'linear-gradient' in d['bgImage'] and '255, 253, 249' in d['bgImage'],
+            # —— 底栏播放键：2026-09-15 主人反馈「底栏那个播放按钮现在太突兀了」，
+            #    乳白实心圆盘 → 与其它图标同族的玻璃按键（见 app.css #player .icon-btn.play）。
+            #    这几条断言跟着新决定走；乳白那条已移到「歌词页」名下继续看着。
+            check('%s 玻璃底：半透明白渐变（不再是乳白实心）' % label,
+                  'linear-gradient' in d['bgImage'] and 'rgba(255, 255, 255, 0.19)' in d['bgImage']
+                  and '255, 253, 249' not in d['bgImage'],
                   d['bgImage'][:58] + '…')
-            check('%s 无 accent 蓝紫外发光' % label, '79, 140, 255' not in d['shadow'], d['shadow'][:52])
-            check('%s 保留柔和暗投影' % label, 'rgba(3, 6, 14' in d['shadow'], d['shadow'][:52])
-            check('%s 图标近黑 + 极淡投影（浅底对比）' % label,
-                  d['color'] == 'rgb(27, 32, 43)' and 'drop-shadow' in d['iconFilter'],
+            check('%s accent 只剩极淡光晕环（不是外发光块）' % label,
+                  'rgba(79, 140, 255, 0.07) 0px 0px 0px 4px' in d['shadow'], d['shadow'][:52])
+            check('%s 保留柔和暗投影' % label, 'rgba(2, 5, 12' in d['shadow'], d['shadow'][:52])
+            check('%s 图标亮白 + 投影（深底上对比稳）' % label,
+                  d['color'] == 'rgb(241, 245, 255)' and 'drop-shadow' in d['iconFilter'],
                   '%s / %s' % (d['color'], d['iconFilter']))
-            check('%s 1px 高光描边' % label, d['border'].startswith('1px') and 'rgba(255, 255, 255, 0.62)' in d['border'],
-                  '%s / shadow ok' % d['border'])
+            check('%s 1px 半透明高光描边' % label, d['border'].startswith('1px') and 'rgba(255, 255, 255, 0.24)' in d['border'],
+                  d['border'])
             check('%s 仍是正圆且尺寸 ≥42px（窄屏下限）' % label, d['w'] == d['h'] and d['w'] >= 42 and d['radius'] == '50%', '%dx%d r=%s' % (d['w'], d['h'], d['radius']))
-            # —— 歌词页同款按钮 ——
-            check('%s 歌词页按钮同款乳白' % label,
+            # —— 歌词页按钮：仍是乳白（本轮只改了底栏那一个） ——
+            check('%s 歌词页按钮仍是乳白' % label,
                   'radial-gradient' in d['lfBgImage'] and '255, 253, 249' in d['lfBgImage'],
                   '%dpx %s' % (d['lfW'], d['lfBgImage'][:44] + '…'))
             # —— 布局回归 ——
