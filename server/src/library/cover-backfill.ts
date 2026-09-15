@@ -1,6 +1,7 @@
 import { onlineSearch, type OnlineItem } from '@/online'
 import { getTenantTracks, refreshCoverFlags, safeUserName, onTenantScanDone, getTenantSettings } from './tenant'
 import { coverEntryOf, recordCover, saveCoverFile } from './cover-cache'
+import { coverScore as scoreOf, MIN_COVER_SCORE as MIN_SCORE } from '@/utils/match'
 
 // ---------------------------------------------------------------------------
 // 在线封面回填任务：对「无内嵌封面」的曲目按「歌手 + 曲名」跨源匹配并抓取封面
@@ -11,8 +12,6 @@ import { coverEntryOf, recordCover, saveCoverFile } from './cover-cache'
 // ---------------------------------------------------------------------------
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
-/** 接受匹配的最低分：低于此值视为未命中 */
-const MIN_SCORE = 0.8
 
 export interface CoverBackfillState {
   running: boolean
@@ -73,47 +72,7 @@ export const cancelCoverBackfill = (safeUser: string): boolean => {
   return true
 }
 
-// ---------------- 匹配打分 ----------------
-
-/** 归一化：去括号补充说明 / 版本词 / 标点空白，便于跨源比对 */
-const norm = (s: string): string => (s || '')
-  .toLowerCase()
-  .replace(/[（(\[【{][^)）\]】}]*[)）\]】}]/g, '')
-  .replace(/\b(feat|ft|live|remaster|remastered|version|acoustic|instrumental|伴奏|纯音乐|翻唱)\b\.?/g, '')
-  .replace(/[\s\-_·、,，.。!！?？:：;；'"“”‘’&+＋/\\|]+/g, '')
-
-const splitArtists = (s: string): string[] =>
-  (s || '').split(/[、,，/&;；]+/).map(x => norm(x)).filter(x => x.length > 0)
-
-/** 曲名 / 歌手 / 专辑三维打分，返回 0~1 */
-const scoreOf = (
-  track: { name: string, singer: string, album: string },
-  item: { name: string, singer: string, album?: string },
-): number => {
-  const tn = norm(track.name)
-  const inn = norm(item.name)
-  if (!tn || !inn) return 0
-  let nameScore: number
-  if (tn === inn) {
-    nameScore = 1
-  } else if (tn.includes(inn) || inn.includes(tn)) {
-    const ratio = Math.min(tn.length, inn.length) / Math.max(tn.length, inn.length)
-    nameScore = 0.82 + 0.13 * ratio
-  } else {
-    const a = new Set(tn.split(''))
-    const b = new Set(inn.split(''))
-    let inter = 0
-    for (const c of a) if (b.has(c)) inter++
-    nameScore = (inter / Math.max(a.size, b.size)) * 0.8
-  }
-  const ta = splitArtists(track.singer)
-  const ia = splitArtists(item.singer)
-  const artistHit = ta.length > 0 && ia.length > 0 &&
-    ta.some(x => ia.some(y => x === y || x.includes(y) || y.includes(x)))
-  let score = artistHit ? Math.min(1, nameScore + 0.15) : nameScore * 0.72
-  if (track.album && item.album && norm(track.album) === norm(item.album)) score = Math.min(1, score + 0.08)
-  return score
-}
+// ---------------- 匹配打分（实现在 utils/match.ts，与下载内嵌封面共用） ----------------
 
 /** 网易云图床支持 param 缩略参数：原图常 1MB+，统一取 500x500 控制缓存体积 */
 const thumbUrl = (u: string): string => {

@@ -10,8 +10,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import ID3 from 'node-id3'
-import { onlineResolvePlayUrl, onlineSearch, onlineAudioExt, onlineDownloadReferer } from '@/online'
+import { resolveCover, fetchLyricFor, writeAudioTags } from './tags'
+import { onlineResolvePlayUrl, onlineSearch, onlineAudioExt, onlineDownloadReferer, onlineSources } from '@/online'
 import type { OnlineItem } from '@/online/kw'
 import { getSettings } from '@/library'
 import { getTenantSettings, startTenantScan } from '@/library/tenant'
@@ -157,51 +157,7 @@ const pickSource = async (source: string, rid: string): Promise<string> => {
   return onlineResolvePlayUrl(source, rid)
 }
 
-// ---------- ID3v2 标签写入（仅 mp3） ----------
-// 失败降级：不抛错给下载流程；仅返回错误信息供 task.error 记录。
-/** 拉取在线封面图（限 3MB），失败返回 null 不影响下载结果 */
-const fetchCover = async (url: string): Promise<{ mime: string, data: Buffer } | null> => {
-  try {
-    if (!/^https?:\/\//.test(String(url ?? ''))) return null
-    // 网易云原图常 500KB+，会让 ID3 标签臃肿；图床支持 param 参数取缩略图
-    const target = /music\.126\.net\//.test(url) && !url.includes('?') ? url + '?param=500y500' : url
-    const r = await fetch(target, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36' },
-    })
-    if (!r.ok) return null
-    const ct = String(r.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
-    const ab = await r.arrayBuffer()
-    if (!ab.byteLength || ab.byteLength > 3 * 1024 * 1024) return null
-    const mime = /^image\/(jpeg|jpg|png|webp)$/.test(ct) ? (ct === 'image/jpg' ? 'image/jpeg' : ct) : 'image/jpeg'
-    return { mime, data: Buffer.from(ab) }
-  } catch { return null }
-}
-
-const writeId3Tags = (filePath: string, task: DownloadTask, cover?: { mime: string, data: Buffer } | null): string | null => {
-  if (!filePath.toLowerCase().endsWith('.mp3')) return null
-  try {
-    const tags: Record<string, unknown> = {}
-    if (task.name) tags.title = task.name
-    if (task.singer) tags.artist = task.singer
-    if (task.album) tags.album = task.album
-    if (task.duration > 0) tags.TCON = 'Music'
-    if (cover) {
-      tags.image = {
-        mime: cover.mime,
-        type: { id: 3, name: 'front cover' },
-        description: 'Cover',
-        imageBuffer: cover.data,
-      }
-    }
-    if (!Object.keys(tags).length) return null
-    const r = ID3.write(tags, filePath) as true | Error
-    if (r === true) return null
-    return r?.message || String(r)
-  } catch (e: any) {
-    return e?.message || String(e)
-  }
-}
+// 标签（封面/歌词）写入已抽到 ./tags.ts：云盘落盘与浏览器直下两条路径共用一套实现。
 
 const downloadTask = async (task: DownloadTask): Promise<void> => {
   if (task.status === 'done') return
@@ -334,11 +290,23 @@ const downloadTask = async (task: DownloadTask): Promise<void> => {
     task.bytes = stat.size
     task.finishedAt = Date.now()
     task.error = undefined
-    // 写 ID3v2 标签（mp3 文件才支持；失败仅记 error，不影响任务状态）
+    // 写 ID3v2 标签：标题/歌手/专辑 + 内嵌封面 + 内嵌歌词（mp3 才支持；失败仅记 error，
+    // 不影响任务状态）。封面与歌词并发取——串行会白等一次网络往返。
+    // 必须写在下面的扫描触发之前：扫描进来时文件得是最终形态。
     if (target.toLowerCase().endsWith('.mp3')) {
-      const cover = task.pic ? await fetchCover(task.pic) : null
-      try { writeId3Tags(target, task, cover) } catch (e: any) {
-        task.error = 'ID3 写入失败：' + (e?.message || e)
+      const meta = {
+        name: task.name, singer: task.singer, album: task.album,
+        duration: task.duration, source: task.source, rid: task.rid,
+      }
+      const [cover, lyric] = await Promise.all([
+        resolveCover(meta, task.pic),
+        fetchLyricFor(meta),
+      ])
+      try {
+        const tr = writeAudioTags(target, meta, cover, lyric)
+        if (tr.error) task.error = '标签写入失败：' + tr.error
+      } catch (e: any) {
+        task.error = '标签写入失败：' + (e?.message || e)
       }
     }
     // 试听片段检测：上游对 VIP/版权曲目常返回十几秒的片段。
@@ -748,8 +716,143 @@ export const stats = (userName?: string): { total: number, done: number, failed:
 }
 
 // ---------- 搜索代理（复用现有 onlineSearch，为下载页统一入口） ----------
-export const searchForDownload = (source: string, keyword: string, page = 1, size = 30) => {
-  return onlineSearch(source, keyword, page, size)
+// ---------- 下载中心搜索（跨源聚合） ----------
+//   不分平台：一次并发查询全部已启用源，按「歌名 + 歌手」归一化后合并去重，
+//   同一首歌在多个平台都有时只出现一行，choices 里保留各平台的可选下载标识。
+//   源优先级决定默认选中的下载源（有封面的优先，其次按 SRC_PRIORITY）。
+
+export interface DownloadSearchChoice {
+  source: string
+  id: string
+  intervalMs: number
+  pic: string | null
+  album: string
+}
+
+export interface DownloadSearchRow {
+  key: string
+  name: string
+  singer: string
+  album: string
+  pic: string | null
+  intervalMs: number
+  source: string            // 当前选中的下载源
+  id: string                // 当前选中源的播放标识
+  choices: DownloadSearchChoice[]
+}
+
+export interface DownloadSearchResult {
+  list: DownloadSearchRow[]
+  total: number
+  size: number
+  perSource: { id: string; name: string; count: number; error?: string }[]
+}
+
+const SRC_PRIORITY = ['kw', 'wy', 'mg', 'soda']
+
+/** 上游偶发返回 HTML 实体（如 `&nbsp;`），先解码再参与去重与显示，避免同一首歌被拆成两行 */
+const decodeEntities = (s: unknown): string =>
+  String(s ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, d: string) => String.fromCharCode(parseInt(d, 10)))
+
+/**
+ * 归一化文本：小写 + 去空白 + 去常见标点，用于跨源判断「同一首歌」。
+ * stripBrackets 只对歌手字段开启：`周杰伦 (Jay Chou)` 要能和 `周杰伦` 合并；
+ * 歌名不剥离括号，否则 `xxx（Live）` / `（精彩音乐汇）` 会被并进原版而丢失版本差异。
+ */
+export const normSearchText = (s: unknown, stripBrackets = false): string => {
+  let t = String(s ?? '')
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, '')
+  if (stripBrackets) t = t.replace(/[（(【\[][^）)】\]]*[）)】\]]/g, '')
+  return t.replace(/[·・.,，、;；:：!！?？'"’‘“”`~^&+*#@$%|/\\\-–—_]/g, '')
+}
+
+/** 合并去重的行标识（歌名 + 歌手） */
+export const dlRowKey = (name: string, singer: string): string =>
+  normSearchText(name) + '|' + normSearchText(singer, true)
+
+const choiceRank = (c: DownloadSearchChoice): number => {
+  const p = SRC_PRIORITY.indexOf(c.source)
+  return (c.pic ? 0 : 10) + (p < 0 ? 9 : p)
+}
+
+export const searchForDownload = async (
+  keyword: string,
+  size = 20,
+  onlySource?: string,
+): Promise<DownloadSearchResult> => {
+  const targets = onlineSources()
+    .filter((s) => s.enabled && (!onlySource || s.id === onlySource))
+  if (!targets.length) return { list: [], total: 0, size, perSource: [] }
+
+  const settled = await Promise.all(targets.map(async (s) => {
+    try {
+      const r = await onlineSearch(s.id, keyword, 1, size)
+      return { s, list: (r?.list ?? []) as OnlineItem[] }
+    } catch (e) {
+      return { s, list: [] as OnlineItem[], error: (e as Error).message }
+    }
+  }))
+
+  const map = new Map<string, DownloadSearchRow>()
+  const perSource: DownloadSearchResult['perSource'] = []
+  for (const { s, list, error } of settled) {
+    perSource.push({ id: s.id, name: s.name, count: list.length, ...(error ? { error } : {}) })
+    for (const raw of list) {
+      const it = {
+        id: raw.id,
+        name: decodeEntities(raw.name).replace(/\s+/g, ' ').trim(),
+        singer: decodeEntities(raw.singer).replace(/\s+/g, ' ').trim(),
+        album: decodeEntities(raw.album).replace(/\s+/g, ' ').trim(),
+        intervalMs: raw.intervalMs || 0,
+        pic: raw.pic ?? null,
+      }
+      const key = dlRowKey(it.name, it.singer)
+      if (!key.replace('|', '')) continue
+      const choice: DownloadSearchChoice = {
+        source: s.id,
+        id: it.id,
+        intervalMs: it.intervalMs,
+        pic: it.pic,
+        album: it.album,
+      }
+      const cur = map.get(key)
+      if (!cur) {
+        map.set(key, {
+          key,
+          name: it.name,
+          singer: it.singer,
+          album: it.album,
+          pic: it.pic,
+          intervalMs: it.intervalMs,
+          source: s.id,
+          id: it.id,
+          choices: [choice],
+        })
+      } else if (!cur.choices.some((c) => c.source === s.id)) {
+        cur.choices.push(choice)
+      }
+    }
+  }
+
+  const list = Array.from(map.values())
+  for (const row of list) {
+    row.choices.sort((a, b) => choiceRank(a) - choiceRank(b))
+    const best = row.choices[0]
+    row.source = best.source
+    row.id = best.id
+    row.intervalMs = best.intervalMs
+    if (!row.pic && best.pic) row.pic = best.pic
+    if (!row.album && best.album) row.album = best.album
+  }
+  return { list, total: list.length, size, perSource }
 }
 
 // ---------- 生命周期 ----------

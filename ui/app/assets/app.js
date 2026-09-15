@@ -203,14 +203,6 @@
     try {
       const d = await api('/api/playlists')
       playlistsCache = d.playlists
-      const box = $('#pl-list')
-      box.innerHTML = ''
-      for (const pl of playlistsCache) {
-        const a = el('a', null, pl.name + ' (' + pl.count + ')')
-        a.href = '#/playlist/' + encodeURIComponent(pl.id)
-        if (location.hash === '#/playlist/' + encodeURIComponent(pl.id)) a.classList.add('on')
-        box.appendChild(a)
-      }
     } catch {}
   }
 
@@ -566,8 +558,17 @@
     const token = localStorage.getItem('gusi-web-token') || ''
     if (t.kind === 'online') {
       const name = encodeURIComponent((t.name || '') + (t.singer ? ' - ' + t.singer : ''))
-      return BASE + '/web/media/online/' + encodeURIComponent(t.source) + '/' + encodeURIComponent(t.rid)
-        + '?dl=1&name=' + name + '&k=' + encodeURIComponent(token)
+      // name 仍是下载文件名；title/singer/album/pic/dur 是给服务端写内嵌封面+歌词用的
+      const q = [
+        'dl=1', 'name=' + name,
+        'title=' + encodeURIComponent(t.name || ''),
+        'singer=' + encodeURIComponent(t.singer || ''),
+        'album=' + encodeURIComponent(t.album || ''),
+        'dur=' + encodeURIComponent(String(t.interval || '')),
+        'k=' + encodeURIComponent(token),
+      ]
+      if (t.pic) q.push('pic=' + encodeURIComponent(t.pic))
+      return BASE + '/web/media/online/' + encodeURIComponent(t.source) + '/' + encodeURIComponent(t.rid) + '?' + q.join('&')
     }
     return mediaUrl('download', t.id)
   }
@@ -1282,15 +1283,8 @@ kuwo.cn/playlist_detail/280301309</pre>
     v.appendChild(table)
   }
 
-  $('#pl-create').onclick = async () => {
-    const name = await prompt2('新建歌单', '')
-    if (!name) return
-    try {
-      const d = await api('/api/playlists', { method: 'POST', body: { name } })
-      await refreshPlaylists()
-      location.hash = '#/playlist/' + encodeURIComponent(d.id)
-    } catch (e) { toast(e.message, true) }
-  }
+  // 侧边栏「歌单」区（列表 + 新建）已删除：歌单全部收进「专辑 / 歌单」页的「我的歌单」tab，
+  // 新建入口就在那个 tab 里，不再有两套入口各自为政。
 
   // ---------------- 视图：搜索 ----------------
   routes.search = async (args, query) => {
@@ -2140,9 +2134,7 @@ kuwo.cn/playlist_detail/280301309</pre>
 
   // ---------------- 下载中心（MVP） ----------------
   let dlState = {
-    sources: onlineSourcesCache.slice(),
-    source: 'kw', q: '', page: 0, size: 20, total: 0,
-    list: [], loading: false, tab: 'search', filter: '',
+    q: '', size: 20, list: [], perSource: [], loading: false, filter: '',
   }
   let dlSse = null, dlQueue = []
   let dlDir = { current: '', dirs: [], authed: [], userDir: '', autoAssigned: false }
@@ -2156,15 +2148,17 @@ kuwo.cn/playlist_detail/280301309</pre>
     const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
     return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/')
   }
-  /** 下载队列 Tab 徽章（下载中数量） */
+  /** 队列区块统计（共 N 项 · N 下载中 · N 失败） */
   function paintDlBadge() {
-    const btn = document.querySelector('.dl-otabs [data-tab="queue"]')
-    if (!btn) return
-    const n = dlStatsCache ? (dlStatsCache.downloading || 0) : 0
-    let b = btn.querySelector('.otab-badge')
-    if (!n) { if (b) b.remove(); return }
-    if (!b) { b = el('span', 'otab-badge', String(n)); btn.appendChild(b) }
-    else b.textContent = String(n)
+    const box = document.getElementById('dl-qcount')
+    if (!box) return
+    const s = dlStatsCache
+    if (!s) { box.textContent = ''; return }
+    const bits = ['共 ' + (s.total || 0) + ' 项']
+    if (s.downloading) bits.push(s.downloading + ' 下载中')
+    if (s.failed) bits.push(s.failed + ' 失败')
+    box.textContent = bits.join(' · ')
+    box.className = 'dl-qcount' + (s.downloading ? ' busy' : '') + (s.failed ? ' has-bad' : '')
   }
   /** 拉取队列统计 / 配额 / 下载目录，渲染成单行 meta */
   async function refreshDlMeta() {
@@ -2218,159 +2212,119 @@ kuwo.cn/playlist_detail/280301309</pre>
   const renderDlCenter = async (v) => {
     if (dlSse) { try { dlSse.close() } catch {} dlSse = null }
     v.innerHTML = ''
-    // 精简头部：仅 Tab + 单行 meta（目录/容量/统计），把高度让给实际内容
-    const tabs = el('div', 'otabs dl-otabs'); v.appendChild(tabs)
-    const metaBar = el('div', 'dl-meta'); metaBar.id = 'dl-meta'; v.appendChild(metaBar)
-    const area = el('div', 'dl-area'); v.appendChild(area)
+    v.appendChild(el('h2', 'page', '下载中心'))
 
-    // 进入下载中心时刷新在线源（dlState.sources 是 init 快照，不能依赖缓存）
+    // ---- 顶部：搜索 Hero（搜索框常驻，不再有「搜索」Tab 与平台 Tab） ----
+    const hero = el('div', 'dl-hero')
+    const bar = el('div', 'dl-hero-bar')
+    bar.appendChild(el('span', 'dl-hero-ic', '🔍'))
+    const inp = el('input')
+    inp.type = 'search'
+    inp.placeholder = '搜索歌曲 / 歌手，自动搜全平台并合并'
+    inp.value = dlState.q
+    inp.maxLength = 100
+    const btn = el('button', 'btn primary dl-hero-btn', '搜索')
+    bar.appendChild(inp); bar.appendChild(btn)
+    hero.appendChild(bar)
+    const tip = el('div', 'dl-hero-tip'); tip.id = 'dl-hero-tip'
+    hero.appendChild(tip)
+    const metaBar = el('div', 'dl-meta'); metaBar.id = 'dl-meta'
+    hero.appendChild(metaBar)
+    v.appendChild(hero)
+
+    const res = el('div', 'dl-res'); res.id = 'dl-res'
+    v.appendChild(res)
+
+    // ---- 下载队列（常驻区块，不再是 Tab） ----
+    const qsec = el('section', 'dl-qsec')
+    const qhead = el('div', 'dl-qhead')
+    qhead.appendChild(el('h3', 'dl-qtitle', '下载队列'))
+    const qcount = el('span', 'dl-qcount'); qcount.id = 'dl-qcount'
+    qhead.appendChild(qcount)
+    qsec.appendChild(qhead)
+    const area = el('div', 'dl-area'); qsec.appendChild(area)
+    v.appendChild(qsec)
+
+    function paintHeroTip() {
+      const enabled = onlineSourcesCache.filter(s => s.enabled)
+      tip.textContent = enabled.length
+        ? '一次搜索覆盖 ' + enabled.map(s => s.name).join(' · ') + '；同一首歌自动合并成一行，可在曲目上切换下载源'
+        : '⚠ 全部在线源已在管理后台停用，请到「音源与代理」页开启'
+    }
+    paintHeroTip()
+    // 进页面时刷新在线源（init 快照不可靠）
     api('/api/online/sources').then(d => {
-      if (d.sources && d.sources.length) {
-        onlineSourcesCache = d.sources
-        dlState.sources = d.sources.slice()
-        if (dlState.tab === 'search') renderDlArea(area)
-      }
+      if (d.sources && d.sources.length) { onlineSourcesCache = d.sources; paintHeroTip() }
     }).catch(() => {})
 
-    function renderDlTabs(box) {
-      box.innerHTML = ''
-      const t1 = el('button', 'otab' + (dlState.tab === 'search' ? ' on' : ''), '🔍 搜索')
-      const t2 = el('button', 'otab' + (dlState.tab === 'queue' ? ' on' : ''), '⏬ 下载队列')
-      t2.dataset.tab = 'queue'
-      t1.onclick = () => { dlState.tab = 'search'; renderDlTabs(box); renderDlArea(area) }
-      t2.onclick = () => { dlState.tab = 'queue'; renderDlTabs(box); renderDlArea(area) }
-      box.appendChild(t1); box.appendChild(t2)
-      paintDlBadge()
-    }
-    function renderDlArea(box) {
-      if (dlState.tab === 'queue') renderQueue(box)
-      else renderSearch(box)
-    }
+    const SRC_SHORT = { kw: '酷我', wy: '网易', mg: '咪咕', soda: '汽水' }
+    const srcShort = (id) => SRC_SHORT[id] || srcName(id) || id
+    let dlSearchSelected = new Set()   // 勾选的行 key（跨源合并不受影响）
 
-    // ---- 搜索 ----
-    function renderSearch(box) {
-      box.innerHTML = ''
-      const chips = el('div', 'chips')
-      const enabled = dlState.sources.filter(s => s.enabled)
-      if (!enabled.length) chips.appendChild(el('span', 'online-disabled', '⚠ 在线源已在管理后台停用'))
-      for (const s of enabled) {
-        const c = el('button', 'chip' + (dlState.source === s.id ? ' on' : ''), s.name)
-        c.onclick = () => { dlState.source = s.id; dlState.list = []; dlState.page = 0; dlState.total = 0; renderSearch(box) }
-        chips.appendChild(c)
-      }
-      box.appendChild(chips)
-      const bar = el('div', 'dl-search-bar')
-      const inp = el('input'); inp.type = 'text'; inp.placeholder = '搜索歌曲名 / 歌手（回车）'; inp.value = dlState.q; inp.maxLength = 100
-      const btn = el('button', 'btn primary', '搜索')
-      const doSearch = () => {
-        const q = inp.value.trim()
-        if (!q) { toast('请输入关键词', true); return }
-        dlState.q = q; dlState.page = 0; dlState.total = 0; dlState.list = []
-        loadDlSearch(box)
-      }
-      inp.onkeydown = (e) => { if (e.key === 'Enter') doSearch() }
-      btn.onclick = doSearch
-      bar.appendChild(inp); bar.appendChild(btn)
-      box.appendChild(bar)
-      const res = el('div', 'res'); res.id = 'dl-res'; box.appendChild(res)
-      if (dlState.list.length) paintDlResults(res)
-      else if (dlState.q) res.appendChild(el('p', 'hint', '加载中…'))
-      else res.appendChild(el('p', 'hint', '输入关键词开始搜索'))
-    }
-    async function loadDlSearch(box) {
-      if (dlState.loading || !dlState.q) return
-      dlState.loading = true
+    async function runDlSearch() {
+      const q = inp.value.trim()
+      if (!q) { toast('请输入关键词', true); inp.focus(); return }
+      if (dlState.loading) return
+      dlState.q = q; dlState.loading = true; dlState.list = []; dlState.perSource = []
+      dlSearchSelected = new Set()
+      res.innerHTML = ''
+      res.appendChild(el('div', 'dl-loading', '正在搜索全部平台…'))
       try {
-        const d = await api('/api/downloads/search?source=' + encodeURIComponent(dlState.source) +
-          '&q=' + encodeURIComponent(dlState.q) + '&page=' + (dlState.page + 1) + '&size=' + dlState.size)
-        dlState.page++
-        dlState.total = d.total
-        dlState.list = dlState.page === 1 ? d.list : dlState.list.concat(d.list)
-        const res = box.querySelector('#dl-res') || box.querySelector('.res')
-        paintDlResults(res)
-      } catch (e) { toast(e.message, true) }
+        const d = await api('/api/downloads/search?q=' + encodeURIComponent(q) + '&size=' + dlState.size)
+        dlState.list = d.list || []
+        dlState.perSource = d.perSource || []
+        paintDlResults()
+      } catch (e) {
+        res.innerHTML = ''
+        res.appendChild(el('div', 'dl-res-empty', '搜索失败：' + e.message))
+      }
       dlState.loading = false
     }
-    // 批量下载选中项
-    let dlSearchSelected = new Set()
+    inp.onkeydown = (e) => { if (e.key === 'Enter') runDlSearch() }
+    btn.onclick = runDlSearch
 
-    async function batchEnqueueSearch() {
-      const items = dlState.list.filter(t => dlSearchSelected.has(t.source + '_' + t.id + '_' + t.name))
-      if (!items.length) { toast('请先勾选要下载的曲目', true); return }
-      const bar = document.querySelector('.dl-search-batch-bar')
-      const btn = bar && bar.querySelector('[data-op="enqueue"]')
-      if (btn) { btn.disabled = true; btn.textContent = '加入中…' }
-      try {
-        const r = await api('/api/downloads/enqueue', {
-          method: 'POST',
-          body: { items: items.map(t => ({ source: t.source, id: t.id, name: t.name, singer: t.singer, intervalMs: t.intervalMs, pic: t.pic, album: t.album })) },
-        })
-        const okN = r.accepted || 0
-        const failN = (r.reasons || []).length
-        if (okN > 0) {
-          toast(`已加入 ${okN} 首到下载队列`); refreshDlMeta()
-        }
-        if (failN > 0) {
-          const r0 = (r.reasons || [])[0]
-          if (r0) toast(`${failN} 首入队失败：${r0.reason || ''}`, true)
-        }
-        if (!okN && !failN) toast('入队失败', true)
-        // 清空选中并刷新表格
-        dlSearchSelected = new Set()
-        const res = document.querySelector('#dl-res')
-        if (res) paintDlResults(res)
-      } catch (e) {
-        toast(e.message, true)
-        if (btn) { btn.disabled = false; btn.textContent = '⬇ 批量下载' }
+    function paintDlResults() {
+      res.innerHTML = ''
+      if (!dlState.q) {
+        res.appendChild(el('div', 'dl-res-empty', '输入关键词，一次搜遍全部已启用平台；同一首歌只占一行，可在曲目上切换下载源'))
+        return
       }
-    }
+      const info = el('div', 'dl-res-info')
+      info.appendChild(el('span', 'dl-res-q', '「' + dlState.q + '」'))
+      info.appendChild(el('span', 'dl-res-n', dlState.list.length + ' 首'))
+      const counts = (dlState.perSource || []).filter(x => x.count > 0).map(x => x.name + ' ' + x.count).join(' · ')
+      if (counts) info.appendChild(el('span', 'dl-res-src', counts))
+      const failed = (dlState.perSource || []).filter(x => x.error)
+      if (failed.length) info.appendChild(el('span', 'dl-res-warn', '⚠ ' + failed.map(f => f.name + ' 失败').join('、')))
+      res.appendChild(info)
+      if (!dlState.list.length) { res.appendChild(el('div', 'dl-res-empty', '没有找到匹配的歌曲，换个关键词试试')); return }
 
-    function updateSearchBatchBar() {
-      const bar = document.querySelector('.dl-search-batch-bar')
-      if (!bar) return
-      const count = dlSearchSelected.size
-      bar.querySelector('.dl-sel-count').textContent = '已选 ' + count + ' 首'
-      const btn = bar.querySelector('[data-op="enqueue"]')
-      if (btn) btn.disabled = count === 0
-    }
-
-    function paintDlResults(container) {
-      if (!container) return
-      container.innerHTML = ''
-      container.appendChild(el('div', 'res-info', '「' + dlState.q + '」 · ' + srcName(dlState.source) + ' · 共 ' + dlState.total + ' 首'))
-      if (!dlState.list.length) { container.appendChild(el('p', 'hint', '无结果')); return }
-      // 批量操作栏
       const batchBar = el('div', 'dl-search-batch-bar')
       batchBar.innerHTML = `
-        <label class="dl-sel-all" title="全选当前页"><input type="checkbox" id="dl-search-check-all"><span>全选</span></label>
+        <label class="dl-sel-all" title="全选"><input type="checkbox" id="dl-search-check-all"><span>全选</span></label>
         <span class="dl-sel-count">已选 0 首</span>
         <span class="dl-batch-spacer"></span>
         <button class="btn primary mini" data-op="enqueue" disabled>⬇ 批量下载</button>
       `
-      batchBar.addEventListener('click', (e) => {
-        const b = e.target.closest('[data-op]')
-        if (b) batchEnqueueSearch()
-      })
+      batchBar.addEventListener('click', (e) => { if (e.target.closest('[data-op]')) batchEnqueueSearch() })
       const checkAll = batchBar.querySelector('#dl-search-check-all')
       if (checkAll) checkAll.onchange = () => {
-        if (checkAll.checked) {
-          for (const t of dlState.list) dlSearchSelected.add(t.source + '_' + t.id + '_' + t.name)
-        } else dlSearchSelected = new Set()
-        paintDlResults(container)
+        if (checkAll.checked) { for (const t of dlState.list) dlSearchSelected.add(t.key) }
+        else dlSearchSelected = new Set()
+        paintDlResults()
       }
-      container.appendChild(batchBar)
-      const tbl = el('table', 'tracks')
-      const thead = el('thead')
-      const htr = el('tr')
+      res.appendChild(batchBar)
+
+      const tbl = el('table', 'tracks dl-res-tbl')
+      const thead = el('thead'); const htr = el('tr')
       const thChk = el('th', 'num')
-      const thChkCb = document.createElement('input'); thChkCb.type = 'checkbox'; thChkCb.title = '全选本页'
+      const thChkCb = document.createElement('input'); thChkCb.type = 'checkbox'; thChkCb.title = '全选'
       thChkCb.onchange = () => {
-        if (thChkCb.checked) { for (const t of dlState.list) dlSearchSelected.add(t.source + '_' + t.id + '_' + t.name) }
-        else { for (const t of dlState.list) dlSearchSelected.delete(t.source + '_' + t.id + '_' + t.name) }
-        paintDlResults(container)
+        if (thChkCb.checked) { for (const t of dlState.list) dlSearchSelected.add(t.key) }
+        else dlSearchSelected = new Set()
+        paintDlResults()
       }
-      thChk.appendChild(thChkCb)
-      htr.appendChild(thChk)
+      thChk.appendChild(thChkCb); htr.appendChild(thChk)
       htr.appendChild(el('th', 'cov', ''))
       htr.appendChild(el('th', null, '歌曲'))
       htr.appendChild(el('th', 'album-col', '专辑'))
@@ -2378,43 +2332,103 @@ kuwo.cn/playlist_detail/280301309</pre>
       htr.appendChild(el('th', 'acts', '操作'))
       thead.appendChild(htr); tbl.appendChild(thead)
       const tbody = el('tbody')
-      dlState.list.forEach((t, i) => tbody.appendChild(dlRow(t, i, container)))
+      for (const t of dlState.list) tbody.appendChild(dlRow(t))
       tbl.appendChild(tbody)
-      container.appendChild(tbl)
-      const more = el('button', 'load-more')
-      more.hidden = dlState.total <= dlState.list.length
-      more.textContent = '加载更多（' + dlState.list.length + ' / ' + dlState.total + '）'
-      more.onclick = () => loadDlSearch(area)
-      container.appendChild(more)
+      res.appendChild(tbl)
+      updateSearchBatchBar()
+      const checkAllEl = panel => { /* noop 占位，保持结构清晰 */ }
+      checkAllEl()
     }
-    function dlRow(t, i, container) {
+
+    function updateSearchBatchBar() {
+      const bar2 = document.querySelector('.dl-search-batch-bar')
+      if (!bar2) return
+      const count = dlSearchSelected.size
+      bar2.querySelector('.dl-sel-count').textContent = '已选 ' + count + ' 首'
+      const b = bar2.querySelector('[data-op="enqueue"]')
+      if (b) b.disabled = count === 0
+    }
+
+    async function batchEnqueueSearch() {
+      const items = dlState.list.filter(t => dlSearchSelected.has(t.key))
+      if (!items.length) { toast('请先勾选要下载的曲目', true); return }
+      const b0 = document.querySelector('.dl-search-batch-bar [data-op="enqueue"]')
+      if (b0) { b0.disabled = true; b0.textContent = '加入中…' }
+      try {
+        const r = await api('/api/downloads/enqueue', {
+          method: 'POST',
+          body: { items: items.map(t => ({ source: t.source, id: t.id, name: t.name, singer: t.singer, intervalMs: t.intervalMs, pic: t.pic, album: t.album })) },
+        })
+        const okN = r.accepted || 0
+        const failN = (r.reasons || []).length
+        if (okN > 0) toast(`已加入 ${okN} 首到下载队列`)
+        if (failN > 0) {
+          const r0 = (r.reasons || [])[0]
+          if (r0) toast(`${failN} 首入队失败：${r0.reason || ''}`, true)
+        }
+        if (!okN && !failN) toast('入队失败', true)
+        dlSearchSelected = new Set()
+        paintDlResults()
+        refreshDlMeta()
+      } catch (e) {
+        toast(e.message, true)
+        if (b0) { b0.disabled = false; b0.textContent = '⬇ 批量下载' }
+      }
+    }
+
+    /** 单行：跨源合并后的歌曲，choices 多于一个时给出源切换下拉 */
+    function dlRow(t) {
       const tr = el('tr', 'row')
-      // 勾选框
       const tdChk = el('td', 'num')
       const chk = document.createElement('input'); chk.type = 'checkbox'; chk.title = '勾选下载'
-      const selKey = t.source + '_' + t.id + '_' + t.name
-      if (dlSearchSelected.has(selKey)) chk.checked = true
+      chk.checked = dlSearchSelected.has(t.key)
       chk.onchange = () => {
-        if (chk.checked) dlSearchSelected.add(selKey)
-        else dlSearchSelected.delete(selKey)
+        if (chk.checked) dlSearchSelected.add(t.key); else dlSearchSelected.delete(t.key)
         updateSearchBatchBar()
-        // 同步全选框状态
         const allCb = document.querySelector('#dl-search-check-all')
-        const thCb = document.querySelector('table.tracks thead input[type=checkbox]')
-        const allChecked = dlState.list.every(x => dlSearchSelected.has(x.source + '_' + x.id + '_' + x.name))
+        const thCb = res.querySelector('table.tracks thead input[type="checkbox"]')
+        const allChecked = dlState.list.length > 0 && dlState.list.every(x => dlSearchSelected.has(x.key))
         if (allCb) allCb.checked = allChecked
         if (thCb) thCb.checked = allChecked
       }
-      tdChk.appendChild(chk)
-      tr.appendChild(tdChk)
+      tdChk.appendChild(chk); tr.appendChild(tdChk)
+
       const tdCov = el('td', 'cov')
-      tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || ''))); tr.appendChild(tdCov)
+      const paintCov = () => { tdCov.innerHTML = ''; tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || ''))) }
+      paintCov(); tr.appendChild(tdCov)
+
       const tdName = el('td')
-      tdName.appendChild(el('div', null, t.name))
-      tdName.appendChild(el('div', 'sub', t.singer || '未知歌手'))
+      tdName.appendChild(el('div', 'dl-nm', t.name))
+      const sub = el('div', 'dl-sub')
+      sub.appendChild(el('span', 'dl-sg', t.singer || '未知歌手'))
+      let tdAlbum = null, tdDur = null
+      if (t.choices && t.choices.length > 1) {
+        const sel = el('select', 'dl-src-sel')
+        sel.title = '这首歌在 ' + t.choices.length + ' 个平台都有，可切换下载源'
+        for (const c of t.choices) {
+          const o = document.createElement('option')
+          o.value = c.source; o.textContent = srcShort(c.source)
+          sel.appendChild(o)
+        }
+        sel.value = t.source
+        sel.onchange = () => {
+          const c = (t.choices || []).find(x => x.source === sel.value)
+          if (!c) return
+          t.source = c.source; t.id = c.id; t.intervalMs = c.intervalMs
+          if (c.pic && c.pic !== t.pic) { t.pic = c.pic; paintCov() }
+          if (c.album) { t.album = c.album; if (tdAlbum) tdAlbum.textContent = c.album }
+          if (tdDur) tdDur.textContent = fmtDur((t.intervalMs || 0) / 1000)
+        }
+        sub.appendChild(sel)
+      } else if (t.source) {
+        sub.appendChild(el('span', 'dl-src-tag', srcShort(t.source)))
+      }
+      tdName.appendChild(sub)
       tr.appendChild(tdName)
-      tr.appendChild(el('td', 'album-col ell', t.album || '—'))
-      tr.appendChild(el('td', 'dur', fmtDur((t.intervalMs || 0) / 1000)))
+
+      tdAlbum = el('td', 'album-col ell', t.album || '—'); tr.appendChild(tdAlbum)
+      tdDur = el('td', 'dur', fmtDur((t.intervalMs || 0) / 1000)); tr.appendChild(tdDur)
+
       const tdAct = el('td', 'acts')
       const bAdd = el('button', 'btn primary mini', '⬇ 下载')
       bAdd.onclick = async () => {
@@ -2511,7 +2525,7 @@ kuwo.cn/playlist_detail/280301309</pre>
         }
       }
       box.innerHTML = ''
-      if (!dlQueue.length) { box.appendChild(el('p', 'hint', '暂无下载任务。切到「搜索」标签加入歌曲。')); return }
+      if (!dlQueue.length) { box.appendChild(el('p', 'hint', '暂无下载任务。在上方搜索并加入歌曲。')); return }
       for (const t of dlQueue) {
         const row = el('div', 'dl-task ' + t.status)
         // 多选列（下载中禁止选择）
@@ -2594,7 +2608,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     }
 
     // ---- 歌单导入 ----
-    renderDlTabs(tabs); renderDlArea(area); refreshDlMeta()
+    renderQueue(area); paintDlResults(); refreshDlMeta()
 
     // SSE（指数退避重连）
     let dlSseRetry = 0
@@ -2606,7 +2620,7 @@ kuwo.cn/playlist_detail/280301309</pre>
         dlSseRetry = 0
         dlSse.addEventListener('task', (ev) => {
           let t; try { t = JSON.parse(ev.data) } catch { return }
-          if (dlState.tab === 'queue') {
+          if (document.getElementById('dl-queue')) {
             const idx = dlQueue.findIndex(x => x.id === t.id)
             if (idx >= 0) dlQueue[idx] = t
             else dlQueue.unshift(t)

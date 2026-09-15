@@ -24,6 +24,8 @@ import { lyricWithFallback } from '@/online/lyric-fallback'
 import { fmChannels, fmNext } from '@/online'
 import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists, onlineAudioExt, onlineStreamReferer } from '@/online'
 import { pipeHttpStream } from '@/utils/httpPipe'
+import { accessLog } from '@/utils/log4js'
+import { resolveCover, fetchLyricFor, writeAudioTags, saveUrlToFile, ensureDirSync } from '@/downloads/tags'
 import {
   enqueue, enqueueMany, listTasks, getTask, removeTask, retryTask, batchOperate, parsePlaylistText,
   stats as downloadStats, subscribe as subscribeDownload, searchForDownload,
@@ -216,6 +218,47 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     // 既不合适给 <audio>，也会让下载文件名被补成 .mp3，这里统一覆盖成音频 MIME
     const oExt = onlineAudioExt(oSource)
     const oCt = oExt == 'm4a' ? 'audio/mp4' : oExt == 'flac' ? 'audio/flac' : oExt == 'aac' ? 'audio/aac' : undefined
+
+    // 下载模式且容器为 mp3：先把上游整包落到临时文件，写好封面与歌词再回传。
+    // 直接 pipe 是「裸流转发」，用户拿到的文件没有封面也没有歌词（此前行为）。
+    // 多花一次落盘 + 几秒，换来下载文件在任意播放器里都带图带词。
+    if (asDownload && oExt == 'mp3') {
+      const tmpFile = path.join(global.lx.dataPath, 'tmp', 'dl-' + process.pid + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8) + '.mp3')
+      const cleanup = (): void => { try { fs.unlinkSync(tmpFile) } catch {} }
+      try {
+        ensureDirSync(path.dirname(tmpFile))
+        const meta = {
+          name: (url.searchParams.get('title') ?? '').substring(0, 180) || fileName.replace(/\.[A-Za-z0-9]{2,5}$/, ''),
+          singer: (url.searchParams.get('singer') ?? '').substring(0, 120),
+          album: (url.searchParams.get('album') ?? '').substring(0, 120),
+          duration: Number(url.searchParams.get('dur')) || 0,
+          source: oSource,
+          rid: oRid,
+        }
+        const playUrl = await onlineResolvePlayUrl(oSource, oRid)
+        await saveUrlToFile(playUrl, { Referer: onlineStreamReferer(oSource) }, tmpFile)
+        // 封面地址由客户端带过来，必须过图床白名单——否则等于给了一个任意 URL 取回口子
+        const pic = (url.searchParams.get('pic') ?? '').substring(0, 600)
+        let picAllowed = false
+        try { picAllowed = !!pic && PIC_HOST_ALLOW.some((re) => re.test(new URL(pic).hostname)) } catch { picAllowed = false }
+        const [cover, lyric] = await Promise.all([
+          resolveCover(meta, picAllowed ? pic : ''),
+          fetchLyricFor(meta),
+        ])
+        const tr = writeAudioTags(tmpFile, meta, cover, lyric)
+        if (tr.error) accessLog.warn('下载标签写入失败：' + tmpFile + ' ' + tr.error)
+        // 回传结束（含客户端中途断开）后清临时文件；出错路径在 catch 里清
+        res.on('close', cleanup)
+        const att = fileName || meta.name || 'download'
+        await serveAudio(req, res, tmpFile, { attachment: /\.[A-Za-z0-9]{2,5}$/.test(att) ? att : att + '.mp3' })
+      } catch (e) {
+        cleanup()
+        if (!res.headersSent) fail(res, 502, (e as Error).message)
+        else { try { res.end() } catch {} }
+      }
+      return true
+    }
+
     void onlineResolvePlayUrl(oSource, oRid).then(
       (playUrl) => pipeHttpStream(
         req, res, playUrl,
@@ -629,13 +672,14 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
   if (method == 'GET' && p == '/web/api/downloads/search') {
-    const source = url.searchParams.get('source') ?? 'kw'
+    // 不分平台：默认并发查全部已启用源并合并去重；带 source 时仅查该源（兼容/调试）
+    const only = (url.searchParams.get('source') ?? '').trim()
     const keyword = (url.searchParams.get('q') ?? '').trim()
-    const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10) || 1)
     const size = Math.min(50, Math.max(1, parseInt(url.searchParams.get('size') ?? '20', 10) || 20))
     if (!keyword || keyword.length > 100) return fail(res, 400, '请输入搜索关键词'), true
+    if (only && !isOnlineSource(only)) return fail(res, 400, '未知的在线源：' + only), true
     try {
-      ok(res, await searchForDownload(source, keyword, page, size))
+      ok(res, await searchForDownload(keyword, size, only || undefined))
     } catch (e) {
       fail(res, 502, (e as Error).message)
     }
