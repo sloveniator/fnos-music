@@ -2519,11 +2519,8 @@ kuwo.cn/playlist_detail/280301309</pre>
   routes.online = async () => {
     setActiveNav('online')
     const v = $('#view')
-    // 顶部信息卡：同时充当页面标题，避免「标题 + 副标题 + tab 栏」三层重复
-    const banner = el('div', 'online-banner')
-    banner.appendChild(el('div', 'ob-t', '在线音乐'))
-    banner.appendChild(el('div', 'ob-s', '平台歌单 · 搜单曲 / 专辑 / 歌单 / 歌手 · 一键入库到本机曲库'))
-    v.appendChild(banner)
+    // 顶部介绍横幅已删除（2026-09-15 主人：点开后不要介绍标签，直接显示内容）
+    // 顶栏已经写着「在线音乐」，再挂一张标题+副标题的卡就是三层重复
 
     // 一行工具栏：左音源切换，右视图切换
     const tools = el('div', 'onl-tools')
@@ -3341,10 +3338,7 @@ kuwo.cn/playlist_detail/280301309</pre>
   routes.fm = async () => {
     setActiveNav('fm')
     const v = $('#view')
-    const banner = el('div', 'fm-banner')
-    banner.appendChild(el('div', 'fm-b-title', 'FM 电台'))
-    banner.appendChild(el('div', 'fm-b-sub', '汽水「听歌模式」频道 · 打开即播 · 队列见底自动续播'))
-    v.appendChild(banner)
+    // 顶部介绍横幅已删除（同上）：进来直接是「自动播放开关 + 频道网格」
 
     const row = el('div', 'fm-autorow')
     const lbl = el('label', 'set-toggle')

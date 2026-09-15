@@ -490,11 +490,7 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   /* 首页快捷卡双列压缩 */
   .grid.quick-grid { grid-template-columns: repeat(2, 1fr); }
 
-  /* 在线页横幅压缩 */
-  .online-banner { padding: 16px 18px 14px; border-radius: 14px; }
-  .online-banner::after { font-size: 40px; right: 14px; }
-  .ob-t { font-size: 20px; }
-  .ob-s { font-size: 11.5px; }
+  /* 在线页横幅已删除（介绍标签不再渲染），这里只保留源/tab 的横滑处理 */
   /* 源 chips 横向滚动不换行 */
   .chips { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
   .chip { flex-shrink: 0; }
@@ -575,14 +571,7 @@ img.ph {
 .tracks td.cov.cov-empty img, .tracks td.cov.cov-empty { background: transparent; box-shadow: none; }
 .tracks td.cov.cov-empty::before { content: ''; display: block; width: 42px; height: 42px; border-radius: 9px; background: linear-gradient(145deg, #232a3d, #151926); opacity: .55; }
 .tracks tr.playing td.cov img { box-shadow: 0 0 0 2px rgba(79,140,255,.65); }
-.online-banner { position: relative; overflow: hidden; margin: 2px 0 18px; padding: 26px 30px 24px; border-radius: 20px;
-  background: linear-gradient(120deg, rgba(79,140,255,.16), rgba(124,92,255,.10) 55%, rgba(217,178,95,.07));
-  border: 1px solid var(--line-soft); border-top-color: rgba(255,255,255,.07); }
-.online-banner::before { content: ''; position: absolute; right: -40px; top: -60px; width: 220px; height: 220px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(124,92,255,.25), transparent 68%); pointer-events: none; }
-.online-banner::after { content: '♪'; position: absolute; right: 26px; top: 50%; transform: translateY(-50%); font-size: 64px; opacity: .14; pointer-events: none; }
-.ob-t { font-size: 26px; font-weight: 700; letter-spacing: 1px; text-shadow: 0 2px 18px rgba(79,140,255,.35); }
-.ob-s { color: var(--muted); font-size: 13px; margin-top: 6px; letter-spacing: .4px; }
+/* .online-banner / .ob-t / .ob-s 已删除（2026-09-15 主人：点开后不要介绍标签） */
 .otabs { display: flex; gap: 8px; margin: 0 0 16px; }
 .otab { padding: 8px 22px; border-radius: 12px; border: 1px solid var(--line-soft); color: var(--muted); font-size: 13.5px;
   background: rgba(255,255,255,.02); transition: all .15s; }
@@ -852,7 +841,6 @@ img.ph {
 .onl-tools .chips { margin: 0; }
 .onl-tools .otabs { margin: 0; }
 .onl-area { min-height: 220px; }
-.online-banner .ob-t { font-size: 22px; font-weight: 700; letter-spacing: .3px; }
 
 /* ============ 封面回填卡片 ============ */
 .set-hint { margin: -4px 0 12px; font-size: 13px; color: var(--muted, #8b93a7); line-height: 1.6; }
@@ -1229,12 +1217,7 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .login-card { width: min(420px, 92vw); }
 }
 /* ---------- FM 电台（汽水听歌模式频道） ---------- */
-.fm-banner { position: relative; overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius);
-  padding: 18px 20px; margin-bottom: 16px;
-  background: linear-gradient(120deg, rgba(79,140,255,.15), rgba(124,92,255,.10) 58%, transparent),
-              linear-gradient(180deg, var(--card), #10131d); }
-.fm-b-title { font-size: 18px; font-weight: 600; letter-spacing: .5px; }
-.fm-b-sub { color: var(--muted); font-size: 12.5px; margin-top: 5px; }
+/* .fm-banner / .fm-b-title / .fm-b-sub 已删除（2026-09-15 主人：点开后不要介绍标签） */
 .fm-autorow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; }
 .fm-auto-hint { color: var(--muted); font-size: 12px; flex: 1 1 260px; line-height: 1.5; }
 .fm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 14px; }
@@ -1263,8 +1246,6 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 @media (max-width: 560px) {
   .fm-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .fm-card { padding: 11px 11px 13px; }
-  .fm-banner { padding: 15px 16px; }
-  .fm-b-sub { font-size: 12px; }
 }
 
 
@@ -1351,3 +1332,125 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 .sr-tbl td.acts .iconbtn { margin-left: 8px; }
 .sr-tbl td.acts .iconbtn.dl { margin-left: 2px; }
 .sr-meta { font-size: 12px; color: var(--muted); margin: 2px 0 12px; }
+
+/* ============================================================================
+   v4 · 手机端等比缩放                                            2026-09-15
+   主人：「移动端显示的封面、ui 都太大了，根据分辨力和尺寸进行等比例缩放」。
+   做法：把「显大」的那些尺寸（字号、卡片留白、封面、间距）全部换成随视口宽
+   线性缩放的令牌 —— 窄屏同比缩小、430px 以上回到常规、平板/桌面完全不受影响。
+   刻意不参与缩放的只有三样，它们是可点性/可用性的硬约束，缩小只会把体验做坏：
+     · 触控下限 --tap 40px 与底栏图标 34px（e2e-responsive 的 ≥34px 断言）
+     · 输入框 16px（iOS 聚焦缩放保护，见上面的 input 规则）
+     · 底栏高度 --player-h（两行布局的物理下限）
+   顺序很重要：本段故意放在文件末尾，用「同优先级后到者胜」压掉前面 560/480/420/380
+   那几个断点里写死的固定 px（例如 .hero .cover 的 min(58vw,190px)）。
+   ============================================================================ */
+@media (max-width: 900px) {
+  :root {
+    /* 字号阶梯：390px 宽 ≈ 常规字号，320px 再小一档，430px 起封顶 */
+    --m-fs-xs: clamp(10.5px, 2.85vw, 12px);    /* 最小说明 / 表头 / 角标 */
+    --m-fs-sm: clamp(11.5px, 3.05vw, 12.8px);  /* 副标题 / meta / chip / tab */
+    --m-fs-md: clamp(12.5px, 3.32vw, 13.8px);  /* 列表正文 / 按钮 */
+    --m-fs-lg: clamp(13.5px, 3.6vw, 15px);     /* 卡片标题 */
+    --m-fs-h3: clamp(14.5px, 3.9vw, 17px);     /* 区块标题 */
+    --m-fs-h2: clamp(16px, 4.2vw, 19.5px);     /* 页面标题 */
+    --m-card-pad: clamp(8px, 2.3vw, 11px);     /* 卡片内留白 */
+    --m-grid-gap: clamp(7px, 2.3vw, 12px);     /* 网格间距 */
+    /* 卡片列宽：390px 下由 3 列变 4 列（封面 113 → 85px），窄屏再按比例收窄 */
+    --grid-min: clamp(76px, 21.5vw, 112px);
+    --grid-gap: var(--m-grid-gap);
+  }
+  /* 继承型文本一起收一档：浏览器默认 16px 在手机上正是「整体偏大」的主因 */
+  body { font-size: var(--m-fs-md); }
+
+  /* —— 标题层 —— */
+  h2.page { font-size: var(--m-fs-h2); margin-bottom: clamp(12px, 3.4vw, 18px); }
+  .page-head { margin-bottom: clamp(14px, 4vw, 20px); }
+  .page-head .meta, .crumb, .hint, .sub-h { font-size: var(--m-fs-sm); }
+  .row-head { margin: clamp(18px, 5vw, 28px) 0 clamp(9px, 2.6vw, 14px); }
+  .row-head h3, .set-sec-h, .dl-qtitle, .dialog-box h3 { font-size: var(--m-fs-h3); }
+  .row-head a { font-size: var(--m-fs-sm); }
+  .set-section { margin-bottom: clamp(20px, 6vw, 30px); }
+
+  /* —— 卡片 / 网格：封面与文字一起按视口等比 —— */
+  .rec-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(76px, 21.5vw, 112px), 1fr));
+    gap: clamp(9px, 2.8vw, 15px) var(--m-grid-gap); margin-bottom: clamp(14px, 4vw, 20px); }
+  .board-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(88px, 24vw, 148px), 1fr)); }
+  .card { padding: var(--m-card-pad); }
+  .card .t { font-size: var(--m-fs-md); margin-top: clamp(6px, 1.9vw, 10px); }
+  .card .s, .rec-grid .card .s { font-size: var(--m-fs-xs); }
+  .rec-grid .card .t { font-size: var(--m-fs-sm); }
+  .card .cover svg { width: clamp(30px, 9vw, 46px); height: clamp(30px, 9vw, 46px); }
+
+  /* —— 列表（全部歌曲 / 下载中心 / 回收站） —— */
+  .tracks th { font-size: var(--m-fs-xs); }
+  .tracks td { font-size: var(--m-fs-md); padding: clamp(8px, 2.4vw, 11px) 10px; }
+  .tracks td.cov img, .tracks td.cov.cov-empty::before {
+    width: clamp(32px, 9.4vw, 40px); height: clamp(32px, 9.4vw, 40px); }
+  .tracks th.cov, .tracks td.cov { width: auto; }
+  .tracks.compact td { font-size: var(--m-fs-sm); }
+  .tracks.compact td.cov img, .tracks.compact td.cov.cov-empty::before {
+    width: clamp(28px, 8.4vw, 34px); height: clamp(28px, 8.4vw, 34px); }
+  .tracks.compact .sub { font-size: var(--m-fs-xs); }
+  .dl-nm { font-size: var(--m-fs-md); }
+  .dl-res-info, .dl-sg { font-size: var(--m-fs-sm); }
+  .dl-src-tag, .dl-src-sel { font-size: var(--m-fs-xs); }
+  .trash-tbl { font-size: var(--m-fs-md); }
+  .trash-count, .trash-selall { font-size: var(--m-fs-sm); }
+
+  /* —— 按钮 / 药丸 / 页签：字号与内边距等比，高度保留触控下限 —— */
+  .btn { font-size: var(--m-fs-md); padding: clamp(8px, 2.3vw, 10px) clamp(14px, 4.2vw, 22px); }
+  .btn.mini { font-size: var(--m-fs-xs); padding: 5px clamp(10px, 3vw, 14px); }
+  .chip { font-size: var(--m-fs-sm); padding: 5px clamp(11px, 3.4vw, 16px); }
+  .chip.hchip { font-size: var(--m-fs-xs); padding: 4px clamp(9px, 2.8vw, 13px); }
+  .otab, .tabs button { font-size: var(--m-fs-sm); padding: 7px clamp(13px, 4vw, 22px); }
+  .otabs.big .otab { font-size: var(--m-fs-md); padding: 8px clamp(14px, 4.2vw, 20px); }
+  .trash-bar .btn, .trash-tbl .t-acts .btn, .dl-res-tbl .acts .btn { font-size: var(--m-fs-xs); }
+  .set-k, .set-v { font-size: var(--m-fs-md); }
+  .set-vol-val { font-size: var(--m-fs-sm); }
+
+  /* —— 首页「为你推荐」卡 & 专辑/歌手/歌单详情页封面 —— */
+  .fy-cov { width: clamp(62px, 17vw, 84px); height: clamp(62px, 17vw, 84px);
+    flex: 0 0 clamp(62px, 17vw, 84px); }
+  .fy-card { gap: clamp(10px, 3vw, 14px);
+    padding: clamp(10px, 2.8vw, 12px) clamp(11px, 3.2vw, 14px); }
+  .fy-name { font-size: var(--m-fs-lg); }
+  .fy-reason { font-size: var(--m-fs-sm); margin-top: clamp(4px, 1.4vw, 6px); }
+  .fy-meta { font-size: var(--m-fs-xs); margin-top: 4px; }
+  .hero, .fy-hero { gap: clamp(12px, 3.6vw, 20px); margin-bottom: clamp(14px, 4vw, 20px); }
+  .hero h2, .fy-hero h2 { font-size: var(--m-fs-h2); }
+  .hero .cover, .fy-hero .fy-cov.big { width: clamp(92px, 26vw, 128px); height: clamp(92px, 26vw, 128px);
+    flex: 0 0 clamp(92px, 26vw, 128px); border-radius: clamp(12px, 3.4vw, 16px); }
+  .hero .meta, .fy-hero .meta { font-size: var(--m-fs-sm); margin-bottom: clamp(10px, 3vw, 16px); }
+
+  /* —— 在线音乐 歌单 / 歌手卡 —— */
+  .coll-hero { gap: clamp(10px, 3vw, 16px); padding: clamp(11px, 3.2vw, 16px); }
+  .coll-hero .cover { width: clamp(64px, 18vw, 88px); height: clamp(64px, 18vw, 88px); }
+  .coll-name { font-size: var(--m-fs-lg); }
+  .coll-sub { font-size: var(--m-fs-sm); }
+  .coll-type, .coll-card .coll-lock { font-size: var(--m-fs-xs); }
+
+  /* —— FM 频道卡 —— */
+  .fm-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(118px, 32vw, 158px), 1fr));
+    gap: var(--m-grid-gap); }
+  .fm-card { padding: clamp(10px, 2.8vw, 13px) clamp(10px, 2.8vw, 13px) clamp(11px, 3.2vw, 15px);
+    gap: clamp(4px, 1.4vw, 6px); }
+  .fm-nm { font-size: var(--m-fs-lg); }
+  .fm-ds { font-size: var(--m-fs-sm); }
+  .fm-tag, .fm-playing { font-size: var(--m-fs-xs); }
+  .fm-auto-hint { font-size: var(--m-fs-sm); }
+
+  /* —— 分享 / 弹窗 —— */
+  .share-item-t, .share-k { font-size: var(--m-fs-md); }
+  .share-item-s, .share-item-url, .share-note, .share-tip { font-size: var(--m-fs-sm); }
+
+  /* —— 歌词全屏页：唱片（封面）与歌词字号同样按视口等比 ——
+     宽度写成 min(clamp(160px, 48vw, 220px), 42vh)：390px 手机上 220 → 187px，
+     矮屏仍由 42vh 兜底（e2e-0017 对这条规则有 220px/42vh 的文本断言，关键字保留）。 */
+  .lf-disc { width: min(clamp(160px, 48vw, 220px), 42vh); height: min(clamp(160px, 48vw, 220px), 42vh); }
+  .lf-body p { font-size: clamp(13px, 3.7vw, 15px); line-height: 2.3; }
+  .lf-body p.tr { font-size: var(--m-fs-sm); }
+  .lf-body p.on { font-size: clamp(15.5px, 4.4vw, 18px); }
+  .lf-head button { font-size: var(--m-fs-sm); padding: 6px 10px; }
+  .lf-head span { font-size: var(--m-fs-xs); }
+}
