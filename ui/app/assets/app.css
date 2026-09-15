@@ -255,11 +255,31 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
 .icon-btn.on { color: var(--accent); }
 /* 静音状态：音量图标用 accent 提示已静音（底栏与歌词全屏共用） */
 #vol-ico.on, #lf-vol-ico.on { color: var(--muted); opacity: .55; }
-.icon-btn.play { width: 46px; height: 46px; background: #fff; color: #0b0e16;
-  box-shadow: 0 4px 16px rgba(255,255,255,.18); }
-.icon-btn.play svg { width: 21px; height: 21px; }
-.icon-btn.play:hover { background: #e8ecf7; transform: scale(1.04); }
-.icon-btn.play:active { transform: scale(.95); }
+/* 播放/暂停：毛玻璃（半透明 + backdrop-blur + accent 染色 + 顶部高光），替掉原来的纯白实心块 —
+   纯白在深色玻璃底栏上像贴上去的贴纸，太抢视觉；柔化后仍是画面里最明确的主操作 */
+.icon-btn.play { width: 46px; height: 46px;
+  color: #fff;
+  background:
+    radial-gradient(112% 84% at 32% 2%, rgba(255,255,255,.42), rgba(255,255,255,0) 62%),
+    linear-gradient(140deg, rgba(79,140,255,.50), rgba(124,92,255,.36));
+  border: 1px solid rgba(255,255,255,.28);
+  backdrop-filter: blur(16px) saturate(1.7);
+  -webkit-backdrop-filter: blur(16px) saturate(1.7);
+  box-shadow: 0 8px 22px rgba(79,140,255,.30), 0 3px 12px rgba(5,8,18,.5),
+              inset 0 1px 0 rgba(255,255,255,.36),
+              inset 0 -10px 18px rgba(24,14,60,.22);
+  transition: transform .2s cubic-bezier(.2,.9,.3,1.3), box-shadow .25s ease,
+              background .25s ease, border-color .25s ease, color .2s ease; }
+/* 图标是 SVG（currentColor）：浅色玻璃上靠近白 + 轻投影保对比，不再靠纯白底 */
+.icon-btn.play svg { width: 21px; height: 21px; filter: drop-shadow(0 1px 3px rgba(4,8,20,.55)); }
+.icon-btn.play:hover { border-color: rgba(255,255,255,.42); transform: scale(1.05);
+  background:
+    radial-gradient(112% 84% at 32% 2%, rgba(255,255,255,.46), rgba(255,255,255,0) 64%),
+    linear-gradient(140deg, rgba(96,155,255,.62), rgba(140,108,255,.48));
+  box-shadow: 0 12px 30px rgba(79,140,255,.46), 0 4px 14px rgba(5,8,18,.55),
+              inset 0 1px 0 rgba(255,255,255,.44),
+              inset 0 -10px 18px rgba(24,14,60,.24); }
+.icon-btn.play:active { transform: scale(.94); }
 .seek-row { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 620px; }
 .time { font-size: 11px; color: var(--muted); width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 .seek { flex: 1; height: 5px; border-radius: 99px; background: #232b3d; position: relative; cursor: pointer; }
@@ -567,7 +587,7 @@ img.ph {
   .lf-ctrls .lf-seek { width: 100%; max-width: none; }
   .lf-btns { display: flex; align-items: center; justify-content: center; gap: 18px; }
   .lf-btns .icon-btn { width: 44px; height: 44px; }
-  .lf-btns .icon-btn.play { width: 56px; height: 56px; background: #fff; color: #0b0e16; }
+  .lf-btns .icon-btn.play { width: 56px; height: 56px; }
   .lf-btns .icon-btn.play svg { width: 24px; height: 24px; }
   .lf-btns .vol-wrap input { width: 74px; }
   .lf-btns .icon-btn.play.on-pause svg { display: none; }
