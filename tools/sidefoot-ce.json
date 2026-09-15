@@ -1,0 +1,250 @@
+{
+ "1440x900@1.333": {
+  "sidebar": {
+   "x": 0,
+   "y": 0,
+   "w": 210,
+   "h": 900,
+   "right": 210,
+   "bottom": 900
+  },
+  "foot": {
+   "x": 12,
+   "y": 810,
+   "w": 185,
+   "h": 78,
+   "right": 197,
+   "bottom": 888
+  },
+  "who": {
+   "x": 25,
+   "y": 827,
+   "w": 159,
+   "h": 22,
+   "right": 184,
+   "bottom": 849
+  },
+  "links": {
+   "x": 19,
+   "y": 859,
+   "w": 171,
+   "h": 25,
+   "right": 190,
+   "bottom": 884
+  },
+  "a1": {
+   "x": 19,
+   "y": 859,
+   "w": 49.9,
+   "h": 25,
+   "right": 68.9,
+   "bottom": 884
+  },
+  "a2": {
+   "x": 154,
+   "y": 859,
+   "w": 36,
+   "h": 25,
+   "right": 190,
+   "bottom": 884
+  },
+  "navTextLeft": 25,
+  "whoTextLeft": 25,
+  "a1TextLeft": 25,
+  "a2TextLeft": 160,
+  "gapWhoToLinks": 10,
+  "footPadTop": "16px",
+  "sidebarPadBottom": "12px",
+  "overflowFoot": 0,
+  "overflowSide": 0,
+  "linksRightInside": 8,
+  "whoText": "古四音乐",
+  "hidden": "block"
+ },
+ "1280x800@1": {
+  "sidebar": {
+   "x": 0,
+   "y": 0,
+   "w": 210,
+   "h": 800,
+   "right": 210,
+   "bottom": 800
+  },
+  "foot": {
+   "x": 12,
+   "y": 710,
+   "w": 185,
+   "h": 78,
+   "right": 197,
+   "bottom": 788
+  },
+  "who": {
+   "x": 25,
+   "y": 727,
+   "w": 159,
+   "h": 22,
+   "right": 184,
+   "bottom": 749
+  },
+  "links": {
+   "x": 19,
+   "y": 759,
+   "w": 171,
+   "h": 25,
+   "right": 190,
+   "bottom": 784
+  },
+  "a1": {
+   "x": 19,
+   "y": 759,
+   "w": 49.9,
+   "h": 25,
+   "right": 68.9,
+   "bottom": 784
+  },
+  "a2": {
+   "x": 154,
+   "y": 759,
+   "w": 36,
+   "h": 25,
+   "right": 190,
+   "bottom": 784
+  },
+  "navTextLeft": 25,
+  "whoTextLeft": 25,
+  "a1TextLeft": 25,
+  "a2TextLeft": 160,
+  "gapWhoToLinks": 10,
+  "footPadTop": "16px",
+  "sidebarPadBottom": "12px",
+  "overflowFoot": 0,
+  "overflowSide": 0,
+  "linksRightInside": 8,
+  "whoText": "古四音乐",
+  "hidden": "block"
+ },
+ "900x800@1": {
+  "sidebar": {
+   "x": 0,
+   "y": 0,
+   "w": 76,
+   "h": 800,
+   "right": 76,
+   "bottom": 800
+  },
+  "foot": {
+   "x": 8,
+   "y": 733,
+   "w": 59,
+   "h": 57,
+   "right": 67,
+   "bottom": 790
+  },
+  "who": {
+   "x": 0,
+   "y": 0,
+   "w": 0,
+   "h": 0,
+   "right": 0,
+   "bottom": 0
+  },
+  "links": {
+   "x": 15.1,
+   "y": 744,
+   "w": 44.7,
+   "h": 44,
+   "right": 59.9,
+   "bottom": 788
+  },
+  "a1": {
+   "x": 15.1,
+   "y": 744,
+   "w": 44.7,
+   "h": 21,
+   "right": 59.9,
+   "bottom": 765
+  },
+  "a2": {
+   "x": 21.5,
+   "y": 767,
+   "w": 32,
+   "h": 21,
+   "right": 53.5,
+   "bottom": 788
+  },
+  "navTextLeft": 12,
+  "whoTextLeft": 0,
+  "a1TextLeft": 20.1,
+  "a2TextLeft": 26.5,
+  "gapWhoToLinks": 744,
+  "footPadTop": "10px",
+  "sidebarPadBottom": "10px",
+  "overflowFoot": 0,
+  "overflowSide": 0,
+  "linksRightInside": 8.1,
+  "whoText": "古四音乐",
+  "hidden": "none"
+ },
+ "390x844@1": {
+  "sidebar": {
+   "x": 0,
+   "y": 0,
+   "w": 76,
+   "h": 844,
+   "right": 76,
+   "bottom": 844
+  },
+  "foot": {
+   "x": 8,
+   "y": 777,
+   "w": 59,
+   "h": 57,
+   "right": 67,
+   "bottom": 834
+  },
+  "who": {
+   "x": 0,
+   "y": 0,
+   "w": 0,
+   "h": 0,
+   "right": 0,
+   "bottom": 0
+  },
+  "links": {
+   "x": 15.1,
+   "y": 788,
+   "w": 44.7,
+   "h": 44,
+   "right": 59.9,
+   "bottom": 832
+  },
+  "a1": {
+   "x": 15.1,
+   "y": 788,
+   "w": 44.7,
+   "h": 21,
+   "right": 59.9,
+   "bottom": 809
+  },
+  "a2": {
+   "x": 21.5,
+   "y": 811,
+   "w": 32,
+   "h": 21,
+   "right": 53.5,
+   "bottom": 832
+  },
+  "navTextLeft": 12,
+  "whoTextLeft": 0,
+  "a1TextLeft": 20.1,
+  "a2TextLeft": 26.5,
+  "gapWhoToLinks": 788,
+  "footPadTop": "10px",
+  "sidebarPadBottom": "10px",
+  "overflowFoot": 0,
+  "overflowSide": 0,
+  "linksRightInside": 8.1,
+  "whoText": "古四音乐",
+  "hidden": "none"
+ }
+}

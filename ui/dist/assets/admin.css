@@ -78,16 +78,21 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
 .nav .tab:hover { background: rgba(255,255,255,.04); color: var(--text); }
 .nav .tab.active { background: linear-gradient(135deg, rgba(79,140,255,.18), rgba(124,92,255,.12)); color: #fff; font-weight: 600; }
 /* 服务器名与「应用/退出」分两行：同行会让两侧互相挤压折行、垂直错位。
-   分隔线改成铺满侧栏内宽（与 .nav 药丸同宽，12..198）：此前左右各缩 13px，被反馈「左右都很空旷」。
-   文字左基线仍是 25px（sidebar 12px 内边距 + 这里 13px 左内边距 = .tab 的文字位置）。
+   分隔线铺满侧栏内宽（与 .nav 药丸同宽，12..198）：此前左右各缩 13px，被反馈「左右都很空旷」。
+   文字左基线 25px（sidebar 12px 内边距 + 这里 13px 左内边距 = .tab 的文字位置）。
    两行之间留 10+4px 呼吸位（4+3px 被反馈「还紧」，这里直接翻倍）。 */
 .side-foot { margin: auto 0 0; padding: 16px 13px 4px; border-top: 1px solid var(--line-soft);
   display: flex; flex-direction: column; align-items: stretch; gap: 10px; overflow: hidden;
   font-size: 12px; color: var(--muted); }
-/* 服务器名超长时省略，而不是换行撑高整块 */
-.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 0 4px; }
-/* 链接药丸左右各 6px 内边距，用负 margin 把字面拉回名字那条基线 */
-.side-foot .side-links { display: flex; gap: 4px; align-items: center; margin-left: -6px; }
+/* 服务器名是这块的标题，给 13px + 前景色（原 12px/muted 与链接同权重，整块糊成一片灰）；
+   超长时省略，而不是换行撑高整块。 */
+.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 0 4px; font-size: 13px; color: var(--text); }
+/* 「← 应用」「退出」左右分列，铺满这一行的内宽（此前两个词挤在左边、右半行空着）。
+   链接药丸左右各 6px 内边距，用负 margin 把两端字面拉回块内边缘：
+   左端字面 = 名字左基线 25px，右端字面 = 分隔线右端 185px。 */
+.side-foot .side-links { display: flex; gap: 4px; align-items: center; justify-content: space-between;
+  margin-left: -6px; margin-right: -6px; }
 .side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 4px 6px; border-radius: 8px; white-space: nowrap; }
 .side-foot a:hover, .side-foot button:hover { color: var(--text); background: rgba(255,255,255,.05); }
 .side-foot button { font: inherit; }
@@ -129,9 +134,10 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
   /* 只藏服务器名（.side-links 同为 span，不能再用 .side-foot span 一刀切） */
   .brand span, .brand em, .side-foot #who { display: none; }
   .nav .tab { font-size: 12px; padding: 10px 4px; text-align: center; white-space: nowrap; }
-  /* 窄侧栏里链接竖排，否则「← 应用 + 退出」横向溢出被裁；76px 容不下 13px 缩进，这里归零 */
+  /* 窄侧栏里链接竖排，否则「← 应用 + 退出」横向溢出被裁；76px 容不下 13px 缩进，这里归零。
+     竖排后「左右分列」失去意义，负 margin 也必须撤掉（否则右边多出 6px 溢出）。 */
   .side-foot { margin: auto 0 0; align-items: center; padding: 10px 0 2px; }
-  .side-foot .side-links { flex-direction: column; gap: 2px; margin-left: 0; }
+  .side-foot .side-links { flex-direction: column; justify-content: flex-start; gap: 2px; margin-left: 0; margin-right: 0; }
   .side-foot a, .side-foot button { padding: 3px 5px; font-size: 11px; }
 }
 
