@@ -4,7 +4,9 @@ import path from 'node:path'
 import {
   getSettings, saveSettings, getStreamToken, verifyStreamToken, resetSecret,
   getTrack, getTracks, listTracks, searchTracks, libraryStats, getScanState, startScan, scheduleAutoScan,
+  removeTracks, listLibraryTrash, restoreLibraryTrash, purgeLibraryTrash,
 } from '@/library'
+import { TRASH_DIRNAME, isInside } from '@/library/trash'
 import { serveAudio } from '@/library/stream'
 import { extractCover, extractLyric } from '@/library/metadata'
 import { enqueueDownload, cancelDownload, removeDownload, listDownloads, clearFinishedDownloads } from '@/library/download'
@@ -338,6 +340,58 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
       page: parseInt(url.searchParams.get('page') ?? '1', 10),
       size: parseInt(url.searchParams.get('size') ?? '50', 10),
     }))
+    return true
+  }
+
+  // ---------------------------------------------------------------------------
+  // 曲库删除 / 回收站（管理后台「音乐库」页）
+  //   删除 = 软删除：文件搬到 <扫描目录>/.gusi-trash/，不是 rm，可恢复（AGENTS.md: trash > rm）。
+  //   扫描器跳过点目录，所以删掉的曲目不会自己回到索引里。
+  // ---------------------------------------------------------------------------
+  if (method == 'POST' && p == '/admin/api/library/remove') {
+    let body: any
+    try { body = JSON.parse(await readBody(req)) } catch { fail(res, 400, 'invalid body'); return true }
+    const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).slice(0, 5000).map(String)
+    if (!ids.length) { fail(res, 400, '没有选中任何曲目'); return true }
+    const result = removeTracks(ids)
+    // 全局曲库和租户曲库扫的常常是同一批目录：全局这边删了，租户索引还留着旧条目。
+    // 受影响（目录有交集）的租户顺手重扫一次，避免 App 里还看得到已删的曲目。
+    const affected = listTenants().filter(user => {
+      const dirs = (getTenantSettings(user).dirs || []).filter(d => !!d)
+      return result.removedPaths.some(fp => dirs.some(d => isInside(fp, d)))
+    })
+    for (const user of affected) startTenantScan(user)
+    ok(res, { ...result, rescannedUsers: affected })
+    return true
+  }
+
+  if (method == 'GET' && p == '/admin/api/library/trash') {
+    const list = listLibraryTrash()
+    ok(res, { list, total: list.length, trashDir: TRASH_DIRNAME })
+    return true
+  }
+
+  if (method == 'POST' && p == '/admin/api/library/trash/restore') {
+    let body: any
+    try { body = JSON.parse(await readBody(req)) } catch { fail(res, 400, 'invalid body'); return true }
+    const paths: string[] = (Array.isArray(body.paths) ? body.paths : []).slice(0, 5000).map(String)
+    if (!paths.length) { fail(res, 400, '没有选中任何条目'); return true }
+    const result = restoreLibraryTrash(paths)
+    const affected = listTenants().filter(user => {
+      const dirs = (getTenantSettings(user).dirs || []).filter(d => !!d)
+      return dirs.length > 0
+    })
+    if (result.ok) for (const user of affected) startTenantScan(user)
+    ok(res, result)
+    return true
+  }
+
+  if (method == 'POST' && p == '/admin/api/library/trash/purge') {
+    let body: any
+    try { body = JSON.parse(await readBody(req)) } catch { fail(res, 400, 'invalid body'); return true }
+    const paths: string[] = (Array.isArray(body.paths) ? body.paths : []).slice(0, 5000).map(String)
+    if (!paths.length) { fail(res, 400, '没有选中任何条目'); return true }
+    ok(res, purgeLibraryTrash(paths))
     return true
   }
 

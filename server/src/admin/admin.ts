@@ -120,8 +120,18 @@ const readBody = (req: http.IncomingMessage): Promise<string> => new Promise((re
 })
 
 const isAuthed = (req: http.IncomingMessage) => {
-  const token = req.headers['x-admin-token']
-  if (typeof token != 'string') return false
+  let token = req.headers['x-admin-token']
+  // <img>/<audio>/<a download> 这类标签带不了自定义请求头，封面/试听/下载只能把 token 放 query。
+  // 因此仅对这三个只读媒体端点放行 ?k=，其余管理 API 依旧只认 X-Admin-Token 头。
+  // （Web 端媒体同理，前端一律用 ?k=，见 ui/app/assets/app.js 的 mediaUrl）
+  if (typeof token != 'string' || !token) {
+    const raw = req.url ?? ''
+    if ((req.method ?? 'GET') == 'GET' && /^\/admin\/api\/library\/(cover|preview|download)\//.test(raw)) {
+      const k = new URLSearchParams(raw.split('?')[1] ?? '').get('k')
+      if (k) token = k
+    }
+  }
+  if (typeof token != 'string' || !token) return false
   const expiry = tokens.get(token)
   if (!expiry || expiry < Date.now()) {
     tokens.delete(token)

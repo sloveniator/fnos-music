@@ -2,8 +2,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { runScan, scanState, type TrackInfo } from './scan'
+import { TRASH_DIRNAME, isInside, moveIntoTrash, listTrash, restoreTrash, purgeTrash, type TrashEntry, type TrashOpResult } from './trash'
 
 export type { TrackInfo } from './scan'
+export type { TrashEntry, TrashOpResult } from './trash'
 
 // ---------------------------------------------------------------------------
 // 曲库持久化 + 设置 + 流媒体 token
@@ -296,3 +298,71 @@ export const libraryStats = (): { tracks: number, artists: number, albums: numbe
   }
   return { tracks: tracks.length, artists: artists.size, albums: albums.size, bytes, scannedAt }
 }
+
+// ---------------------------------------------------------------------------
+// 曲库管理（管理后台「音乐库」页）：删除 / 回收站
+//   语义与租户曲库一致：软删除 = 文件搬进 <扫描目录>/.gusi-trash/（点目录，扫描器不进），
+//   数据不丢、可恢复；彻底删除只在回收站页显式触发（AGENTS.md：trash > rm）。
+//   安全阀：只接受本索引里已存在的 id（调用方无法传任意路径）；文件必须落在某个扫描目录内。
+// ---------------------------------------------------------------------------
+
+export interface RemoveTracksResult {
+  removed: number
+  /** 实际移出索引的 id（含「文件已被外部删掉、只清索引」这种） */
+  removedIds: string[]
+  failed: Array<{ id: string, name?: string, reason: string }>
+  total: number
+  trashDir: string
+  /** 被移走的文件原绝对路径（管理端据此判断哪些租户曲库需要跟着重扫） */
+  removedPaths: string[]
+}
+
+const scanDirs = (): string[] => settings.dirs.filter(d => !!d)
+
+export const removeTracks = (ids: string[]): RemoveTracksResult => {
+  const dirs = scanDirs()
+  const removed: TrackInfo[] = []
+  const failed: RemoveTracksResult['failed'] = []
+  for (const raw of ids) {
+    const id = String(raw)
+    const tr = tracksById.get(id)
+    if (!tr) { failed.push({ id, reason: '曲目不存在' }); continue }
+    // 取最深匹配的扫描目录作为该文件的归属根
+    const owner = dirs.filter(d => isInside(tr.filePath, d)).sort((a, b) => b.length - a.length)[0]
+    if (!owner) { failed.push({ id, name: tr.name, reason: '文件不在曲库扫描目录内，已跳过' }); continue }
+    if (!fs.existsSync(tr.filePath)) {
+      // 文件已被外部删除：仅清理索引，仍算删除成功
+      removed.push(tr)
+      failed.push({ id, name: tr.name, reason: '文件已不存在（已清理索引）' })
+      continue
+    }
+    try { moveIntoTrash(owner, tr.filePath); removed.push(tr) }
+    catch (e) { failed.push({ id, name: tr.name, reason: (e as Error).message }) }
+  }
+  if (removed.length) {
+    const gone = new Set(removed.map(r => r.id))
+    tracks = tracks.filter(x => !gone.has(x.id))
+    for (const id of gone) tracksById.delete(id)
+    buildNormIndex()
+    persist()
+  }
+  return {
+    removed: removed.length,
+    removedIds: removed.map(r => r.id),
+    failed,
+    total: tracks.length,
+    trashDir: TRASH_DIRNAME,
+    removedPaths: removed.map(r => r.filePath),
+  }
+}
+
+export const listLibraryTrash = (): TrashEntry[] => listTrash(scanDirs())
+
+export const restoreLibraryTrash = (relPaths: string[]): TrashOpResult => {
+  const r = restoreTrash(scanDirs(), relPaths)
+  // 搬回来的文件要重新进索引才能在曲库看到；扫描是异步的，前端稍后刷新即可
+  if (r.ok) startScan()
+  return r
+}
+
+export const purgeLibraryTrash = (relPaths: string[]): TrashOpResult => purgeTrash(scanDirs(), relPaths)

@@ -422,6 +422,7 @@ const loadLibrary = async () => {
     renderScan(d.scan)
     await loadSystemDirs()
     await loadTracks()
+    await loadTrash()
   } catch (err) {
     toast('音乐库加载失败: ' + err.message)
   }
@@ -566,6 +567,7 @@ const renderTracks = () => {
           <div class="row-acts">
             <button class="btn mini act-dl">下载</button>
             <button class="btn mini act-play">试听</button>
+            <button class="btn mini act-del danger">删除</button>
           </div>
         </td>
       </tr>`).join('')
@@ -578,9 +580,11 @@ const renderTracks = () => {
   if (!STREAM_TOKEN) $('#btn-export').disabled = true
 }
 
-const apiCover = (id) => '/admin/api/library/cover/' + encodeURIComponent(id)
-const apiPreview = (id) => '/admin/api/library/preview/' + encodeURIComponent(id)
-const apiDownload = (id) => '/admin/api/library/download/' + encodeURIComponent(id)
+// 媒体类端点（封面/试听/下载）由标签直接发起，带不了 X-Admin-Token 头，
+// 所以走 ?k= 传 token（服务端只对这三个只读端点放行 query token）
+const apiCover = (id) => '/admin/api/library/cover/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN)
+const apiPreview = (id) => '/admin/api/library/preview/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN)
+const apiDownload = (id) => '/admin/api/library/download/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN)
 
 $('#track-tbody').addEventListener('click', (e) => {
   const row = e.target.closest('tr')
@@ -599,6 +603,10 @@ $('#track-tbody').addEventListener('click', (e) => {
     document.body.appendChild(a)
     a.click()
     a.remove()
+    return
+  }
+  if (e.target.closest('.act-del')) {
+    removeTracks([id])
     return
   }
   const cb = e.target.closest('.row-select')
@@ -622,6 +630,119 @@ $('#track-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#bt
 $('#page-prev').addEventListener('click', () => { if (lib.page > 1) { lib.page--; loadTracks() } })
 $('#page-next').addEventListener('click', () => { if (lib.page * lib.size < lib.total) { lib.page++; loadTracks() } })
 $('#btn-clear-sel').addEventListener('click', () => { lib.sel.clear(); renderTracks() })
+
+// ==================== 删除（软删除 → 回收站） ====================
+// 删除不是 rm：文件移到扫描目录下的 .gusi-trash/，可恢复（AGENTS.md：trash > rm）。
+// 二次确认里写清这一点，避免管理员以为"删除 = 永久删除"而不敢用。
+const removeTracks = async (ids) => {
+  const list = (ids || []).filter(Boolean)
+  if (!list.length) return
+  const ok = confirm('删除选中的 ' + list.length + ' 首曲目？\n\n'
+    + '文件会移动到扫描目录下的 .gusi-trash/，不是永久删除，可在本页「回收站」恢复。')
+  if (!ok) return
+  try {
+    const r = await api('/admin/api/library/remove', { method: 'POST', body: { ids: list } })
+    const d = r.data || {}
+    lib.sel.clear()
+    let msg = '已删除 ' + (d.removed ?? 0) + ' 首（已移入回收站）'
+    if (d.failed?.length) msg += '，跳过 ' + d.failed.length + ' 首'
+    toast(msg)
+    if (d.failed?.length) console.warn('[曲库删除] 跳过的条目：', d.failed)
+    await loadTracks()
+    await loadTrash()
+    try { renderLibStats((await api('/admin/api/library/stats', { method: 'GET' })).data) } catch { /* 统计刷新失败不影响删除结果 */ }
+  } catch (err) { toast('删除失败: ' + err.message) }
+}
+$('#btn-remove-sel').addEventListener('click', () => removeTracks([...lib.sel]))
+
+// ==================== 回收站 ====================
+const trash = { list: [], sel: new Set() }
+
+const loadTrash = async () => {
+  try {
+    const r = await api('/admin/api/library/trash', { method: 'GET' })
+    trash.list = r.data.list || []
+    // 已恢复/已彻底删除的条目要从选择集里剔掉，否则计数虚高
+    const alive = new Set(trash.list.map(e => e.relPath))
+    for (const p of [...trash.sel]) if (!alive.has(p)) trash.sel.delete(p)
+    renderTrash()
+  } catch (err) {
+    toast('回收站加载失败: ' + err.message)
+  }
+}
+
+const renderTrash = () => {
+  const tb = $('#trash-tbody')
+  $('#trash-all').checked = trash.list.length > 0 && trash.list.every(e => trash.sel.has(e.relPath))
+  tb.innerHTML = trash.list.length
+    ? trash.list.map(e => `
+      <tr class="${trash.sel.has(e.relPath) ? 'sel' : ''}" data-path="${esc(e.relPath)}">
+        <td class="chk"><input type="checkbox" class="trash-select" ${trash.sel.has(e.relPath) ? 'checked' : ''}></td>
+        <td><span class="t-name">${esc(e.name)}</span></td>
+        <td>${esc(e.singer || '—')}</td>
+        <td>${esc(e.album || '—')}</td>
+        <td>${fmtBytes(e.size)}</td>
+        <td>${fmtDate(e.mtime)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="empty">回收站是空的</td></tr>'
+  $('#trash-count').textContent = '已选 ' + trash.sel.size + ' 项'
+  $('#trash-bar').hidden = !trash.sel.size
+}
+
+const trashRestore = async (paths) => {
+  if (!paths.length) return
+  if (!confirm('把选中的 ' + paths.length + ' 项恢复回原位置？')) return
+  try {
+    const r = await api('/admin/api/library/trash/restore', { method: 'POST', body: { paths } })
+    const d = r.data || {}
+    trash.sel.clear()
+    toast('已恢复 ' + (d.ok ?? 0) + ' 项' + (d.failed?.length ? '，失败 ' + d.failed.length + ' 项' : '') + '，曲库正在重新扫描…')
+    await loadTrash()
+    // 恢复只是把文件搬回原位置，索引要等服务端重扫（异步）才更新：
+    // 立刻刷新曲目表只会看到空表，管理员会以为恢复失败、文件丢了。这里轮询等它回到索引。
+    await loadTracks()
+    for (let i = 0; i < 15 && lib.total < (d.ok ?? 0); i++) {
+      await new Promise(res => setTimeout(res, 1000))
+      await loadTracks()
+    }
+  } catch (err) { toast('恢复失败: ' + err.message) }
+}
+
+const trashPurge = async (paths) => {
+  if (!paths.length) return
+  const all = paths.length === 1 && paths[0] === '*'
+  const tip = all
+    ? '清空回收站：里面的文件会被真正删除，不可撤销。\n\n确定继续？'
+    : '彻底删除选中的 ' + paths.length + ' 项？文件会被真正删除，不可撤销。'
+  if (!confirm(tip)) return
+  try {
+    const r = await api('/admin/api/library/trash/purge', { method: 'POST', body: { paths } })
+    const d = r.data || {}
+    trash.sel.clear()
+    toast('已彻底删除 ' + (d.ok ?? 0) + ' 项' + (d.failed?.length ? '，失败 ' + d.failed.length + ' 项' : ''))
+    await loadTrash()
+  } catch (err) { toast('彻底删除失败: ' + err.message) }
+}
+
+$('#trash-tbody').addEventListener('click', (e) => {
+  const row = e.target.closest('tr')
+  if (!row || !row.dataset.path) return
+  const cb = e.target.closest('.trash-select')
+  if (!cb) return
+  if (cb.checked) trash.sel.add(row.dataset.path); else trash.sel.delete(row.dataset.path)
+  row.classList.toggle('sel', cb.checked)
+  renderTrash()
+})
+$('#trash-all').addEventListener('change', (e) => {
+  if (e.target.checked) trash.list.forEach(x => trash.sel.add(x.relPath))
+  else trash.sel.clear()
+  renderTrash()
+})
+$('#btn-trash-refresh').addEventListener('click', () => { loadTrash(); toast('回收站已刷新') })
+$('#btn-trash-restore').addEventListener('click', () => trashRestore([...trash.sel]))
+$('#btn-trash-purge-sel').addEventListener('click', () => trashPurge([...trash.sel]))
+$('#btn-trash-purge-all').addEventListener('click', () => trashPurge(['*']))
+$('#btn-trash-clear-sel').addEventListener('click', () => { trash.sel.clear(); renderTrash() })
 
 // 导出 .lxmc
 const exportIds = async (ids) => {
