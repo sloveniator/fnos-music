@@ -417,3 +417,55 @@ export const sodaLyric = async (id: string): Promise<{ lyric: string; tlyric: st
     return { lyric: '', tlyric: '' }
   }
 }
+
+// ------------------------------ 听歌模式（场景音乐） ------------------------------
+
+/**
+ * 汽水「听歌模式」条目。来自 /luna/pc/feed/mode 的 feed_mode_block（免登录可用）。
+ * 注意：该接口只给出**模式目录**（名称/图标/场景 id/队列类型），
+ * 具体场景歌流走客户端私有接口（免登录面不可达，详见 fm.ts 头注释）。
+ */
+export interface SodaFeedMode {
+  /** 稳定标识：sub_queue_type，如 scene_mode_emo */
+  key: string
+  /** 展示名：如「深夜 EMO」「沉浸 0.8x」 */
+  name: string
+  /** 场景 id（scene_mode_id） */
+  sceneId: number
+  /** 模式图标 */
+  pic: string | null
+  /** 切换提示文案（上游原文） */
+  toast?: string
+}
+
+const FEED_MODE = 'https://api.qishui.com/luna/pc/feed/mode'
+
+/** 拉取汽水的听歌模式目录（实测 45 个场景模式；免登录、无需签名） */
+export const sodaFeedModes = async (): Promise<SodaFeedMode[]> => {
+  const j = await fetchJson(`${FEED_MODE}?${qs(pcParams())}`, {
+    'User-Agent': PC_UA,
+    'x-luna-background-type': 'foreground',
+    'x-luna-is-background-req': '0',
+  }, 15_000)
+  const blocks: any[] = Array.isArray(j?.feed_mode_block) ? j.feed_mode_block : []
+  const out: SodaFeedMode[] = []
+  const seen = new Set<string>()
+  for (const b of blocks) {
+    const modes: any[] = Array.isArray(b?.feed_mode) ? b.feed_mode : []
+    for (const m of modes) {
+      const scene = m?.entity?.feed_scene_mode
+      const key = String(scene?.sub_queue_type ?? '').trim()
+      const name = String(m?.text ?? '').trim()
+      if (!key || !name || seen.has(key)) continue
+      seen.add(key)
+      out.push({
+        key,
+        name,
+        sceneId: Number(scene?.scene_mode_id ?? 0) || 0,
+        pic: sodaPic(m?.url_info),
+        toast: String(m?.cutover_toast ?? '').trim() || undefined,
+      })
+    }
+  }
+  return out
+}

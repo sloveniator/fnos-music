@@ -134,6 +134,8 @@
     $('#who').textContent = me.name
     await refreshPlaylists()
     route()
+    // 打开网页/APP 自动开台（FM 电台）：等首屏渲染落地后再起播，不抢首屏
+    setTimeout(maybeFmAutoplay, 400)
   }
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault()
@@ -187,7 +189,7 @@
   }
 
   // ---------------- 侧栏 / 路由 ----------------
-  const TITLES = { home: '首页', tracks: '全部歌曲', albums: '专辑', artists: '歌手', search: '搜索', online: '在线音乐', downloads: '下载中心', playlists: '我的歌单', settings: '设置' }
+  const TITLES = { home: '首页', tracks: '全部歌曲', albums: '专辑', artists: '歌手', search: '搜索', online: '在线音乐', fm: 'FM 电台', downloads: '下载中心', playlists: '我的歌单', settings: '设置' }
   function setActiveNav(name) {
     document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === name))
     $('#top-title').textContent = TITLES[name] || '古四音乐'
@@ -2813,6 +2815,148 @@ kuwo.cn/playlist_detail/280301309</pre>
     await load()
   }
 
+  // ---------------- FM 电台（汽水「听歌模式」→ 自动续播频道） ----------------
+  // 频道来自汽水 /luna/pc/feed/mode（45 个听歌模式，服务端实时拉取并缓存 1h）；
+  // 每个频道的曲目由服务端按「频道名 + 配方词」从汽水歌单/搜索合成，仅保留免登录可播的免费全曲。
+  const FM_ICON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.4"/><path d="M8.1 8.1a5.5 5.5 0 0 0 0 7.8M15.9 8.1a5.5 5.5 0 0 1 0 7.8"/><path d="M5.2 5.2a9.6 9.6 0 0 0 0 13.6M18.8 5.2a9.6 9.6 0 0 1 0 13.6"/></svg>'
+  let fmChannelsCache = []
+
+  const fmAutoOn = () => localStorage.getItem('gusi-fm-auto') !== '0'
+
+  async function loadFmChannels(force) {
+    if (fmChannelsCache.length && !force) return fmChannelsCache
+    const d = await api('/api/fm/modes')
+    fmChannelsCache = Array.isArray(d.list) ? d.list : []
+    return fmChannelsCache
+  }
+
+  /** 可选音源校验：汽水源被关掉时 FM 不可用（避免开台后整队播不出来） */
+  function fmSourceEnabled() {
+    const s = onlineSourcesCache.find(x => x.id === 'soda')
+    return !s || s.enabled
+  }
+
+  /** 开台：拉首批曲目交给播放器（FM 语义：顺序播放、队列见底自动续、按频道变速） */
+  async function startFm(key, opts) {
+    const o = opts || {}
+    if (!fmSourceEnabled()) { toast('汽水音乐源未启用，请先在管理后台开启', true); return }
+    try {
+      if (!o.silent) toast('正在接入频道…')
+      const d = await api('/api/fm/next?key=' + encodeURIComponent(key) + '&limit=20')
+      const rows = asOnlineRows(d.list)
+      if (!rows.length) { toast('该频道暂时取不到可播放曲目', true); return }
+      player.playFm({ key: d.key, name: d.name, rate: d.playbackRate || 1, poolSize: d.poolSize }, rows)
+      localStorage.setItem('gusi-fm-key', d.key)
+      localStorage.setItem('gusi-fm-name', d.name)
+      toast('FM 已开台 · ' + d.name + '（池 ' + d.poolSize + ' 首' + ((d.playbackRate || 1) !== 1 ? ' · ' + d.playbackRate + ' 倍速' : '') + '）')
+    } catch (e) {
+      toast('开台失败：' + (e.message || e), true)
+    }
+  }
+
+  function fmCard(ch) {
+    const c = el('div', 'fm-card')
+    c.dataset.key = ch.key
+    const ic = el('div', 'fm-ic')
+    if (ch.pic) {
+      const img = document.createElement('img')
+      img.src = picProxy(ch.pic) || ''
+      img.alt = ''
+      img.loading = 'lazy'
+      img.onerror = () => { ic.innerHTML = FM_ICON }
+      ic.appendChild(img)
+    } else ic.innerHTML = FM_ICON
+    c.appendChild(ic)
+    c.appendChild(el('div', 'fm-nm', ch.name))
+    c.appendChild(el('div', 'fm-ds', ch.desc || ''))
+    if (ch.playbackRate && ch.playbackRate !== 1) c.appendChild(el('span', 'fm-tag', ch.playbackRate + '× 慢放'))
+    c.onclick = () => { startFm(ch.key) }
+    return c
+  }
+
+  /** 频道卡「播放中」标记（开台/换台后调用；页面不在 #/fm 时自然无操作） */
+  function paintFmCurrent() {
+    const cur = player.fm ? player.fm.key : ''
+    document.querySelectorAll('.fm-card').forEach((c) => {
+      const on = !!cur && c.dataset.key === cur
+      c.classList.toggle('on', on)
+      const badge = c.querySelector('.fm-playing')
+      if (on && !badge) c.insertBefore(el('span', 'fm-playing', '播放中'), c.firstChild)
+      if (!on && badge) badge.remove()
+    })
+  }
+
+  /** 无手势自动播放被浏览器拦截时的「继续收听」浮条（点一下即恢复，符合 autoplay 策略） */
+  function showFmBlocked(fm) {
+    let bar = document.getElementById('fm-unlock')
+    if (!bar) {
+      bar = el('button', 'fm-unlock')
+      bar.id = 'fm-unlock'
+      bar.onclick = () => {
+        const a = player.audio
+        if (a && a.src) a.play().catch(() => {})
+        else player.start()
+        bar.classList.remove('show')
+      }
+      document.body.appendChild(bar)
+    }
+    bar.textContent = '▶ 点击继续收听 FM · ' + (fm && fm.name ? fm.name : '电台')
+    bar.classList.add('show')
+  }
+  function hideFmBlocked() {
+    const b = document.getElementById('fm-unlock')
+    if (b) b.classList.remove('show')
+  }
+
+  /** 打开网页/APP 自动开台：优先接着上次的 FM 队列（含播放位置），否则重开上次频道 */
+  function maybeFmAutoplay() {
+    if (!fmAutoOn()) return
+    if (player.fm && player.queue.length) { player.start(); return }
+    const key = localStorage.getItem('gusi-fm-key')
+    if (key) void startFm(key, { silent: true })
+  }
+
+  routes.fm = async () => {
+    setActiveNav('fm')
+    const v = $('#view')
+    const banner = el('div', 'fm-banner')
+    banner.appendChild(el('div', 'fm-b-title', 'FM 电台'))
+    banner.appendChild(el('div', 'fm-b-sub', '汽水「听歌模式」频道 · 打开即播 · 队列见底自动续播'))
+    v.appendChild(banner)
+
+    const row = el('div', 'fm-autorow')
+    const lbl = el('label', 'set-toggle')
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.checked = fmAutoOn()
+    cb.onchange = () => {
+      localStorage.setItem('gusi-fm-auto', cb.checked ? '1' : '0')
+      toast(cb.checked ? '已开启：打开应用自动播放 FM' : '已关闭：打开应用自动播放 FM')
+    }
+    lbl.appendChild(cb)
+    lbl.appendChild(el('span', 'set-toggle-track'))
+    row.appendChild(lbl)
+    row.appendChild(el('span', 'fm-auto-hint', '打开网页/APP 自动播放（无手势时浏览器会拦截，点一下浮条「继续收听」即可）'))
+    v.appendChild(row)
+
+    const grid = el('div', 'fm-grid')
+    v.appendChild(grid)
+    grid.appendChild(el('div', 'fm-loading', '正在拉取汽水「听歌模式」…'))
+    try {
+      const list = await loadFmChannels()
+      grid.innerHTML = ''
+      if (!list.length) {
+        grid.appendChild(el('div', 'fm-empty', '未取到频道（汽水接口可能已变更）'))
+        return
+      }
+      for (const ch of list) grid.appendChild(fmCard(ch))
+      paintFmCurrent()
+    } catch (e) {
+      grid.innerHTML = ''
+      grid.appendChild(el('div', 'fm-empty', '频道拉取失败：' + (e.message || e)))
+    }
+  }
+
   routes.settings = async () => {
     setActiveNav('settings')
     const v = $('#view')
@@ -2886,6 +3030,33 @@ kuwo.cn/playlist_detail/280301309</pre>
 
     pbPref.appendChild(pbGrid)
     v.appendChild(pbPref)
+
+    // FM 电台
+    const fmSec = el('section', 'set-section')
+    fmSec.appendChild(el('h3', 'set-sec-h', 'FM 电台'))
+    const fmGrid = el('div', 'set-grid')
+    fmGrid.appendChild(el('span', 'set-k', '打开自动播放'))
+    const fmToggle = el('label', 'set-toggle')
+    const fmCb = document.createElement('input')
+    fmCb.type = 'checkbox'
+    fmCb.checked = fmAutoOn()
+    fmCb.onchange = () => {
+      localStorage.setItem('gusi-fm-auto', fmCb.checked ? '1' : '0')
+      toast(fmCb.checked ? '已开启：打开应用自动播放 FM' : '已关闭：打开应用自动播放 FM')
+    }
+    fmToggle.appendChild(fmCb)
+    fmToggle.appendChild(el('span', 'set-toggle-track'))
+    fmGrid.appendChild(fmToggle)
+    fmGrid.appendChild(el('span', 'set-k', '上次频道'))
+    fmGrid.appendChild(el('span', 'set-v', localStorage.getItem('gusi-fm-name') || '未开台'))
+    fmGrid.appendChild(el('span', 'set-k', '频道目录'))
+    const fmGo = el('span', 'set-v')
+    const fmGoBtn = el('button', 'btn btn-sm', '前往 FM 电台 →')
+    fmGoBtn.onclick = () => { location.hash = '#/fm' }
+    fmGo.appendChild(fmGoBtn)
+    fmGrid.appendChild(fmGo)
+    fmSec.appendChild(fmGrid)
+    v.appendChild(fmSec)
 
     // 数据管理
     const dataSec = el('section', 'set-section')
@@ -3164,17 +3335,22 @@ kuwo.cn/playlist_detail/280301309</pre>
   const player = {
     audio: null, queue: [], index: -1, mode: localStorage.getItem('gusi-mode') || 'order',
     cur: null, lyric: null, lyricIdx: -1,
+    // FM 电台状态：{ key, name, rate, played:Set<rid>, playedCount, refilling, poolSize }
+    // 非 FM 播放（本地曲库/搜索列表）时为 null
+    fm: null,
     // 随机播放无放回：已播过的下标，遍历完自动重置（避免连续重复）
     _visited: null,
 
     init() {
       this.audio = new Audio()
+      // E2E 探针：音频元素未挂载 DOM，自动化测试需要读队列/倍速/FM 态（与 window.__onlineArea 同风格）
+      window.__player = this
       this.audio.volume = (parseInt(localStorage.getItem('gusi-vol') ?? '80', 10)) / 100
       $('#vol').value = Math.round(this.audio.volume * 100)
       this.audio.addEventListener('timeupdate', () => this.tick())
       this.audio.addEventListener('ended', () => this.next(true))
       this.audio.addEventListener('pause', () => this.setPlayIcon(false))
-      this.audio.addEventListener('playing', () => { this.setPlayIcon(true); this.onPlayOk() })
+      this.audio.addEventListener('playing', () => { this.setPlayIcon(true); this.applyFmRate(); this.onPlayOk() })
       this.audio.addEventListener('error', () => this.onPlayError())
       // 断点恢复：元数据就绪后跳回上次位置（仅一次）
       this.audio.addEventListener('loadedmetadata', () => {
@@ -3279,7 +3455,7 @@ kuwo.cn/playlist_detail/280301309</pre>
           id: t.id, kind: t.kind, source: t.source, rid: t.rid, name: t.name, singer: t.singer,
           album: t.album, interval: t.interval, pic: t.pic, hasCover: hasCoverOf(t),
         }))
-        localStorage.setItem('gusi-q', JSON.stringify({ queue: slim, index: this.index, at: atSec || 0 }))
+        localStorage.setItem('gusi-q', JSON.stringify({ queue: slim, index: this.index, at: atSec || 0, fm: this.fm ? { key: this.fm.key, name: this.fm.name, rate: this.fm.rate } : null }))
       } catch {}
     },
     restore() {
@@ -3291,6 +3467,14 @@ kuwo.cn/playlist_detail/280301309</pre>
         const t = this.queue[this.index]
         if (!t) return
         this.cur = t
+        // FM 队列恢复：频道信息（名称/倍速/已播集合）一并还原，后续续播才知道从哪个频道取
+        if (saved.fm && saved.fm.key) {
+          this.fm = {
+            key: saved.fm.key, name: saved.fm.name || 'FM', rate: Number(saved.fm.rate) || 1,
+            played: new Set(this.queue.filter(x => x.kind === 'online' && x.rid).map(x => String(x.rid))),
+            playedCount: this.index + 1, refilling: false, poolSize: 0,
+          }
+        }
         this._pendingAt = Number(saved.at) || 0
         $('#player').hidden = false
         document.body.classList.add('has-player')
@@ -3301,6 +3485,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     },
 
     play(list, idx) {
+      this.fm = null // 非 FM 入口：退出电台态（倍速随之复位为 1x）
       this.queue = list.slice()
       this.index = idx
       this._visited = null
@@ -3308,6 +3493,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       this._skips = []
       this.saveQ(0)
       this.start()
+      paintFmCurrent()
     },
     enqueue(list) {
       if (!this.queue.length) return this.play(list, 0)
@@ -3315,9 +3501,60 @@ kuwo.cn/playlist_detail/280301309</pre>
       this.renderQueue()
       this.saveQ(0)
     },
+    // ---------- FM 电台 ----------
+    /** 开台：接管队列，走 FM 语义（顺序播放 · 队列见底自动续 · 按频道变速） */
+    playFm(info, rows) {
+      this.fm = {
+        key: info.key, name: info.name, rate: Number(info.rate) || 1,
+        played: new Set(rows.map(r => String(r.rid))), playedCount: 1,
+        refilling: false, poolSize: info.poolSize || 0,
+      }
+      this.queue = rows.slice()
+      this.index = 0
+      this._visited = null
+      this._errSeq = 0
+      this._skips = []
+      this.mode = 'order'
+      localStorage.setItem('gusi-mode', this.mode)
+      setModeIcon(this.mode)
+      this.saveQ(0)
+      this.start()
+      paintFmCurrent()
+    },
+    /** 续播：向服务端要下一批（带 exclude 去重），追加到队列尾部 */
+    fmRefill() {
+      const fm = this.fm
+      if (!fm || fm.refilling) return
+      fm.refilling = true
+      const ex = Array.from(fm.played).slice(-600).join(',')
+      api('/api/fm/next?key=' + encodeURIComponent(fm.key) + '&limit=20&exclude=' + encodeURIComponent(ex))
+        .then((d) => {
+          if (!this.fm || this.fm.key !== fm.key) return
+          if (d.reset) fm.played.clear()
+          const rows = asOnlineRows(d.list)
+          rows.forEach(r => fm.played.add(String(r.rid)))
+          if (d.poolSize) fm.poolSize = d.poolSize
+          if (!rows.length) { toast('FM 取不到新曲目了（频道池可能已空）', true); return }
+          this.queue.push(...rows)
+          this.renderQueue()
+          this.saveQ(0)
+          toast('FM 续播 ' + rows.length + ' 首 · ' + fm.name + (d.reset ? '（已开启新一轮）' : ''))
+        })
+        .catch((e) => { toast('FM 续播失败：' + (e.message || e), true) })
+        .finally(() => { fm.refilling = false })
+    },
+    /** 频道倍速（沉浸 0.8x = 0.8）；非 FM 时复位 1x */
+    applyFmRate() {
+      const rate = this.fm ? (Number(this.fm.rate) || 1) : 1
+      if (this.audio && this.audio.playbackRate !== rate) {
+        this.audio.playbackRate = rate
+        this.renderNp()
+      }
+    },
     // 随机播放：打乱列表从头播，并切换洗牌模式（队列变更重置无放回记录）
     shufflePlay(list) {
       if (!list.length) return
+      this.fm = null // 打乱播放属于非电台入口
       const arr = list.slice()
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1))
@@ -3372,8 +3609,11 @@ kuwo.cn/playlist_detail/280301309</pre>
       this.queue = []
       this.index = -1
       this.cur = null
+      this.fm = null
+      hideFmBlocked()
       $('#player').hidden = true
       this.saveQ(0)
+      paintFmCurrent()
     },
     // 播放失败自动跳过（VIP/版权在线曲、损坏文件不卡队列）；单曲循环也跳过坏曲
     onPlayError() {
@@ -3397,6 +3637,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       this.start()
     },
     onPlayOk() {
+      hideFmBlocked()
       if (this._skips && this._skips.length) {
         toast('已跳过不可播 ' + this._skips.length + ' 首：' + this._skips.join('、'))
       }
@@ -3416,7 +3657,14 @@ kuwo.cn/playlist_detail/280301309</pre>
         this.audio.src = mediaUrl('stream', t.id)
         api('/api/played', { method: 'POST', body: { trackId: t.id } }).catch(() => {})
       }
-      this.audio.play().catch(() => {})
+      this.applyFmRate()
+      // 浏览器 autoplay 策略：无手势时 play() 会被拒 —— FM 场景给一条「继续收听」浮条兜底
+      this.audio.play().catch(() => { if (this.fm) showFmBlocked(this.fm) })
+      // FM：队列见底前预取下一批（顺序播放看 index 进度，随机播放靠已播计数兜底）
+      if (this.fm) {
+        this.fm.playedCount = (this.fm.playedCount || 0) + 1
+        if (this.fm.playedCount >= this.queue.length - 4) this.fmRefill()
+      }
       this.renderNp()
       this.renderQueue()
       this.saveQ(0)
@@ -3479,7 +3727,9 @@ kuwo.cn/playlist_detail/280301309</pre>
       const t = this.cur
       if (!t) return
       $('#np-name').textContent = t.name
-      $('#np-singer').textContent = t.singer || '未知歌手'
+      // FM 播放时在歌手行尾标注频道来源（含倍速），电台态一眼可辨
+      const fmTag = this.fm ? ' · FM ' + this.fm.name + (Number(this.fm.rate) !== 1 ? ' ' + this.fm.rate + '×' : '') : ''
+      $('#np-singer').textContent = (t.singer || '未知歌手') + fmTag
       const img = $('#np-cover')
       const npLove = $('#np-love')
       const npDl = $('#np-download')

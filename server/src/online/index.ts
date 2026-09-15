@@ -219,6 +219,10 @@ export const importOnlineUrl = async (rawUrl: string): Promise<{ source: string;
 export { kwParseJSON }
 export type { OnlineItem, OnlineCollection }
 
+// FM 电台（汽水听歌模式 → 频道）：目录 + 频道曲流
+export { fmChannels, fmChannel, fmNext, fmPoolSize } from './fm'
+export type { FmChannel, FmNextResult } from './fm'
+
 /**
  * 拉流（<audio> 经 NAS 代理）时上游需要的 Referer。
  * 缺省沿用酷我（历史行为，网易云/咪咕直链也接受）；汽水直链在 douyinvod，

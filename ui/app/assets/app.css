@@ -1077,3 +1077,42 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .np-name { font-size: 15.5px; }
   .login-card { width: min(420px, 92vw); }
 }
+/* ---------- FM 电台（汽水听歌模式频道） ---------- */
+.fm-banner { position: relative; overflow: hidden; border: 1px solid var(--line-soft); border-radius: var(--radius);
+  padding: 18px 20px; margin-bottom: 16px;
+  background: linear-gradient(120deg, rgba(79,140,255,.15), rgba(124,92,255,.10) 58%, transparent),
+              linear-gradient(180deg, var(--card), #10131d); }
+.fm-b-title { font-size: 18px; font-weight: 600; letter-spacing: .5px; }
+.fm-b-sub { color: var(--muted); font-size: 12.5px; margin-top: 5px; }
+.fm-autorow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; }
+.fm-auto-hint { color: var(--muted); font-size: 12px; flex: 1 1 260px; line-height: 1.5; }
+.fm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 14px; }
+.fm-card { position: relative; display: flex; flex-direction: column; gap: 6px; cursor: pointer;
+  background: linear-gradient(180deg, var(--card), #10131d); border: 1px solid var(--line-soft);
+  border-radius: var(--radius); padding: 13px 13px 15px;
+  transition: transform .16s, border-color .16s, box-shadow .16s; }
+.fm-card:hover { transform: translateY(-3px); border-color: #2e3648; }
+.fm-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(79,140,255,.5), 0 12px 30px rgba(79,140,255,.12); }
+.fm-ic { width: 38px; height: 38px; border-radius: 11px; overflow: hidden; display: flex; align-items: center;
+  justify-content: center; background: rgba(255,255,255,.05); border: 1px solid var(--line-soft); margin-bottom: 4px; }
+.fm-ic img { width: 100%; height: 100%; object-fit: cover; }
+.fm-ic svg { width: 20px; height: 20px; opacity: .6; }
+.fm-nm { font-size: 14px; font-weight: 550; }
+.fm-ds { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.fm-tag { align-self: flex-start; margin-top: 2px; font-size: 10.5px; padding: 2px 7px; border-radius: 8px;
+  background: rgba(79,140,255,.16); color: #9dbdff; }
+.fm-playing { position: absolute; top: 9px; right: 9px; font-size: 10.5px; padding: 2px 7px; border-radius: 8px;
+  background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(79,140,255,.4); }
+.fm-loading, .fm-empty { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 13px; padding: 22px 0; }
+.fm-unlock { position: fixed; left: 50%; transform: translateX(-50%); z-index: 45; display: none;
+  bottom: calc(var(--player-h) + env(safe-area-inset-bottom, 0px) + 22px);
+  padding: 11px 20px; border-radius: 999px; font-size: 13px; max-width: 88vw;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
+  box-shadow: 0 10px 28px rgba(79,140,255,.42); }
+.fm-unlock.show { display: block; }
+@media (max-width: 560px) {
+  .fm-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .fm-card { padding: 11px 11px 13px; }
+  .fm-banner { padding: 15px 16px; }
+  .fm-b-sub { font-size: 12px; }
+}

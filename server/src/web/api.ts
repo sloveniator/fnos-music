@@ -21,6 +21,7 @@ import {
 import { getUserSpace } from '@/user'
 import { LIST_IDS } from '@/constants'
 import { lyricWithFallback } from '@/online/lyric-fallback'
+import { fmChannels, fmNext } from '@/online'
 import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists, onlineAudioExt, onlineStreamReferer } from '@/online'
 import { pipeHttpStream } from '@/utils/httpPipe'
 import {
@@ -463,6 +464,31 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     if (!isOnlineSource(source) || !/^[A-Za-z0-9_]{1,48}$/.test(rid)) return fail(res, 400, '参数非法'), true
     const r = await onlineLyric(source, rid)
     ok(res, r)
+    return true
+  }
+  // ---------------- FM 电台（汽水听歌模式 → 自动续播频道） ----------------
+  // GET /web/api/fm/modes —— 频道目录（实时拉汽水「听歌模式」，含频道说明/播放速率）
+  if (method == 'GET' && p == '/web/api/fm/modes') {
+    try {
+      ok(res, { list: await fmChannels() })
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
+    return true
+  }
+  // GET /web/api/fm/next?key=&limit=&exclude= —— 取下一批频道曲目（前端队列见底时续播）
+  //   exclude 为客户端已播曲目 id（逗号分隔），服务端据此避开重复；池子跑完一圈自动重开
+  if (method == 'GET' && p == '/web/api/fm/next') {
+    const key = (url.searchParams.get('key') ?? '').trim()
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') ?? '20', 10) || 20, 1), 50)
+    const exclude = (url.searchParams.get('exclude') ?? '')
+      .split(',').map((s) => s.trim()).filter((s) => /^[A-Za-z0-9_\-]{1,48}$/.test(s)).slice(0, 800)
+    if (!/^[a-z0-9_]{1,48}$/.test(key)) return fail(res, 400, '参数非法'), true
+    try {
+      ok(res, await fmNext(key, exclude, limit))
+    } catch (e) {
+      fail(res, 502, (e as Error).message)
+    }
     return true
   }
   // ---------------- 在线下载队列（MVP，移植 daoyin 下载能力的最小内核） ----------------
