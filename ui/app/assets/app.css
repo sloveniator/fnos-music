@@ -1012,24 +1012,37 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 
 /* —— 7.4 手机端操作按钮：等宽两列网格 + 触屏复选框放大 —— */
 @media (max-width: 560px) {
-  /* 批量操作收成单行横滑（与在线源 chips / Tab 同一套手势），不再占三行高度 */
-  /* 注意：横滑容器不能用 flex-end 对齐——溢出到左侧的按钮会滚不到（Chrome 不计入 scrollWidth） */
-  .page-head .btns { width: 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto;
-    -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
-  .page-head .btns::-webkit-scrollbar { display: none; }
-  .page-head .btns .btn { flex: 0 0 auto; padding: 9px 16px; min-height: var(--tap); }
+  /* 主人 2026-09-15 决定：不用单行横滑，改回整齐两列 —— 按钮一眼看全，不必在页头里横向找 */
+  /* 用 grid 而非 flex 换行：grid 的行列由轨道决定，不会再出现右对齐参差的阶梯状留白 */
+  .page-head .btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px; width: 100%; justify-content: stretch; }
+  /* 只有一个按钮时占满整行，否则会孤零零地停在左半边 */
+  .page-head .btns > .btn:only-child { grid-column: 1 / -1; }
+  .page-head .btns .btn { width: 100%; padding: 9px 10px; min-height: var(--tap); white-space: nowrap; }
   input[type=checkbox] { width: 18px; height: 18px; }
 }
 
-/* —— 7.5 超窄屏底栏：收藏/下载移入播放页（#lyric-full 各有一个），歌名不再被挤成一两个字 —— */
-@media (max-width: 480px) { #np-love, #np-download { display: none; } }
+/* —— 7.5 ≤480px 底栏：不藏按钮，改用「压缩封面 + 收紧间距」把宽度还给歌名 —— */
+/* 主人 2026-09-15 决定：保留收藏/下载，换压缩封面方案 */
+@media (max-width: 480px) {
+  .player { padding: 0 6px; gap: 4px; }
+  .ctrls { gap: 0; }
+  .np { gap: 6px; }
+  .np-cover { width: 34px; height: 34px; border-radius: 9px; }
+  /* 收藏/下载：压缩但仍守住 34px 触控下限（e2e-responsive.py 的下限断言） */
+  #np-love, #np-download { width: 34px; height: 34px; flex-shrink: 0; }
+  #np-love svg, #np-download svg { width: 17px; height: 17px; }
+  /* 封面缩小后播放中角标按比例收一档，否则会盖住半个封面 */
+  .np-eq { width: 17px; height: 17px; right: -4px; bottom: -4px; }
+  .np-eq i { width: 2.5px; }
+}
 
-/* —— 7.6 320~380px：底栏再压缩一档，歌名区不至于只剩两个字 —— */
+/* —— 7.6 320~380px：封面/间距再压一档，传输键收到 36/42（仍 ≥34px 触控下限） —— */
 @media (max-width: 380px) {
-  .np-cover { width: 46px; height: 46px; border-radius: 11px; }
-  .np { gap: 10px; }
-  .icon-btn { width: 38px; height: 38px; }
-  .icon-btn.play { width: 46px; height: 46px; }
+  .np-cover { width: 30px; height: 30px; border-radius: 8px; }
+  .np { gap: 5px; }
+  .icon-btn { width: 36px; height: 36px; }
+  .icon-btn.play { width: 42px; height: 42px; }
 }
 
 /* —— 8. 横屏手机 / 矮窗口：竖向空间优先 —— */

@@ -77,7 +77,15 @@ METRICS = """() => {
     minTap: taps.length ? Math.min(...taps) : 0,
     shellH: Math.round(document.querySelector('.shell').getBoundingClientRect().height),
     btnsW: br ? Math.round(br.width) : 0,
+    btnsScrollW: btns ? btns.scrollWidth : 0,
+    btnsClientW: btns ? btns.clientWidth : 0,
+    /* 操作按钮组每行最多几个：两列网格下应为 2，横滑/换行布局下会更多 */
+    btnsPerRow: (() => { if (!btns) return 0
+      const c = {}
+      ;[...btns.children].forEach(e => { const t = Math.round(e.getBoundingClientRect().top); c[t] = (c[t] || 0) + 1 })
+      return Math.max(0, ...Object.values(c)) })(),
     npMetaW: (() => { const m = document.querySelector('.np-meta'); return m ? Math.round(m.getBoundingClientRect().width) : 0 })(),
+    npCoverW: (() => { const e = document.querySelector('.np-cover'); return e ? Math.round(e.getBoundingClientRect().width) : 0 })(),
     npLoveVisible: (() => { const e = document.getElementById('np-love'); const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 })(),
     avail: Math.round(view.getBoundingClientRect().width),
   }
@@ -140,6 +148,12 @@ def main():
                   'doc=%s main=%s' % (m['docOverflow'], m['mainOverflow']))
             check('%s 操作按钮组不超宽' % label, m['btnsW'] <= m['avail'] + 1,
                   'btns=%s avail=%s' % (m['btnsW'], m['avail']))
+            if w <= 560:
+                check('%s 操作按钮组不横向滚动（改回两列网格）' % label,
+                      m['btnsScrollW'] <= m['btnsClientW'] + 1,
+                      'scroll=%s client=%s' % (m['btnsScrollW'], m['btnsClientW']))
+                check('%s 操作按钮每行最多两个（等宽两列）' % label, m['btnsPerRow'] <= 2,
+                      'perRow=%s' % m['btnsPerRow'])
             check('%s 底栏不出屏' % label, m['playerBottom'] <= m['vh'] + 1 and m['playerH'] >= 55,
                   'bottom=%s vh=%s h=%s' % (m['playerBottom'], m['vh'], m['playerH']))
             check('%s 内容不被顶栏压住' % label, m['contentTop'] >= m['topbarH'] - 2,
@@ -152,14 +166,28 @@ def main():
             check('%s 抽屉内触控目标 ≥36px' % label, m['sideMinTap'] >= 36, 'min=%s' % m['sideMinTap'])
             check('%s shell 高度铺满视口（dvh）' % label, abs(m['shellH'] - m['vh']) <= 2,
                   'shell=%s vh=%s' % (m['shellH'], m['vh']))
-            if w <= 360:
-                check('%s 底栏歌名区宽 ≥70px（超窄屏下限）' % label, m['npMetaW'] >= 70,
-                      'meta=%s loveHidden=%s' % (m['npMetaW'], not m['npLoveVisible']))
+            # 底栏方案（2026-09-15 主人决定）：收藏/下载保留在底栏，靠压缩封面 + 收紧间距
+            # 给歌名让位。所以下面同时盯「按钮在」「封面被压缩」「歌名够宽」三件事，
+            # 免得以后有人为了歌名宽度又把按钮藏掉。
+            check('%s 底栏保留收藏/下载入口' % label, m['npLoveVisible'], 'love=%s' % m['npLoveVisible'])
+            if w <= 340:
+                # 320px：4 个传输键 + 2 个功能键 + 封面 + 歌名，横向是物理硬约束
+                check('%s 底栏歌名区宽 ≥38px（320 物理下限）' % label, m['npMetaW'] >= 38,
+                      'meta=%s' % m['npMetaW'])
+                check('%s 超窄屏封面已压缩 ≤32px' % label, 0 < m['npCoverW'] <= 32,
+                      'cover=%s' % m['npCoverW'])
+            elif w <= 380:
+                check('%s 底栏歌名区宽 ≥74px' % label, m['npMetaW'] >= 74, 'meta=%s' % m['npMetaW'])
+                check('%s 窄屏封面已压缩 ≤32px' % label, 0 < m['npCoverW'] <= 32,
+                      'cover=%s' % m['npCoverW'])
             elif w <= 480:
-                check('%s 底栏歌名区宽 ≥85px（收藏/下载已移入播放页）' % label, m['npMetaW'] >= 85,
-                      'meta=%s loveHidden=%s' % (m['npMetaW'], not m['npLoveVisible']))
+                check('%s 底栏歌名区宽 ≥80px（压缩封面方案）' % label, m['npMetaW'] >= 80,
+                      'meta=%s' % m['npMetaW'])
+                check('%s 手机封面已压缩 ≤36px' % label, 0 < m['npCoverW'] <= 36,
+                      'cover=%s' % m['npCoverW'])
             else:
-                check('%s 底栏保留收藏入口' % label, m['npLoveVisible'], 'love=%s' % m['npLoveVisible'])
+                check('%s 底栏歌名区宽 ≥150px（横屏/平板）' % label, m['npMetaW'] >= 150,
+                      'meta=%s' % m['npMetaW'])
             page.screenshot(path='tools/resp-%dx%d.png' % (w, h))
             print('      %s: padX=%s 卡片=%s 底栏=%s 侧栏=%s' %
                   (label, m['padX'], m['gridCol'], m['playerH'], m['sidebarW']))
