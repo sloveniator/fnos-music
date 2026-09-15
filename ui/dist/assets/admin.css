@@ -78,15 +78,16 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
 .nav .tab:hover { background: rgba(255,255,255,.04); color: var(--text); }
 .nav .tab.active { background: linear-gradient(135deg, rgba(79,140,255,.18), rgba(124,92,255,.12)); color: #fff; font-weight: 600; }
 /* 服务器名与「应用/退出」分两行：同行会让两侧互相挤压折行、垂直错位。
-   分隔线左右各缩 13px，与导航文字列（.tab 的 13px 左内边距）对齐；名字与链接同一条左基线 */
+   分隔线左右各缩 13px，与导航文字列（.tab 的 13px 左内边距）对齐；名字与链接同一条左基线。
+   两行之间留 4+3+4px 的呼吸位（太紧会糊成一块）。 */
 .side-foot { margin: auto 13px 0; padding: 14px 0 4px; border-top: 1px solid var(--line-soft);
-  display: flex; flex-direction: column; align-items: stretch; gap: 0; overflow: hidden;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; overflow: hidden;
   font-size: 12px; color: var(--muted); }
 /* 服务器名超长时省略，而不是换行撑高整块 */
-.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 0 1px; }
+.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 0 3px; }
 /* 链接药丸左右各 6px 内边距，用负 margin 把字面拉回名字那条基线 */
-.side-foot .side-links { display: flex; gap: 2px; align-items: center; margin-left: -6px; }
-.side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 3px 6px; border-radius: 8px; white-space: nowrap; }
+.side-foot .side-links { display: flex; gap: 4px; align-items: center; margin-left: -6px; }
+.side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 4px 6px; border-radius: 8px; white-space: nowrap; }
 .side-foot a:hover, .side-foot button:hover { color: var(--text); background: rgba(255,255,255,.05); }
 .side-foot button { font: inherit; }
 

@@ -1,5 +1,5 @@
 module.exports = {
-  serverName: 'My Sync Server', // 同步服务名称
+  serverName: '古四音乐', // 同步服务名称
   'proxy.enabled': false, // 是否使用代理转发请求到本服务器
   'proxy.header': 'x-real-ip', // 代理转发的请求头，原始 IP
 
