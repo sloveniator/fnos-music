@@ -705,27 +705,9 @@
     // 清除骨架屏
     v.querySelectorAll('.sk-wrap').forEach(s => s.remove())
 
-    // 统计条（紧凑：一行四项，图标 + 数字，避免首屏被大卡片占满）
-    const quick = el('div', 'stat-row')
-    const tiles = [
-      { svg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.8"/><path d="M12 9.2v5.6"/></svg>', n: '专辑', s: stats.albums + ' 张', h: '#/albums' },
-      { svg: '<svg viewBox="0 0 24 24"><rect x="9.2" y="2.6" width="5.6" height="11" rx="2.8"/><path d="M4.8 11.5a7.2 7.2 0 0 0 14.4 0"/><path d="M12 18.7V22"/></svg>', n: '歌手', s: stats.artists + ' 位', h: '#/artists' },
-      { svg: '<svg viewBox="0 0 24 24"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>', n: '全部歌曲', s: stats.tracks + ' 首', h: '#/tracks' },
-      { svg: '<svg viewBox="0 0 24 24"><path d="M12 20.5s-7.8-5-7.8-10.2A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 7.8 2.7C19.8 15.5 12 20.5 12 20.5Z"/></svg>', n: '我喜欢', s: (playlistsCache.find(p => p.id === 'love') || {}).count + ' 首', h: '#/playlist/love' },
-    ]
-    for (const tile of tiles) {
-      const c = el('div', 'stat-pill')
-      const ic = el('div', 'sp-ic')
-      ic.innerHTML = tile.svg
-      const tx = el('div', 'sp-tx')
-      tx.appendChild(el('div', 'sp-n', tile.n))
-      tx.appendChild(el('div', 'sp-s', tile.s))
-      c.appendChild(ic)
-      c.appendChild(tx)
-      c.onclick = () => { location.hash = tile.h }
-      quick.appendChild(c)
-    }
-    v.appendChild(quick)
+    // 统计条（专辑 27 张 / 歌手 22 位 / 全部歌曲 32 首 / 我喜欢 0 首）已按需求下线：
+    // 专辑·歌手·全部歌曲 在侧边栏，「我喜欢」在「专辑/歌单 → 我的歌单」里，
+    // 首屏直接进「为你推荐」更干净。
 
     // 为你推荐：按账户口味生成的两份歌单（今日推荐 / 猜你喜欢）。
     // 这里是「UI 封面」形态 —— 只给封面 + 推荐依据，点开才进详情（#/mix/daily、#/mix/guess）。
@@ -780,20 +762,36 @@
   }
 
   // ---------------- 为你推荐（首页入口卡片 + 详情页） ----------------
-  /** 推荐封面拼图：本地曲目走封面接口、在线曲目走源图，最多 4 张 */
-  function fyCollage(items, cls) {
+  /**
+   * 推荐封面：一个格子只放一张图（本地曲目走封面接口、在线曲目走源图）。
+   * 接口给的是一个候选序列，这里按顺序顶替 —— 第一张挂了（封面文件缺失 / 图床失效）
+   * 就换下一张，界面上始终只有一张图，不会退回占满格子的拼图。
+   */
+  function fyCover(items, cls) {
     const box = el('div', cls || 'fy-cov')
     const list = (items || []).slice(0, 4)
-    if (list.length <= 1) box.classList.add('one')
     if (!list.length) {
       box.appendChild(el('div', 'fy-cov-ph', '♪'))
       return box
     }
-    for (const t of list) {
-      const seed = (t.name || '') + (t.singer || '')
-      if (t.kind === 'online') box.appendChild(picImg(t.pic, null, seed))
-      else box.appendChild(coverImg(t.hasCover ? { id: t.id, hasCover: true } : null, null, seed))
+    const img = el('img')
+    img.alt = ''
+    img.loading = 'lazy'
+    let i = 0
+    const giveUp = () => {
+      if (!img.parentNode) return
+      box.removeChild(img)
+      box.appendChild(el('div', 'fy-cov-ph', '♪'))
     }
+    const swap = () => {
+      const t = list[i]
+      if (!t || (t.kind === 'online' ? !t.pic : !hasCoverOf(t))) { i++; return i < list.length ? swap() : giveUp() }
+      if (t.kind === 'online') img.src = picProxy(t.pic)
+      else img.src = mediaUrl('cover', t.id)
+    }
+    img.onerror = () => { i++; if (i < list.length) swap(); else giveUp() }
+    box.appendChild(img)
+    swap()
     return box
   }
 
@@ -824,7 +822,7 @@
     for (const mix of [d.daily, d.guess]) {
       if (!mix || !(mix.tracks || []).length) continue
       const card = el('div', 'fy-card')
-      card.appendChild(fyCollage(mix.cover))
+      card.appendChild(fyCover(mix.cover))
       const body = el('div', 'fy-body')
       body.appendChild(el('div', 'fy-name', mix.name))
       body.appendChild(el('div', 'fy-reason', mix.reason || ''))
@@ -915,7 +913,7 @@
     const tracks = mix.tracks || []
 
     const hero = el('div', 'fy-hero')
-    hero.appendChild(fyCollage(mix.cover, 'fy-cov big'))
+    hero.appendChild(fyCover(mix.cover, 'fy-cov big'))
     const box = el('div')
     const crumb = el('div', 'crumb', '‹ 为你推荐')
     crumb.onclick = () => { location.hash = '#/home' }

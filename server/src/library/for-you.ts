@@ -365,7 +365,8 @@ export interface ForYouMix {
   /** 一句话说明推荐依据（首页卡片副标题 / 详情页 meta） */
   reason: string
   updatedAt: number
-  /** 卡片封面拼图用的前几首（本地带 id+hasCover，在线带 pic） */
+  /** 封面候选序列（本地带 id+hasCover，在线带 pic）：UI 一个格子只显示一张，
+   *  多给几个是给加载失败留的兜底 —— 第一张挂了换下一张 */
   cover: MixRow[]
   localCount: number
   onlineCount: number

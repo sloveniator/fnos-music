@@ -7,8 +7,8 @@
     python3 tools/e2e-home-foryou.py
 
 覆盖：
-  1. 首页只留四张统计条（专辑/歌手/全部歌曲/我喜欢），新入库/热门歌手/最近播放三块已删除
-  2. 「为你推荐」两张入口卡片：UI 封面拼图 + 推荐依据文案 + 数量说明
+  1. 首页统计条（专辑/歌手/全部歌曲/我喜欢）与新入库/热门歌手/最近播放全部不出现，入口留在侧边栏
+  2. 「为你推荐」两张入口卡片：单图封面 + 推荐依据文案 + 数量说明
   3. 点开卡片进详情（#/mix/daily、#/mix/guess）：封面页头 + 混排曲目表 + 播放全部
   4. 详情页播放走正常链路（底栏起播 + 服务端播放历史记到这一首）
   5. 在线行有「在线」标记与「…」菜单（下载到本机 / 保存到云盘）
@@ -97,12 +97,20 @@ def main():
 
         print('\n— 1. 首页结构 —')
         goto(page, '#/home', 1200)
-        pills = page.eval_on_selector_all('.stat-pill .sp-n', 'els => els.map(e => e.textContent.trim())')
-        check('统计条仍是四项（专辑/歌手/全部歌曲/我喜欢）',
-              pills == ['专辑', '歌手', '全部歌曲', '我喜欢'], ' | '.join(pills))
-        subs = page.eval_on_selector_all('.stat-pill .sp-s', 'els => els.map(e => e.textContent.trim())')
-        check('统计数字来自 /api/stats',
-              subs[0] == '%d 张' % stats['albums'] and subs[2] == '%d 首' % stats['tracks'], ' | '.join(subs))
+        check('首页统计条（专辑/歌手/全部歌曲/我喜欢）已下线',
+              page.query_selector('.stat-row') is None and page.query_selector('.stat-pill') is None)
+        check('首页不再出现统计数字（如「%d 张」）' % stats['albums'],
+              ('%d 张' % stats['albums']) not in page.evaluate(VIEW_TEXT))
+        side = page.evaluate("() => document.querySelector('#sidebar').innerText")
+        check('入口没丢：侧边栏仍有 全部歌曲 / 专辑歌单 / 歌手',
+              '全部歌曲' in side and '专辑/歌单' in side and '歌手' in side)
+        goto(page, '#/albums', 1200)
+        page.evaluate("() => [...document.querySelectorAll('#view .tabs button')]"
+                      ".find(t => t.textContent.trim() === '我的歌单').click()")
+        page.wait_for_timeout(1200)
+        check('入口没丢：「专辑/歌单 → 我的歌单」里能找到「我喜欢」',
+              '我喜欢' in page.evaluate(VIEW_TEXT))
+        goto(page, '#/home', 1200)
         body = page.evaluate(VIEW_TEXT)
         for gone in ('新入库', '热门歌手', '最近播放'):
             check('首页已删掉「%s」' % gone, gone not in body)
@@ -124,9 +132,15 @@ def main():
         check('卡片写明数量并提示可点开', all('点开看详情' in m for m in metas), ' | '.join(metas))
         imgs = page.eval_on_selector_all('.foryou-slot .fy-card .fy-cov img',
                                          'els => els.map(e => ({ w: e.naturalWidth, n: e.naturalWidth > 0 }))')
-        check('卡片表面是 UI 封面拼图（真实图片而不是空壳）',
-              len(imgs) >= 2 and sum(1 for i in imgs if i['n']) >= 1,
+        peers = page.eval_on_selector_all('.foryou-slot .fy-card',
+                                          "els => els.map(e => e.querySelectorAll('.fy-cov img').length)")
+        check('每张卡片封面只有一张图（不是拼图）', len(cards) == 2 and peers == [1, 1],
+              'per-card=%s' % peers)
+        check('封面是真图而不是空壳',
+              len(imgs) == 2 and all(i['n'] for i in imgs),
               'imgs=%d loaded=%d' % (len(imgs), sum(1 for i in imgs if i['n'])))
+        check('卡片里没有残留拼图占位符（♪）',
+              page.query_selector('.foryou-slot .fy-cov-ph') is None)
         check('首页推荐区有说明（按账户口味 · 每日更新）', '按本账户的收听习惯生成' in body)
         page.screenshot(path='tools/home-foryou-desktop.png')
 
@@ -136,6 +150,9 @@ def main():
         check('点卡片进入今日推荐详情', page.evaluate('() => location.hash') == '#/mix/daily',
               page.evaluate('() => location.hash'))
         check('详情页有封面页头', page.query_selector('.fy-hero .fy-cov.big') is not None)
+        check('详情页封面也只有一张图',
+              page.eval_on_selector_all('.fy-hero .fy-cov.big img', 'els => els.length') == 1,
+              'imgs=%s' % page.eval_on_selector_all('.fy-hero .fy-cov.big img', 'els => els.length'))
         h2 = page.eval_on_selector('.fy-hero h2', 'e => e.textContent.trim()')
         check('详情页标题 = 今日推荐', h2 == '今日推荐', h2)
         rows = page.query_selector_all('.fy-hero ~ table.tracks tbody tr.row')
@@ -206,6 +223,10 @@ def main():
 
         print('\n— 7. 桌面并排 —')
         goto(page, '#/home', 2000)
+        # 鼠标必须停在中性位置：.fy-card:hover 有 translateY(-3px)，
+        # 前面点过卡片、指针留在第一张上会让两张卡 top 差 3px（脚手架假失败）
+        page.mouse.move(4, 4)
+        page.wait_for_timeout(300)
         try:
             page.wait_for_selector('.foryou-slot .fy-card', timeout=25000)
         except Exception:
