@@ -66,9 +66,22 @@ npm ci
 npm run build
 ```
 
-### 配置 `config.js`
+### 配置 `config.json`
 
-按照文件中的说明配置好本目录下的 `config.js` 文件
+服务器配置，默认读取本目录下的 `config.json`（可用环境变量 `CONFIG_PATH` 指定其他路径）：
+
+```json
+{
+  "serverName": "古四音乐",
+  "proxy.enabled": false,
+  "proxy.header": "x-real-ip",
+  "maxSnapshotNum": 10,
+  "list.addMusicLocationType": "top",
+  "users": []
+}
+```
+
+`users` 为预置用户（连接码）列表，元素格式：`{ "name": "user1", "password": "123.def", "maxSnapshotNum": 10, "list.addMusicLocationType": "top" }`，后两项可选。
 
 ### 配置 `ecosystem.config.js` 中的 `env_production`
 
@@ -124,7 +137,7 @@ map $http_upgrade $connection_upgrade{
 server {
     # ...
     location / {
-        proxy_set_header X-Real-IP $remote_addr;  # 该头部与config.js文件的 proxy.header 对应
+        proxy_set_header X-Real-IP $remote_addr;  # 该头部与config.json文件的 proxy.header 对应
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header Host  $http_host;
         proxy_pass http://127.0.0.1:9527;
@@ -145,7 +158,7 @@ map $http_upgrade $connection_upgrade{
 server {
     # ...
     location /xxx/ {
-        proxy_set_header X-Real-IP $remote_addr;  # 该头部与config.js文件的 proxy.header 对应
+        proxy_set_header X-Real-IP $remote_addr;  # 该头部与config.json文件的 proxy.header 对应
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header Host  $http_host;
         proxy_pass http://127.0.0.1:9527;
@@ -158,11 +171,11 @@ server {
 
 *注：上面的 `xxx` 是你想要代理的路径前缀（可以多级）。*
 
-注意 `$remote_addr` 的转发名字与 `config.js` 中的 `proxy.header` 对应，并同时启用 `proxy.enabled`（或与环境变量的 `PROXY_HEADER` 对应），这用于校验相同 IP 多次使用错误连接码连接时的封禁。
+注意 `$remote_addr` 的转发名字与 `config.json` 中的 `proxy.header` 对应，并同时启用 `proxy.enabled`（或与环境变量的 `PROXY_HEADER` 对应），这用于校验相同 IP 多次使用错误连接码连接时的封禁。
 
 ## 升级新版本
 
-若更新日志无特别说明，注意保留**你修改过**的 `config.js`、`ecosystem.config.js` 或 `Dockerfile` 之类的配置文件，以及 `data`、`logs` 目录即可，其他的都可以删除后再将新版本的文件复制进去，以下是更新日志无特别说明的更新流程：
+若更新日志无特别说明，注意保留**你修改过**的 `config.json`、`ecosystem.config.js` 或 `Dockerfile` 之类的配置文件，以及 `data`、`logs` 目录即可，其他的都可以删除后再将新版本的文件复制进去，以下是更新日志无特别说明的更新流程：
 
 使用在 GitHub Releases 下载的压缩包运行的服务：
 
@@ -201,13 +214,13 @@ server {
 | `PORT` | 绑定的端口号，默认为 `9527`。 |
 | `BIND_IP` | 绑定的 IP 地址，默认为 `127.0.0.1`，使用 `0.0.0.0` 将接受所有 IPv4 请求，使用 `::` 将接受所有 IP 请求。 |
 | `PROXY_HEADER` | 代理转发的请求头 原始 IP，如果设置，则自动启用。 |
-| `CONFIG_PATH` | 配置文件路径，默认使用项目目录下的 `config.js`。 |
+| `CONFIG_PATH` | 配置文件路径，默认使用项目目录下的 `config.json`。 |
 | `LOG_PATH` | 服务日志保存路径，默认保存在服务目录下的 `logs` 文件夹内。 |
 | `DATA_PATH` | 同步数据保存路径，默认保存在服务目录下的 `data` 文件夹内。 |
 | `MAX_SNAPSHOT_NUM` | 公共最大备份快照数。 |
 | `SERVER_NAME` | 同步服务名称。 |
 | `LIST_ADD_MUSIC_LOCATION_TYPE` | 公共添加歌曲到我的列表时的方式，可用值为 `top` 和 `bottom`。 |
-| `LX_USER_` | 以 `LX_USER_` 开头的环境变量将被识别为用户配置，可用的配置语法为：<br />1. `LX_USER_user1='xxx'`；<br />2. `LX_USER_user1='{"password":"xxx"}'`。<br />其中 `LX_USER_` 会被去掉，剩下的 `user1` 为用户名，`xxx` 为用户密码（**连接码**）。<br />配置方式 1 为简写模式，只指定用户名及密码（链接码），其他配置使用公共配置。<br />配置方式 2 为 JSON 字符串格式，配置内容参考 `config.js`，由于该方式在变量名指定了用户名，所以 JSON 里的用户名是可选的。 |
+| `LX_USER_` | 以 `LX_USER_` 开头的环境变量将被识别为用户配置，可用的配置语法为：<br />1. `LX_USER_user1='xxx'`；<br />2. `LX_USER_user1='{"password":"xxx"}'`。<br />其中 `LX_USER_` 会被去掉，剩下的 `user1` 为用户名，`xxx` 为用户密码（**连接码**）。<br />配置方式 1 为简写模式，只指定用户名及密码（链接码），其他配置使用公共配置。<br />配置方式 2 为 JSON 字符串格式，配置内容参考 `config.json`，由于该方式在变量名指定了用户名，所以 JSON 里的用户名是可选的。 |
 
 ### PM2 常用命令
 

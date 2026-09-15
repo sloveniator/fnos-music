@@ -1,0 +1,8 @@
+{
+  "serverName": "古四音乐",
+  "proxy.enabled": false,
+  "proxy.header": "x-real-ip",
+  "maxSnapshotNum": 10,
+  "list.addMusicLocationType": "top",
+  "users": []
+}

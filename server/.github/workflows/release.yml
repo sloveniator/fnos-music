@@ -50,7 +50,7 @@ jobs:
           git_tag_prefix: "v"
 
       - name: Zip files
-        run: zip -r lx-music-sync-server_v${{ env.PACKAGE_VERSION }}.zip server ecosystem.config.js config.js index.js package-lock.json package.json LICENSE Readme.md
+        run: zip -r lx-music-sync-server_v${{ env.PACKAGE_VERSION }}.zip server ecosystem.config.js config.json index.js package-lock.json package.json LICENSE Readme.md
 
       - name: Release
         uses: softprops/action-gh-release@v1

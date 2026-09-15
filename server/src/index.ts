@@ -117,9 +117,22 @@ const margeConfig = (p: string) => {
 }
 
 
-const p1 = path.join(__dirname, '../config.js')
-fs.existsSync(p1) && margeConfig(p1)
-envParams.CONFIG_PATH && fs.existsSync(envParams.CONFIG_PATH) && margeConfig(envParams.CONFIG_PATH)
+// 配置文件加载：默认读项目目录下的 config.json，可用环境变量 CONFIG_PATH 指定其他路径
+const loadedConfigFiles = new Set<string>()
+const loadConfigFile = (p: string, warnIfMissing = false) => {
+  if (!fs.existsSync(p)) {
+    if (warnIfMissing) console.warn('Config file not found: ' + p)
+    return
+  }
+  // 默认路径与 CONFIG_PATH 指向同一文件时只加载一次，避免重复合并
+  const filePath = path.resolve(p)
+  if (loadedConfigFiles.has(filePath)) return
+  loadedConfigFiles.add(filePath)
+  margeConfig(filePath)
+}
+
+loadConfigFile(path.join(__dirname, '../config.json'))
+envParams.CONFIG_PATH && loadConfigFile(envParams.CONFIG_PATH, true)
 if (envParams.PROXY_HEADER) {
   global.lx.config['proxy.enabled'] = true
   global.lx.config['proxy.header'] = envParams.PROXY_HEADER
