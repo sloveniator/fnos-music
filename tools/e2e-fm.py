@@ -146,6 +146,11 @@ def ui_layer(pw):
     n = cards.count()
     check('频道数量与接口一致', n >= 40, '%d 个频道卡' % n)
     check('频道卡有名称与说明', page.locator('.fm-card .fm-nm').count() == n)
+    # 主人 2026-09-15 决定：频道卡转纯文字。上游 pic 是 300×300 近纯白图（最暗 253/255），
+    # 深色卡片上只是块白方块，所以头像整体去掉；这条断言防止以后有人又把它加回来。
+    check('频道卡为纯文字（不含头像）',
+          page.locator('.fm-card .fm-ic, .fm-card img').count() == 0,
+          '头像节点 %d 个' % page.locator('.fm-card .fm-ic, .fm-card img').count())
     check('沉浸 0.8x 频道带「慢放」标签', page.locator('.fm-card .fm-tag').count() >= 1,
           '%d 个标签' % page.locator('.fm-card .fm-tag').count())
     page.screenshot(path=os.path.join(SHOT_DIR, 'fm-channels.png'))

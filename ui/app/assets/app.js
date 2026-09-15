@@ -2818,7 +2818,6 @@ kuwo.cn/playlist_detail/280301309</pre>
   // ---------------- FM 电台（汽水「听歌模式」→ 自动续播频道） ----------------
   // 频道来自汽水 /luna/pc/feed/mode（45 个听歌模式，服务端实时拉取并缓存 1h）；
   // 每个频道的曲目由服务端按「频道名 + 配方词」从汽水歌单/搜索合成，仅保留免登录可播的免费全曲。
-  const FM_ICON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.4"/><path d="M8.1 8.1a5.5 5.5 0 0 0 0 7.8M15.9 8.1a5.5 5.5 0 0 1 0 7.8"/><path d="M5.2 5.2a9.6 9.6 0 0 0 0 13.6M18.8 5.2a9.6 9.6 0 0 1 0 13.6"/></svg>'
   let fmChannelsCache = []
 
   const fmAutoOn = () => localStorage.getItem('gusi-fm-auto') !== '0'
@@ -2854,19 +2853,16 @@ kuwo.cn/playlist_detail/280301309</pre>
     }
   }
 
+  /**
+   * 频道卡 = 纯文字（主人 2026-09-15 决定去掉头像）。
+   * 上游 feed/mode 确实给了 pic，但那是**近纯白图**：实测 300×300、最暗像素 253/255、
+   * 约 2.1KB —— 原始 PNG 带透明通道，被 `~tplv-…resize:300:300.jpg` 这条图片处理参数
+   * 压成了白底，深色卡片上就是一块白方块（不是代理挂了、也不是 CORS，直连上游同样是白的）。
+   * 所以这里不渲染头像；哪天觉得卡片太素，先换内容源，别把 pic 加回来。
+   */
   function fmCard(ch) {
     const c = el('div', 'fm-card')
     c.dataset.key = ch.key
-    const ic = el('div', 'fm-ic')
-    if (ch.pic) {
-      const img = document.createElement('img')
-      img.src = picProxy(ch.pic) || ''
-      img.alt = ''
-      img.loading = 'lazy'
-      img.onerror = () => { ic.innerHTML = FM_ICON }
-      ic.appendChild(img)
-    } else ic.innerHTML = FM_ICON
-    c.appendChild(ic)
     c.appendChild(el('div', 'fm-nm', ch.name))
     c.appendChild(el('div', 'fm-ds', ch.desc || ''))
     if (ch.playbackRate && ch.playbackRate !== 1) c.appendChild(el('span', 'fm-tag', ch.playbackRate + '× 慢放'))

@@ -1106,10 +1106,9 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   transition: transform .16s, border-color .16s, box-shadow .16s; }
 .fm-card:hover { transform: translateY(-3px); border-color: #2e3648; }
 .fm-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(79,140,255,.5), 0 12px 30px rgba(79,140,255,.12); }
-.fm-ic { width: 38px; height: 38px; border-radius: 11px; overflow: hidden; display: flex; align-items: center;
-  justify-content: center; background: rgba(255,255,255,.05); border: 1px solid var(--line-soft); margin-bottom: 4px; }
-.fm-ic img { width: 100%; height: 100%; object-fit: cover; }
-.fm-ic svg { width: 20px; height: 20px; opacity: .6; }
+/* 频道卡纯文字：上游 pic 是近纯白图（原因见 app.js fmCard 注释），不再渲染头像 */
+/* 「播放中」角标绝对定位在右上角，标题改成第一行后要给它让位，否则长频道名会压到角标下 */
+.fm-card.on .fm-nm { padding-right: 54px; }
 .fm-nm { font-size: 14px; font-weight: 550; }
 .fm-ds { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
 .fm-tag { align-self: flex-start; margin-top: 2px; font-size: 10.5px; padding: 2px 7px; border-radius: 8px;
