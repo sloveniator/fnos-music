@@ -25,6 +25,7 @@ import { fmChannels, fmNext } from '@/online'
 import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists, onlineAudioExt, onlineStreamReferer } from '@/online'
 import { pipeHttpStream } from '@/utils/httpPipe'
 import { accessLog } from '@/utils/log4js'
+import { auditDestructive } from '@/utils/audit'
 import { resolveCover, fetchLyricFor, writeAudioTags, saveUrlToFile, ensureDirSync } from '@/downloads/tags'
 import {
   enqueue, enqueueMany, listTasks, getTask, removeTask, retryTask, batchOperate, parsePlaylistText,
@@ -78,6 +79,10 @@ const clientIp = (req: http.IncomingMessage): string => {
   }
   return req.socket.remoteAddress ?? 'unknown'
 }
+
+/** 审计用操作者信息：谁 + 从哪来（IP / UA），供删除、恢复、彻底删除三条路径复用 */
+const auditActor = (req: http.IncomingMessage, user: string) =>
+  ({ user, ip: clientIp(req), ua: String(req.headers['user-agent'] ?? '') })
 
 const parseJson = (raw: string): any => {
   try {
@@ -702,6 +707,15 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     if (!ids.length) return fail(res, 400, '请提供要删除的曲目'), true
     if (ids.length > 500) return fail(res, 400, '单次最多删除 500 首'), true
     const r = removeTenantTracks(userName, ids)
+    // 审计：软删除也动真实文件（搬进 .gusi-trash/），谁在什么时候删了什么必须留痕
+    auditDestructive('tracks.delete', auditActor(req, userName), {
+      requested: ids.length,
+      removed: r.removed,
+      remaining: r.total,
+      trashDir: r.trashDir,
+      ids: r.removedIds,
+      failed: r.failed.map((f) => ({ id: f.id, name: f.name, reason: f.reason })),
+    })
     // 曲目没了，歌单/收藏里的 local_<id> 就是死引用，必须一并摘掉：
     // 否则歌单里会留一行「看着能点、点了只会报曲目不存在」的幽灵曲目。
     const playlists = r.removedIds.length
@@ -725,7 +739,14 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     const paths: string[] = Array.isArray(body?.paths) ? body.paths.map((x: unknown) => String(x)) : []
     if (!paths.length) return fail(res, 400, '请选择要恢复的文件'), true
     if (paths.length > 500) return fail(res, 400, '单次最多恢复 500 个'), true
-    ok(res, restoreTenantTrash(userName, paths))
+    const rr = restoreTenantTrash(userName, paths)
+    auditDestructive('trash.restore', auditActor(req, userName), {
+      requested: paths.length,
+      ok: rr.ok,
+      paths,
+      failed: rr.failed,
+    })
+    ok(res, rr)
     return true
   }
 
@@ -735,7 +756,16 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     const paths: string[] = Array.isArray(body?.paths) ? body.paths.map((x: unknown) => String(x)) : []
     if (!paths.length) return fail(res, 400, '请选择要删除的文件'), true
     if (paths.length > 500) return fail(res, 400, '单次最多删除 500 个'), true
-    ok(res, purgeTenantTrash(userName, paths))
+    const pr = purgeTenantTrash(userName, paths)
+    // 彻底删除不可恢复，这一行是唯一的追责依据
+    auditDestructive('trash.purge', auditActor(req, userName), {
+      requested: paths.length,
+      ok: pr.ok,
+      clearAll: paths.some((x) => String(x) === '*'),
+      paths,
+      failed: pr.failed,
+    })
+    ok(res, pr)
     return true
   }
 
