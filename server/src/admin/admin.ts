@@ -12,6 +12,7 @@ import {
 } from '@/user/register'
 import { getQuota } from '@/user/quota'
 import { setListBroadcaster } from '@/web/playlists'
+import { dropTenant } from '@/library/tenant'
 
 // ---------------------------------------------------------------------------
 // 管理后台 HTTP API + 静态 UI 托管
@@ -317,14 +318,33 @@ const handleApi = async(req: http.IncomingMessage, res: http.ServerResponse, url
         hooks.kickUser(name)
         dropUserSessions(name)
         const purge = url.searchParams.get('purge') == '1'
+        // 网页注册用户额外清掉的私有目录（供前端提示用）
+        const removedDirs: string[] = []
         if (!global.lx.config.users.some(u => u.name == name)) {
           // 网页自助注册用户：从 users.json 摘掉（内置用户走 adminRemoveUser）
           if (!removeRegisteredUser(name)) throw new Error('用户不存在')
-          if (purge) fs.rmSync(path.join(global.lx.userPath, getUserDirname(name)), { recursive: true, force: true })
+          if (purge) {
+            fs.rmSync(path.join(global.lx.userPath, getUserDirname(name)), { recursive: true, force: true })
+            // 只清该用户自己的两个私有目录：云盘下载目录 + 租户曲库索引（含其 .gusi-trash 回收站）。
+            // 刻意不删租户 settings.dirs 里可能配置的扫描目录 —— 那是用户在设置里指到共享/NAS 的路径，
+            // 误删会连带删掉别人的文件。
+            for (const dir of [
+              path.join(global.lx.dataPath, 'library', name),
+              path.join(global.lx.dataPath, 'libraries', name),
+            ]) {
+              try {
+                if (fs.existsSync(dir)) {
+                  fs.rmSync(dir, { recursive: true, force: true })
+                  removedDirs.push(dir)
+                }
+              } catch { /* 单个目录清理失败不阻塞删号 */ }
+            }
+            try { dropTenant(name) } catch { /* 正在扫描时会拒绝释放，重启后自然回收 */ }
+          }
         } else {
           adminRemoveUser(name, purge)
         }
-        json(res, 200, { success: true })
+        json(res, 200, { success: true, removedDirs })
       } catch (err: any) {
         json(res, 400, { message: err.message })
       }

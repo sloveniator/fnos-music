@@ -635,7 +635,7 @@ const renderTenants = () => {
     <div class="tenant-box" data-user="${esc(u.name)}">
       <div class="tenant-head">
         <div>
-          <div class="u-name">${esc(u.name)}</div>
+          <div class="u-name">${esc(u.name)}${u.source === 'web' ? ' <span class="muted-note" style="font-weight:400;font-size:12px">网页注册</span>' : ''}</div>
           <div class="u-meta">${st.tracks || 0} 首 · ${st.artists || 0} 位歌手 · ${st.albums || 0} 张专辑 · ${fmtBytes(st.bytes)}${st.scannedAt ? ' · 扫描于 ' + fmtDate(st.scannedAt) : ''}</div>
         </div>
         <div class="user-acts">

@@ -9,6 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { saveTenantSettings } from '@/library/tenant'
 
 export interface RegisteredUser {
   name: string
@@ -168,6 +169,13 @@ export const registerUser = async (
     fs.mkdirSync(path.join(global.lx.dataPath, 'libraries', name), { recursive: true, mode: 0o700 })
     fs.mkdirSync(path.join(global.lx.dataPath, 'library', name), { recursive: true, mode: 0o700 })
   } catch { /* ignore */ }
+
+  // 开箱即用：把专属下载目录登记为该用户的曲库扫描目录。
+  //   不登记的话「下载到云盘」只会落盘（配额照算），文件永远进不了索引 ——
+  //   网页端曲库为空、听不了、也管不了，而且此前网页端与后台都没有配这个目录的入口。
+  try {
+    saveTenantSettings(name, { dirs: [path.join(global.lx.dataPath, 'library', name)] })
+  } catch { /* ignore: 目录配置失败不影响注册本身，后台仍可补配 */ }
 
   return { ok: true, user }
 }

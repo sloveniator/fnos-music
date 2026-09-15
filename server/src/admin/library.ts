@@ -13,6 +13,7 @@ import { getAddress } from '@/utils/tools'
 import { buildSourceScript } from './source-script'
 import { resolveFromUserSources, listUserSources, saveUserSource, deleteUserSource, setUserSourceEnabled, testUserSource, getUserSource, readScript } from '@/online/user-source'
 import { getTenantSettings, saveTenantSettings, startTenantScan, getTenantScanState, tenantLibraryStats, listTenants } from '@/library/tenant'
+import { findRegisteredUser, listRegisteredUsers } from '@/user/register'
 
 // ---------------------------------------------------------------------------
 // 曲库 HTTP 层
@@ -28,6 +29,11 @@ const json = (res: http.ServerResponse, code: number, data: unknown): void => {
 
 const ok = (res: http.ServerResponse, data: unknown): void => json(res, 200, { code: 0, data })
 const fail = (res: http.ServerResponse, code: number, msg: string): void => json(res, code, { code: -1, msg })
+
+// 曲库管理页面对「内置用户（config） + 网页自助注册用户（users.json）」一视同仁：
+// 两类用户都有独立租户曲库，若只认 config 用户，网页注册用户在后台就是 404，管理员没法给他配目录/触发扫描。
+const isLibraryUser = (name: string): boolean =>
+  (global.lx.config.users || []).some(u => u.name == name) || !!findRegisteredUser(name)
 
 // 音源脚本/流地址必须走 TCP 直连：fnOS 网关 /app/* 需要登录态，手机洛雪 App 无法通过
 // 经网关访问时 Host 是网关地址，须换成局域网 IP + 服务端口
@@ -727,17 +733,23 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
   // ---------------- UPGRADE_0020：Web 用户租户曲库 ----------------
   // GET /admin/api/library/users —— 列出所有用户的租户曲库概况
   if (method == 'GET' && p == '/admin/api/library/users') {
-    const allUsers = (global.lx.config.users || [])
-      .map(u => {
-        const safeName = (u.name || '').replace(/[^A-Za-z0-9_.-]/g, '_').substring(0, 64) || 'default'
-        return {
-          name: u.name,
-          safeName,
-          settings: getTenantSettings(u.name),
-          stats: tenantLibraryStats(u.name),
-          scan: getTenantScanState(u.name),
-        }
-      })
+    // 内置用户 + 网页注册用户（同名以内置为准），各自一个独立租户曲库
+    const names: { name: string, source: 'builtin' | 'web' }[] = (global.lx.config.users || [])
+      .map(u => ({ name: u.name, source: 'builtin' as const }))
+    for (const u of listRegisteredUsers()) {
+      if (!names.some(x => x.name === u.name)) names.push({ name: u.name, source: 'web' })
+    }
+    const allUsers = names.map(({ name, source }) => {
+      const safeName = (name || '').replace(/[^A-Za-z0-9_.-]/g, '_').substring(0, 64) || 'default'
+      return {
+        name,
+        safeName,
+        source,
+        settings: getTenantSettings(name),
+        stats: tenantLibraryStats(name),
+        scan: getTenantScanState(name),
+      }
+    })
     ok(res, { users: allUsers, tenants: listTenants() })
     return true
   }
@@ -746,7 +758,7 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
   const segUs = /^\/admin\/api\/library\/user-settings\/([^\/]{1,64})$/.exec(p)
   if (segUs && method == 'GET') {
     const name = decodeURIComponent(segUs[1])
-    if (!global.lx.config.users.some(u => u.name == name)) {
+    if (!isLibraryUser(name)) {
       fail(res, 404, '该用户不存在')
       return true
     }
@@ -757,7 +769,7 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
   // POST /admin/api/library/user-settings/:name  {dirs: string[]}
   if (segUs && method == 'POST') {
     const name = decodeURIComponent(segUs[1])
-    if (!global.lx.config.users.some(u => u.name == name)) {
+    if (!isLibraryUser(name)) {
       fail(res, 404, '该用户不存在')
       return true
     }
@@ -781,7 +793,7 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
   const segScan = /^\/admin\/api\/library\/user-scan\/([^\/]{1,64})$/.exec(p)
   if (segScan && method == 'POST') {
     const name = decodeURIComponent(segScan[1])
-    if (!global.lx.config.users.some(u => u.name == name)) {
+    if (!isLibraryUser(name)) {
       fail(res, 404, '该用户不存在')
       return true
     }
@@ -805,7 +817,7 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
   const segStats = /^\/admin\/api\/library\/user-stats\/([^\/]{1,64})$/.exec(p)
   if (segStats && method == 'GET') {
     const name = decodeURIComponent(segStats[1])
-    if (!global.lx.config.users.some(u => u.name == name)) {
+    if (!isLibraryUser(name)) {
       fail(res, 404, '该用户不存在')
       return true
     }

@@ -380,6 +380,13 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
   if (method == 'GET' && p == '/web/api/stats') {
+    // 自愈式补扫：已配扫描目录但从未扫过（注册后管理员/用户直接往云盘目录放文件，
+    // 或目录配置晚于放文件）时补一次。scannedAt 只在扫描结果落地后写入，故正常情况下只触发一次。
+    try {
+      const t = getTenantSettings(userName)
+      const sc = getTenantScanState(userName)
+      if (t.dirs.length && !sc.scannedAt && !sc.scanning) startTenantScan(userName)
+    } catch { /* 补扫失败不影响统计返回 */ }
     ok(res, { ...tenantLibraryStats(userName), scan: getTenantScanState(userName) })
     return true
   }
