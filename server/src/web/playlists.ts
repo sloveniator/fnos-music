@@ -4,6 +4,7 @@ import { getUserSpace, getUserDirname } from '@/user'
 import { handleListAction } from '@/modules/list/sync/handler'
 import { type TrackInfo } from '@/library'
 import { getTenantTrack } from '@/library/tenant'
+import { onlineSourceIds } from '@/online'
 import { LIST_IDS } from '@/constants'
 
 // ---------------------------------------------------------------------------
@@ -83,20 +84,97 @@ export const overwritePlaylistOrder = async(userName: string, listId: string, mu
   await applyAction(userName, { action: 'list_music_overwrite', data: { listId, musicInfos: ordered } })
 }
 
-/** 我喜欢 收藏状态切换；返回切换后是否已收藏 */
-export const toggleLove = async(userName: string, trackId: string): Promise<boolean> => {
+// ---------------------------------------------------------------------------
+// 「我喜欢」
+//   一个列表同时存两种曲目：本地曲库（MusicInfoLocal）与在线音源（MusicInfoOnline）。
+//   在线曲目按洛雪 MusicInfo 形状落库（id = <source>_<rid> + meta.songId/picUrl），
+//   这样手机端同步过去也能解析、能播；Web 端播放靠 id 里的 source + rid 解析直链。
+// ---------------------------------------------------------------------------
+
+/** 去掉控制字符 + 限长：在线数据来自第三方接口，落库前必须清洗 */
+const cleanText = (v: unknown, max: number): string =>
+  String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().substring(0, max)
+
+/** 毫秒 → 洛雪 interval 字符串（mm:ss） */
+const formatInterval = (ms: number): string => {
+  const total = Math.max(1, Math.round(ms / 1000))
+  return Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0')
+}
+
+/** 在线曲目 → 洛雪 MusicInfoOnline（与手机端同步进歌单的形状一致） */
+export const onlineToMusicInfo = (input: {
+  source?: unknown, rid?: unknown, name?: unknown, singer?: unknown,
+  album?: unknown, intervalMs?: unknown, pic?: unknown,
+}): LX.Music.MusicInfo => {
+  const source = cleanText(input.source, 16)
+  // 与前端/内置适配器一致：酷我 id 去掉 MUSIC_ 前缀，全链路只用一个形态
+  const rid = cleanText(input.rid, 48).replace(/^MUSIC_/, '')
+  const ms = Number(input.intervalMs)
+  const pic = cleanText(input.pic, 600)
+  // source 是运行期字符串（含内置 LX 类型没有的汽水），只能在这里收口断言
+  return {
+    id: `${source}_${rid}`,
+    name: cleanText(input.name, 200) || '未知曲目',
+    singer: cleanText(input.singer, 200) || '未知歌手',
+    source,
+    interval: Number.isFinite(ms) && ms > 0 ? formatInterval(ms) : null,
+    meta: {
+      songId: rid,
+      albumName: cleanText(input.album, 200),
+      picUrl: pic || null,
+    },
+  } as unknown as LX.Music.MusicInfo
+}
+
+/** 按 id 切换一条曲目的收藏状态；返回切换后是否已收藏 */
+const toggleLoveMusic = async(userName: string, music: LX.Music.MusicInfo): Promise<boolean> => {
   const userSpace = getUserSpace(userName)
-  const track = getTenantTrack(userName, trackId)
-  if (!track) throw new Error('曲目不存在')
-  const music = trackToMusicInfo(track)
   const loveList = await userSpace.listManage.listDataManage.getListMusics(LIST_IDS.LOVE)
-  const existing = loveList.find(m => m.id == music.id)
-  if (existing) {
+  if (loveList.some(m => m.id == music.id)) {
     await applyAction(userName, { action: 'list_music_remove', data: { listId: LIST_IDS.LOVE, ids: [music.id] } })
     return false
   }
   await applyAction(userName, { action: 'list_music_add', data: { id: LIST_IDS.LOVE, musicInfos: [music], addMusicLocationType: 'top' } })
   return true
+}
+
+/** 我喜欢：本地曲库曲目（按 trackId） */
+export const toggleLove = async(userName: string, trackId: string): Promise<boolean> => {
+  const track = getTenantTrack(userName, trackId)
+  if (!track) throw new Error('曲目不存在')
+  return toggleLoveMusic(userName, trackToMusicInfo(track))
+}
+
+/** 我喜欢：在线曲目（source + rid + 快照信息），与本地曲目共用同一份列表 */
+export const toggleLoveOnline = async(userName: string, input: {
+  source?: unknown, rid?: unknown, name?: unknown, singer?: unknown,
+  album?: unknown, intervalMs?: unknown, pic?: unknown,
+}): Promise<boolean> => {
+  const source = cleanText(input?.source, 16)
+  // 已知源即可（含被后台停用的源）：停用后仍要能把之前收藏的取消掉
+  if (!onlineSourceIds().includes(source)) throw new Error('未知的在线源：' + (source || '空'))
+  const rid = cleanText(input?.rid, 48)
+  if (!/^[A-Za-z0-9_]{1,48}$/.test(rid)) throw new Error('在线曲目标识非法')
+  return toggleLoveMusic(userName, onlineToMusicInfo({ ...input, source, rid }))
+}
+
+/** 批量收藏本地曲目（列表页「喜欢选中」）；已在列表里的直接跳过，返回本次新增数 */
+export const addLoveTrackIds = async(userName: string, trackIds: string[]): Promise<number> => {
+  const userSpace = getUserSpace(userName)
+  const loveList = await userSpace.listManage.listDataManage.getListMusics(LIST_IDS.LOVE)
+  const seen = new Set(loveList.map(m => String(m.id)))
+  const musics: LX.Music.MusicInfo[] = []
+  for (const id of trackIds) {
+    const track = getTenantTrack(userName, id)
+    if (!track) continue
+    const music = trackToMusicInfo(track)
+    if (seen.has(music.id)) continue
+    seen.add(music.id)
+    musics.push(music)
+  }
+  if (!musics.length) return 0
+  await applyAction(userName, { action: 'list_music_add', data: { id: LIST_IDS.LOVE, musicInfos: musics, addMusicLocationType: 'top' } })
+  return musics.length
 }
 /**
  * 冷启动竞态：ListDataManage 在构造函数里 fire-and-forget 读快照，用户空间刚

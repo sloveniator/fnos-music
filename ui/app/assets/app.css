@@ -505,6 +505,13 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .tracks th.cov, .tracks td.cov { width: 48px; padding: 8px 4px 8px 0; }
   .tracks td.cov img, .tracks td.cov.cov-empty::before { width: 40px; height: 40px; }
   .tracks td.love .iconbtn { font-size: 19px; }
+  /* 收藏/行内操作图标：触屏下把可点范围撑到 ~33px（padding 扩点 + 负 margin 抵消，
+     图形仍是 17px、行高列宽都不动 —— 只改命中区，不改排版） */
+  .tracks td.love .iconbtn, .tracks td.acts .iconbtn, .tracks td.dur .iconbtn,
+  .sr-tbl td.acts .iconbtn {
+    padding: 8px; margin-top: -8px; margin-bottom: -8px;
+  }
+  .sr-tbl td.acts .iconbtn { margin-left: 2px; }
   .tracks .ell { max-width: 110px; }
   .tracks .dur { font-size: 11.5px; }
   /* 队列行移除按钮常显（触屏无 hover） */
@@ -915,9 +922,7 @@ img.ph {
 .fy-reason { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin-top: 6px; }
 .fy-meta { color: var(--muted); font-size: 11.5px; margin-top: 6px; opacity: .78; }
 .fy-note { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.6; }
-/* 在线曲目不能收藏：心形置灰，别让人以为点了会有反应 */
-td.love.off .iconbtn { opacity: .28; cursor: default; }
-td.love.off .iconbtn:hover { color: inherit; }
+/* 收藏列：本地与在线曲目都能收藏，心形一律可点（在线行不再有置灰态） */
 .fy-hero { display: flex; gap: 26px; align-items: flex-end; margin-bottom: 24px; }
 .fy-hero .fy-cov.big { width: 178px; height: 178px; flex: 0 0 178px; border-radius: 16px;
   box-shadow: 0 22px 54px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.05); }

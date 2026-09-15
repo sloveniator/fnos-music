@@ -437,11 +437,13 @@ def run_ui_cases():
         pg.wait_for_selector('#dialog:not([hidden])', timeout=8000)
         pg.click('#dlg-ok')
         # 撤销是异步的（请求回来才重渲染），固定等待会偶发假失败 → 轮询到列表变短为止
+        # 撤销后重渲染会先经过一帧「空列表/加载中」，只判「变短」会撞上这帧假数据
+        # （曾偶发报 5 → 0）→ 必须轮询到 == n-1 为止，真的少错一条仍然会失败
         n2 = n
-        for _i in range(20):
+        for _i in range(30):
             pg.wait_for_timeout(300)
             n2 = pg.eval_on_selector_all('.share-item', 'els => els.length')
-            if n2 < n:
+            if n2 == n - 1:
                 break
         check('设置页撤销后列表减少', n2 == n - 1, '%d → %d' % (n, n2))
         # 专辑页：分享入口 + 弹窗

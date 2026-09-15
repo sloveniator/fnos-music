@@ -28,7 +28,13 @@ BASE = 'http://localhost:20059'
 USER, PASSWORD = 'Slceleto', 'REDACTED'
 SHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 
-PASS = FAIL = 0
+PASS = FAIL = SKIP = 0
+
+
+def skip(name, why):
+    global SKIP
+    SKIP += 1
+    print('  [SKIP] %s  -- %s' % (name, why))
 
 
 def check(name, ok, detail=''):
@@ -200,10 +206,22 @@ def ui_layer(pw):
     singer = page.evaluate("document.querySelector('#np-singer').textContent")
     check('底栏显示频道与 0.8× 标记', '0.8' in singer and 'FM' in singer, singer)
 
-    print('\n== E. 退出电台态（播放本地曲目）==')
+    print('\n== E. 退出电台态（播放非 FM 曲目）==')
     page.evaluate("location.hash = '#/tracks'")
-    page.wait_for_selector('.tracks tr.row', timeout=20000)
-    page.locator('.tracks tr.row').first.click()
+    page.wait_for_timeout(1500)
+    if page.locator('.tracks tr.row').count():
+        page.locator('.tracks tr.row').first.click()
+        via = '本地曲库'
+        local_ok = True
+    else:
+        # 曲库为空是主人有意清库后的常态，不能让整条用例挂掉：
+        # 用在线搜索结果行替代「非 FM 曲目」，断言的是同一件事（退出 FM 态、倍速复位）
+        skip('播放本地曲目退出 FM 态', '本地曲库为空（0 首），改用在线曲目验证同一条语义')
+        local_ok = False
+        page.evaluate("location.hash = '#/search?q=%E5%91%A8%E6%9D%B0%E4%BC%A6'")
+        page.wait_for_selector('.sr-tbl tbody tr', timeout=45000)
+        page.evaluate("() => document.querySelector('.sr-tbl tbody tr .iconbtn').click()")
+        via = '在线搜索结果'
     page.wait_for_timeout(2200)
     # 注意：曲目判别统一用 kind === 'online'（见 asOnlineRows / start() / renderNp），
     # 本地曲库条目天生没有 kind 字段，断言必须用「非 online」，不能写 == 'local'。
@@ -211,9 +229,10 @@ def ui_layer(pw):
       return { fm: p.fm, rate: p.audio.playbackRate, kind: p.cur && p.cur.kind,
                curId: p.cur && p.cur.id, playing: !p.audio.paused,
                bar: document.querySelectorAll('#fm-unlock.show').length } }""")
-    check('播放本地曲目后退出 FM 态',
-          st2['fm'] is None and st2['kind'] != 'online' and bool(st2['curId']) and st2['playing'],
-          json.dumps(st2, ensure_ascii=False))
+    check('播放%s曲目后退出 FM 态' % ('本地' if local_ok else '非 FM'), 
+          st2['fm'] is None and bool(st2['curId']) and st2['playing']
+          and (st2['kind'] != 'online' if local_ok else st2['kind'] == 'online'),
+          json.dumps(st2, ensure_ascii=False) + ' via=' + via)
     check('退出电台后浮条不再显示', st2['bar'] == 0, '%d 个' % st2['bar'])
     check('倍速复位为 1x', abs(st2['rate'] - 1) < 0.001, 'playbackRate=%s' % st2['rate'])
     page.evaluate("location.hash = '#/fm'")
@@ -301,7 +320,7 @@ def main():
         ui_layer(pw)
         blocked_layer(pw)
     print('\n===== 结果 =====')
-    print('通过 %d 项，失败 %d 项' % (PASS, FAIL))
+    print('通过 %d 项，失败 %d 项（跳过 %d）' % (PASS, FAIL, SKIP))
     return 1 if FAIL else 0
 
 

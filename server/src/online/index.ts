@@ -132,6 +132,9 @@ export const onlineSources = (): { id: string; name: string; enabled: boolean; l
 
 export const isOnlineSource = (source: string): boolean => enabledIds().includes(source)
 
+/** 全部内置源 id（**含被后台停用的**）：用于识别一个 source 字符串是否是我们认识的音源 */
+export const onlineSourceIds = (): string[] => KNOWN_IDS
+
 export const onlineSearch = async (source: string, keyword: string, page: number, size: number) => {
   if (!isOnlineSource(source)) throw new Error('在线源未启用或不存在：' + source)
   return REGISTRY[source].search(keyword, page, size)

@@ -15,7 +15,7 @@ import {
 } from './session'
 import {
   createPlaylist, renamePlaylist, removePlaylists, addTrackIds, removeMusicIds,
-  clearPlaylist, toggleLove, recordPlayed, recordPlayedOnline, getPlayed, overwritePlaylistOrder, migrateTrackRefs, dropTrackRefs,
+  clearPlaylist, toggleLove, toggleLoveOnline, addLoveTrackIds, recordPlayed, recordPlayedOnline, getPlayed, overwritePlaylistOrder, migrateTrackRefs, dropTrackRefs,
   getListDataStable,
 } from './playlists'
 import { getUserSpace } from '@/user'
@@ -1209,7 +1209,12 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
 
-  // ---------------- 收藏 ----------------
+  // ---------------- 收藏（「我喜欢」） ----------------
+  // 本地曲目：{ trackId }
+  // 在线曲目：{ source, rid, name, singer, album, intervalMs, pic }
+  //   在线曲目没有本地文件，按洛雪 MusicInfo 快照入列表（与手机端同步进歌单同形状），
+  //   播放时再由 source + rid 解析直链；快照里的 name/singer 是给离线展示用的。
+  // 无论哪种，都由服务端权威判定 toggle 后的状态，前端不猜。
   if (method == 'POST' && p == '/web/api/love/toggle') {
     let body: any
     try {
@@ -1218,8 +1223,28 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
       return fail(res, 400, '请求体异常'), true
     }
     try {
-      const loved = await toggleLove(userName, String(body?.trackId ?? ''))
+      const online = body?.source !== undefined && body?.source !== ''
+      const loved = online
+        ? await toggleLoveOnline(userName, body)
+        : await toggleLove(userName, String(body?.trackId ?? ''))
       ok(res, { loved })
+    } catch (err: any) {
+      fail(res, 400, err?.message ?? String(err))
+    }
+    return true
+  }
+  // 批量收藏本地曲目（列表页多选 →「喜欢选中」）；已在列表里的跳过
+  if (method == 'POST' && p == '/web/api/love/add') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const ids = (Array.isArray(body?.trackIds) ? body.trackIds : []).map((x: any) => String(x)).slice(0, 1000)
+    if (!ids.length) return fail(res, 400, '请先选择曲目'), true
+    try {
+      ok(res, { added: await addLoveTrackIds(userName, ids) })
     } catch (err: any) {
       fail(res, 400, err?.message ?? String(err))
     }

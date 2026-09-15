@@ -105,6 +105,80 @@
     return m ? Number(m[1]) * 60 + Number(m[2]) : 0
   }
 
+  // ---------------- 「我喜欢」收藏 ----------------
+  // 一个列表同时装本地曲目与在线曲目，所以「这个 id 长什么样」「怎么切」只在这里定义一次。
+  const isOnlineTrack = (t) => !!(t && (t.kind === 'online' || t.online === true))
+  /**
+   * 曲目 → 服务端「我喜欢」列表里的 MusicInfo id：
+   *   本地曲库 local_<trackId>（服务端 trackToMusicInfo）
+   *   在线音源 <source>_<rid>（服务端 onlineToMusicInfo，酷我 id 去掉 MUSIC_ 前缀）
+   */
+  const loveKeyOf = (t) => {
+    if (!t) return ''
+    if (isOnlineTrack(t)) {
+      const rid = t.rid != null && t.rid !== '' ? t.rid : String(t.id || '').replace(/^[A-Za-z][A-Za-z0-9]*_/, '')
+      if (!t.source || rid === '') return ''
+      return t.source + '_' + String(rid).replace(/^MUSIC_/, '')
+    }
+    return t.id ? 'local_' + t.id : ''
+  }
+  const isLoved = (t) => { const k = loveKeyOf(t); return !!k && loveIds.has(k) }
+  /** 在线行时长字段名不统一（intervalMs / interval），取值统一定义为毫秒 */
+  const loveIntervalMs = (t) => {
+    const n = Number(t.intervalMs != null ? t.intervalMs : t.interval)
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+  }
+  /** 切换喜欢；返回切换后的收藏状态（服务端为准，失败时保持原状态） */
+  async function toggleLoveOf(t) {
+    if (!t) return false
+    const k = loveKeyOf(t)
+    if (!k) { toast('该曲目无法收藏', true); return false }
+    const body = isOnlineTrack(t)
+      ? {
+        source: t.source, rid: t.rid != null && t.rid !== '' ? t.rid : String(t.id || '').replace(/^[A-Za-z][A-Za-z0-9]*_/, ''),
+        name: t.name, singer: t.singer, album: t.album, intervalMs: loveIntervalMs(t), pic: t.pic,
+      }
+      : { trackId: t.id }
+    const d = await api('/api/love/toggle', { method: 'POST', body })
+    if (d.loved) loveIds.add(k); else loveIds.delete(k)
+    return !!d.loved
+  }
+  /** 心形按钮：初始态取自 loveIds，点完就地换样式并在「我喜欢」页重绘列表。
+   *  target 可以是曲目，也可以是返回曲目的函数——切源下拉会改行内 source/rid，
+   *  用函数取「当前行」，心形状态才跟得上。 */
+  const loveBtn = (target, cls) => {
+    const get = typeof target === 'function' ? target : () => target
+    const b = el('button', 'iconbtn love-btn' + (isLoved(get()) ? ' loved' : ''))
+    b.innerHTML = SVG.heart
+    b.title = isLoved(get()) ? '取消喜欢' : '加入我喜欢'
+    b.onclick = async (e) => {
+      e.stopPropagation()
+      const t = get()
+      const before = isLoved(t)
+      try {
+        const loved = await toggleLoveOf(t)
+        b.classList.toggle('loved', loved)
+        b.title = loved ? '取消喜欢' : '加入我喜欢'
+        toast(loved ? '已加入我喜欢' : '已取消喜欢')
+        // 「我喜欢」列表页：移除后必须重绘（否则取消喜欢只是心形变灰，行还赖在那）
+        if (location.hash.indexOf('#/playlist/love') === 0 && before && !loved) route()
+      } catch (err) { toast(err.message, true) }
+    }
+    if (cls) b.classList.add(cls)
+    return b
+  }
+  /** 菜单项文案随收藏状态变（菜单是快照，打开那一刻的状态就够用） */
+  const loveMenuLabel = (t) => (isLoved(t) ? '取消喜欢' : '加入我喜欢')
+  /** 菜单里的收藏动作：切换 + 重绘当前页（列表里心形状态/「我喜欢」页要跟着变） */
+  const loveMenuAction = async (t) => {
+    try {
+      const loved = await toggleLoveOf(t)
+      toast(loved ? '已加入我喜欢' : '已取消喜欢')
+      route()
+      refreshPlaylists()
+    } catch (e) { toast(e.message, true) }
+  }
+
   // ---------------- 状态 ----------------
   let me = null
   let loveIds = new Set()
@@ -147,11 +221,27 @@
   }
   $('#to-register').onclick = () => { $('#login-err').textContent = ''; authForm('register') }
   $('#to-login').onclick = () => { $('#reg-err').textContent = ''; authForm('login') }
+  /**
+   * 登录态相关的全局缓存：喜欢 id 集合 + 在线音源能力表。
+   * boot() 与「登录/注册成功」都必须走一遍 —— 只在 boot 里拉的话，首次在登录页
+   * 输密码进来的用户拿到的是空 loveIds（boot 没 token 时提前 return，压根没请求），
+   * 于是所有心形都显示成未收藏，得刷新一次才对，这是个真 bug。
+   */
+  async function loadUserState() {
+    try {
+      const d = await api('/api/love-ids')
+      loveIds = new Set(d.ids || [])
+    } catch {}
+    try {
+      const d = await api('/api/online/sources')
+      if (d.sources && d.sources.length) onlineSourcesCache = d.sources
+    } catch {}
+  }
   async function enterApp() {
     $('#login').hidden = true
     $('#shell').hidden = false
     $('#who').textContent = me.name
-    await refreshPlaylists()
+    await Promise.all([loadUserState(), refreshPlaylists()])
     route()
     // 打开网页/APP 自动开台（FM 电台）：等首屏渲染落地后再起播，不抢首屏
     setTimeout(maybeFmAutoplay, 400)
@@ -205,6 +295,9 @@
     localStorage.removeItem('gusi-web-token')
     token = ''
     me = null
+    // 用户态缓存必须清：换个人登录不能看到上一位的收藏与音源配置
+    loveIds = new Set()
+    onlineSourcesCache = [{ id: 'kw', name: '酷我音乐' }]
     player.stopAll()
     showLogin()
   }
@@ -324,32 +417,42 @@
     }
     const love = el('td', 'love')
     if (t.online) {
-      // 第三方音源歌曲：Web 端无音源解析能力，置灰并提示去手机端播放
-      tr.classList.add('disabled')
-      tr.onclick = () => toast('「' + t.name + '」来自第三方音源，请在手机洛雪 App 中播放', true)
-      love.appendChild(el('span', 'iconbtn', '·'))
+      // 在线音源行（手机端同步进歌单的，或 Web 端刚收藏进「我喜欢」的）：
+      // 现在服务端能解析在线直链，所以这些行与在线音乐页一致——可播、可收藏、可移除。
+      // 只有连 source/rid 都没有的残项才置灰（历史数据 / 导入的坏条目）。
+      if (!t.source || !(t.rid || t.id)) {
+        tr.classList.add('disabled')
+        tr.onclick = () => toast('「' + t.name + '」缺少音源信息，无法播放', true)
+        love.appendChild(el('span', 'iconbtn', '·'))
+        tr.appendChild(love)
+        tr.appendChild(el('td', 'dur', t.interval || ''))
+        if (opts.order) appendOrderBtns(tr, t, musics, idx)
+        if (opts.menu) {
+          // 空 acts 容器：供歌单移除按钮挂载
+          const acts = el('td', 'acts')
+          const wrap = el('span', 'more-wrap')
+          acts.appendChild(wrap)
+          tr.appendChild(acts)
+        }
+        return tr
+      }
+      love.appendChild(loveBtn(t))
       tr.appendChild(love)
-      tr.appendChild(el('td', 'dur', t.interval || ''))
+      tr.appendChild(el('td', 'dur', fmtDur(loveIntervalMs(t) / 1000)))
       if (opts.order) appendOrderBtns(tr, t, musics, idx)
       if (opts.menu) {
-        // 空 acts 容器：供歌单移除按钮挂载
         const acts = el('td', 'acts')
         const wrap = el('span', 'more-wrap')
+        const mb = el('button', 'iconbtn', '…')
+        mb.onclick = (e) => { e.stopPropagation(); openTrackMenu(mb, t, musics, idx) }
+        wrap.appendChild(mb)
         acts.appendChild(wrap)
         tr.appendChild(acts)
       }
+      tr.onclick = () => player.play(musics, idx)
       return tr
     }
-    const lb = el('button', 'iconbtn' + (loveIds.has('local_' + t.id) ? ' loved' : ''))
-    lb.innerHTML = SVG.heart
-    lb.onclick = async (e) => {
-      e.stopPropagation()
-      try {
-        const d = await api('/api/love/toggle', { method: 'POST', body: { trackId: t.id } })
-        if (d.loved) loveIds.add('local_' + t.id); else loveIds.delete('local_' + t.id)
-        lb.classList.toggle('loved', d.loved)
-      } catch (err) { toast(err.message, true) }
-    }
+    const lb = loveBtn(t)
     // 死引用（歌单里指向已被删/改名的曲库文件）：灰显，只留菜单里的「从歌单移除」
     love.appendChild(t.missing ? el('span', 'iconbtn', '·') : lb)
     if (t.missing) tr.classList.add('disabled')
@@ -486,10 +589,8 @@
     }
     mk('立即播放', () => player.play(musics, idx))
     mk('下一首播放', () => { player.insertNext(track); toast('已插入下一首') })
-    mk('加入我喜欢', async () => {
-      if (loveIds.has('local_' + track.id)) return toast('已在我喜欢中')
-      try { await api('/api/love/toggle', { method: 'POST', body: { trackId: track.id } }); loveIds.add('local_' + track.id); toast('已收藏'); route() } catch (e) { toast(e.message, true) }
-    })
+    // 收藏：本地与在线同一份「我喜欢」列表，文案随当前状态变
+    if (loveKeyOf(track)) mk(loveMenuLabel(track), () => loveMenuAction(track))
     // 歌单目前只能存曲库内的曲目，所以只对本地曲目显示（与「删除…」一致）
     if (!track.online && track.id) mk('添加到歌单…', () => askAddToPlaylist([track]))
     // 分享这首（免登录可听的公开链接，默认 7 天、默认允许下载）
@@ -884,12 +985,8 @@
     tdName.appendChild(el('div', 'sub', (t.singer || '未知歌手') + ' · 在线'))
     tr.appendChild(tdName)
     tr.appendChild(el('td', 'album-col ell', t.album || '—'))
-    const love = el('td', 'love off')
-    const lb = el('button', 'iconbtn')
-    lb.innerHTML = SVG.heart
-    lb.title = '在线曲目暂不支持收藏'
-    lb.onclick = (e) => { e.stopPropagation(); toast('在线歌曲暂不支持收藏，可到手机端添加') }
-    love.appendChild(lb)
+    const love = el('td', 'love')
+    love.appendChild(loveBtn(t))
     tr.appendChild(love)
     tr.appendChild(el('td', 'dur', t.interval ? fmtDur(Number(t.interval) / 1000) : ''))
     const acts = el('td', 'acts')
@@ -900,6 +997,7 @@
       popMenu(mb, [
         ['▶ 立即播放', () => player.play(list, idx)],
         ['⏭ 下一首播放', () => player.insertNext(t)],
+        [isLoved(t) ? '💔 取消喜欢' : '❤ 加入我喜欢', () => toggleLoveOf(t).then(v => { toast(v ? '已加入我喜欢' : '已取消喜欢'); route() }).catch(err => toast(err.message, true))],
         ['💻 下载到本机', () => askDownload(asOnlineRows([t]), mb)],
         ['☁️ 保存到云盘', () => saveToCloud(asOnlineRows([t]))],
       ])
@@ -974,6 +1072,7 @@
     btns.appendChild(btnAll); btns.appendChild(btnShuf)
     // 勾选列一直存在，但此前没有任何批量操作接上去；补齐「下载/删除选中」
     btns.appendChild(selDlBtn())
+    btns.appendChild(selLoveBtn())
     btns.appendChild(selDelBtn())
     btns.appendChild(selPlBtn())
     btns.appendChild(selShareBtn())
@@ -1300,18 +1399,37 @@ kuwo.cn/playlist_detail/280301309</pre>
     const v = $('#view')
     const d = await api('/api/playlists/' + encodeURIComponent(id))
     const isFixed = id === 'default' || id === 'love'
-    const tracks = d.tracks.map(m => ({
-      id: m.trackId || m.id,
-      name: m.name, singer: m.singer, album: (m.meta && m.meta.albumName) || '',
-      interval: m.interval,
-      online: !m.trackId, // 非 NAS 曲库曲目（第三方音源）：Web 不可播
-      // 曲库里已没有这个 id（文件被删/改名/外部移动后重扫）：引用失效，只能从歌单移除
-      missing: !!m.missing,
-      hasCover: !!m.trackId && !m.missing,
-      _musicId: m.id,
-      _listId: id,
-    }))
-    const playable = tracks.filter(t => !t.online && !t.missing)
+    // 歌单里的曲目有两种：本地曲库项（source=local）与在线音源项（手机端同步进来的、
+    // 以及 Web 端「加入我喜欢」存进来的）。后者带着 source + id，Web 端能解析直链播放，
+    // 所以这里必须把 source/rid 保留下来，不能一律当成「不可播的第三方项」。
+    const tracks = d.tracks.map(m => {
+      const src = m.source || 'local'
+      if (!m.trackId && src !== 'local') {
+        return {
+          id: m.id, kind: 'online', source: src,
+          // 存的 id 是 <source>_<rid>；rid 用于拼 /web/media/online/<source>/<rid>
+          rid: String(m.id || '').replace(/^[A-Za-z][A-Za-z0-9]*_/, ''),
+          name: m.name, singer: m.singer, album: (m.meta && m.meta.albumName) || '',
+          interval: parseInterval(m.interval) * 1000,
+          pic: (m.meta && m.meta.picUrl) || '',
+          online: true, missing: false, hasCover: false,
+          _musicId: m.id,
+          _listId: id,
+        }
+      }
+      return {
+        id: m.trackId || m.id,
+        name: m.name, singer: m.singer, album: (m.meta && m.meta.albumName) || '',
+        interval: m.interval,
+        online: false,
+        // 曲库里已没有这个 id（文件被删/改名/外部移动后重扫）：引用失效，只能从歌单移除
+        missing: !!m.missing,
+        hasCover: !!m.trackId && !m.missing,
+        _musicId: m.id,
+        _listId: id,
+      }
+    })
+    const playable = tracks.filter(t => !t.missing && (t.kind === 'online' ? !!t.rid : true))
     const deadCount = tracks.filter(t => t.missing).length
     const rmBtn = el('button', 'btn')
     rmBtn.textContent = '🗑 删除歌单'
@@ -1350,10 +1468,10 @@ kuwo.cn/playlist_detail/280301309</pre>
     if (!isFixed) extra.push(rmBtn)
     const thirdCount = tracks.length - playable.length - deadCount
     const metaText = tracks.length + ' 首'
-      + (thirdCount > 0 ? '（' + thirdCount + ' 首在线源歌曲需手机端播放）' : '')
+      + (thirdCount > 0 ? '（' + thirdCount + ' 首缺少音源信息，无法播放）' : '')
       + (deadCount > 0 ? '（' + deadCount + ' 首引用已失效，可从行内 × 移除）' : '')
     const shuf = shuffleBtn('随机播放')
-    shuf.onclick = () => { if (playable.length) player.shufflePlay(playable); else toast('歌单里没有可在网页端播放的曲目', true) }
+    shuf.onclick = () => { if (playable.length) player.shufflePlay(playable); else toast('歌单里没有可播放的曲目', true) }
     // 分享歌单：快照当前歌单内容（之后改歌单不影响已发出的链接）；在线源曲目服务端会自动跳过
     const shareB = el('button', 'btn')
     shareB.innerHTML = SVG.share + '<span>分享歌单</span>'
@@ -1457,6 +1575,9 @@ kuwo.cn/playlist_detail/280301309</pre>
           if (c.pic && c.pic !== r.pic) { r.pic = c.pic; paintCov() }
           if (c.album) { r.album = c.album; if (tdAlbum) tdAlbum.textContent = c.album }
           if (tdDur) tdDur.textContent = fmtDur((r.intervalMs || 0) / 1000)
+          // 换了平台就是另一首歌：收藏态跟着重算
+          bLove.classList.toggle('loved', isLoved(loveTarget()))
+          bLove.title = isLoved(loveTarget()) ? '取消喜欢' : '加入我喜欢'
         }
         sub.appendChild(sel)
       } else if (r.source) {
@@ -1471,14 +1592,23 @@ kuwo.cn/playlist_detail/280301309</pre>
       tr.appendChild(tdDur)
 
       const tdAct = el('td', 'acts')
-      const bPlay = el('button', 'iconbtn', SVG.play)
+      // 行内数据是「搜索结果」（source + 原始 id），而收藏要的是「播放行」（kind/rid）；
+      // 用函数取当前行：切源下拉改了 source/id 后，心形的收藏态跟着重算
+      const loveTarget = () => asOnlineRows([r])[0]
+      const bLove = loveBtn(loveTarget)
+      const bPlay = el('button', 'iconbtn')
+      // el() 的第三个参数是 textContent：图标必须走 innerHTML，否则 SVG 源码会被转义成文本显示
+      bPlay.innerHTML = SVG.play
       bPlay.title = '播放'
       bPlay.onclick = (e) => { e.stopPropagation(); player.play(toRows(st.list), i) }
-      const bDl = el('button', 'iconbtn dl', SVG.dl)
+      const bDl = el('button', 'iconbtn dl')
+      bDl.innerHTML = SVG.dl
       bDl.title = '下载'
       bDl.onclick = (e) => { e.stopPropagation(); askDownload(asOnlineRows([r]), bDl) }
+      // 顺序固定为 ▶ ⬇ ♥：起播/下载仍是行内头两个动作，收藏排在最后（与既有操作习惯一致）
       tdAct.appendChild(bPlay)
       tdAct.appendChild(bDl)
+      tdAct.appendChild(bLove)
       tr.appendChild(tdAct)
 
       tr.onclick = (e) => {
@@ -1617,6 +1747,12 @@ kuwo.cn/playlist_detail/280301309</pre>
       const sp = b.querySelector('span')
       if (sp) sp.textContent = '分享选中 (' + nLocal + ')'
     })
+    // 收藏同样只认本地曲目（本页的在线行不在列表里，无从勾选）
+    document.querySelectorAll('.love-sel').forEach(b => {
+      b.disabled = nLocal === 0
+      const sp = b.querySelector('span')
+      if (sp) sp.textContent = '喜欢选中 (' + nLocal + ')'
+    })
     const boxes = document.querySelectorAll('.row-sel')
     const hdr = document.querySelector('.all-sel')
     if (hdr) {
@@ -1692,6 +1828,24 @@ kuwo.cn/playlist_detail/280301309</pre>
     b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.6"/><circle cx="16.6" cy="15.5" r="2.6"/></svg><span>加入歌单 (0)</span>'
     b.disabled = true
     b.onclick = () => askAddToPlaylist(selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online))
+    return b
+  }
+  /** 「喜欢选中 (n)」按钮：批量把本地曲目收进「我喜欢」（已在列表里的服务端会跳过） */
+  const selLoveBtn = (cls) => {
+    const b = el('button', (cls || 'btn mini ghost') + ' love-sel')
+    b.innerHTML = SVG.heart + '<span>喜欢选中 (0)</span>'
+    b.disabled = true
+    b.onclick = async () => {
+      const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online && !t.missing && t.id)
+      if (!items.length) { toast('请先勾选要收藏的本地歌曲', true); return }
+      try {
+        const r = await api('/api/love/add', { method: 'POST', body: { trackIds: items.map(t => String(t.id)) } })
+        const rel = await api('/api/love-ids').catch(() => null)
+        if (rel) loveIds = new Set(rel.ids)
+        toast(r.added ? '已加入我喜欢 ' + r.added + ' 首' : '这些曲目都已经在我喜欢里了')
+        route()
+      } catch (e) { toast(e.message, true) }
+    }
     return b
   }
   /** 「分享选中 (n)」按钮：只分享云盘曲目（在线曲目没有稳定文件，服务端会跳过） */
@@ -1935,6 +2089,10 @@ kuwo.cn/playlist_detail/280301309</pre>
     tr.appendChild(tdName)
     const tdAlbum = el('td', 'album-col ell', t.album || '—')
     tr.appendChild(tdAlbum)
+    // 收藏列：在线曲目与本地曲目共用「我喜欢」列表（服务端按 source+rid 存 MusicInfo）
+    const tdLove = el('td', 'love')
+    tdLove.appendChild(loveBtn(t))
+    tr.appendChild(tdLove)
     const tdB = el('td', 'dur')
     const pbtn = el('button', 'iconbtn')
     pbtn.innerHTML = SVG.play
@@ -1966,6 +2124,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     htr.appendChild(el('th', 'cov', ''))
     htr.appendChild(el('th', null, '歌曲'))
     htr.appendChild(el('th', 'album-col', '专辑'))
+    htr.appendChild(el('th', 'love', ''))
     htr.appendChild(el('th', 'dur', '时长'))
     thead.appendChild(htr)
   }
@@ -3855,26 +4014,19 @@ kuwo.cn/playlist_detail/280301309</pre>
       $('#queue-close').onclick = () => { $('#queue').hidden = true }
       $('#btn-lyric').onclick = () => { togglePlayPage() }
       $('#lf-close').onclick = () => { togglePlayPage(false) }
-      $('#np-love').onclick = () => {
-        if (!this.cur) return
+      // 收藏当前曲目：本地与在线同一份「我喜欢」，只要行内有 source/rid 就能收藏
+      const loveCur = () => {
         const t = this.cur
-        if (t.kind === 'online') { toast('在线歌曲暂不支持收藏，可到手机端添加'); return }
-        api('/api/love/toggle', { method: 'POST', body: { trackId: t.id } }).then(d => {
-          if (d.loved) loveIds.add('local_' + t.id); else loveIds.delete('local_' + t.id)
+        if (!t) return
+        toggleLoveOf(t).then(v => {
+          toast(v ? '已加入我喜欢' : '已取消喜欢')
           this.renderNp()
         }).catch(e => toast(e.message, true))
       }
+      $('#np-love').onclick = loveCur
       $('#np-download').onclick = (e) => downloadCurrent(e.currentTarget)
       // 播放页（歌词全屏）收藏/下载：与底栏共用逻辑
-      $('#lf-love').onclick = () => {
-        if (!this.cur) return
-        const t = this.cur
-        if (t.kind === 'online') { toast('在线歌曲暂不支持收藏，可到手机端添加'); return }
-        api('/api/love/toggle', { method: 'POST', body: { trackId: t.id } }).then(d => {
-          if (d.loved) loveIds.add('local_' + t.id); else loveIds.delete('local_' + t.id)
-          this.renderNp()
-        }).catch(e => toast(e.message, true))
-      }
+      $('#lf-love').onclick = loveCur
       $('#lf-download').onclick = (e) => downloadCurrent(e.currentTarget)
       // UPGRADE_0019: 点击底栏封面拉起播放页（CD 旋转 + 歌词）
       const npCover = $('#np-cover')
@@ -4220,8 +4372,11 @@ kuwo.cn/playlist_detail/280301309</pre>
       if (t.kind === 'online') {
         img.src = picProxy(t.pic) || 'assets/icon.png'
         img.onerror = () => { img.src = 'assets/icon.png' }
-        npLove.style.visibility = 'hidden'
-        npLove.style.pointerEvents = 'none'
+        // 在线曲目也能收藏（服务端按 source+rid 存进「我喜欢」），只有拿不到 rid 时才禁掉
+        const canLove = !!loveKeyOf(t)
+        npLove.style.visibility = canLove ? '' : 'hidden'
+        npLove.style.pointerEvents = canLove ? '' : 'none'
+        npLove.title = canLove ? '加入我喜欢 / 取消喜欢' : '该曲目无法收藏'
         // 在线曲目支持下载（服务端 ?dl=1 附加 Content-Disposition: attachment）
         const canOnlineDl = !!t.rid
         npDl.style.visibility = canOnlineDl ? '' : 'hidden'
@@ -4234,18 +4389,20 @@ kuwo.cn/playlist_detail/280301309</pre>
         } else img.src = 'assets/icon.png'
         npLove.style.visibility = ''
         npLove.style.pointerEvents = ''
+        npLove.title = '加入我喜欢 / 取消喜欢'
         npDl.style.visibility = t.id ? '' : 'hidden'
         npDl.style.pointerEvents = t.id ? '' : 'none'
       }
-      const loved = loveIds.has('local_' + t.id)
+      const loved = isLoved(t)
       $('#np-love').style.color = loved ? 'var(--danger)' : ''
       // 播放页同步：红心状态随底栏；在线/本地同规则显隐
       const lfLove = $('#lf-love')
       const lfDl = $('#lf-download')
       if (lfLove) {
-        lfLove.style.color = loved && t.kind !== 'online' ? 'var(--danger)' : ''
-        lfLove.style.visibility = t.kind === 'online' ? 'hidden' : ''
-        lfLove.style.pointerEvents = t.kind === 'online' ? 'none' : ''
+        lfLove.style.color = loved ? 'var(--danger)' : ''
+        const canLove = !!loveKeyOf(t)
+        lfLove.style.visibility = canLove ? '' : 'hidden'
+        lfLove.style.pointerEvents = canLove ? '' : 'none'
       }
       if (lfDl) {
         const canDl = t.kind === 'online' ? !!t.rid : !!t.id
@@ -4409,14 +4566,6 @@ kuwo.cn/playlist_detail/280301309</pre>
     } catch {
       return showLogin()
     }
-    try {
-      const d = await api('/api/love-ids')
-      loveIds = new Set(d.ids)
-    } catch {}
-    try {
-      const d = await api('/api/online/sources')
-      if (d.sources && d.sources.length) onlineSourcesCache = d.sources
-    } catch {}
     enterApp()
   }
   bindGlobalKeys()
