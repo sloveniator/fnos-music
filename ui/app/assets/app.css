@@ -105,6 +105,9 @@ body.has-player .side-foot { background: linear-gradient(0deg, rgba(13,16,24,.55
 .view { max-width: 1240px; margin: 0 auto; }
 h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom: 22px; }
 .page-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+/* 只有操作按钮、没有标题的工具栏（歌单页的 tab 已充当标题，避免标题两层重复） */
+.page-head.acts-only { justify-content: flex-end; margin-bottom: 16px; }
+.page-head.acts-only .btns { flex: none; }
 .page-head h2.page { margin-bottom: 0; }
 .page-head .sp { flex: 1; }
 .page-head .meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -206,7 +209,7 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
 .search-box input { flex: 1; background: rgba(20,24,36,.85); border: 1px solid var(--line-soft);
   border-radius: 99px; padding: 13px 20px; transition: border-color .2s, box-shadow .2s; }
 .search-box input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(79,140,255,.12); }
-.tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+.tabs { display: flex; gap: 8px; row-gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
 .tabs button { padding: 8px 20px; border-radius: 99px; border: 1px solid var(--line-soft);
   color: var(--muted); font-size: 13px; transition: all .15s; }
 .tabs button.on { background: linear-gradient(135deg, var(--accent), var(--accent2)); border-color: transparent; color: #fff; font-weight: 600; }
@@ -1122,6 +1125,8 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .page-head .btns { flex-wrap: wrap; row-gap: 8px; justify-content: flex-end; max-width: 100%; }
   /* ≤560px 改成整齐两列，避免右对齐换行造成的阶梯状留白 */
   .page-head .btns { width: 100%; }
+  /* 只有按钮的工具栏（歌单页）不铺满：单个按钮拉成一整条会像横幅，压过上面的 tab */
+  .page-head.acts-only .btns { width: auto; }
   /* 源/Tab 横滑容器：不换行、不显示滚动条 */
   .otabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .otabs::-webkit-scrollbar { display: none; }

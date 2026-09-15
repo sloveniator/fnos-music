@@ -154,7 +154,10 @@ METRICS = """() => {
   }
 }"""
 
+# 歌单页只有一个侧栏入口，四个 tab 逐个覆盖（?tab= 是它的深链语法）
 PAGES = [('home', '#/home'), ('tracks', '#/tracks'), ('albums', '#/albums'),
+         ('albums-artists', '#/albums?tab=artists'), ('albums-album', '#/albums?tab=albums'),
+         ('albums-import', '#/albums?tab=import'),
          ('online', '#/online'), ('downloads', '#/downloads'),
          ('trash', '#/trash'), ('settings', '#/settings')]
 

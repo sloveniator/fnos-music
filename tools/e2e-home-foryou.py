@@ -150,14 +150,17 @@ def main():
         check('首页不再出现统计数字（如「%d 张」）' % stats['albums'],
               ('%d 张' % stats['albums']) not in page.evaluate(VIEW_TEXT))
         side = page.evaluate("() => document.querySelector('#sidebar').innerText")
-        check('入口没丢：侧边栏仍有 全部歌曲 / 专辑歌单 / 歌手',
-              '全部歌曲' in side and '专辑/歌单' in side and '歌手' in side)
+        check('入口没丢：侧边栏仍有 全部歌曲 / 歌单（歌手已并进歌单页 tab）',
+              '全部歌曲' in side and '歌单' in side and '歌手' not in side)
         goto(page, '#/albums', 1200)
         page.evaluate("() => [...document.querySelectorAll('#view .tabs button')]"
                       ".find(t => t.textContent.trim() === '我的歌单').click()")
         page.wait_for_timeout(1200)
-        check('入口没丢：「专辑/歌单 → 我的歌单」里能找到「我喜欢」',
+        check('入口没丢：「歌单 → 我的歌单」里能找到「我喜欢」',
               '我喜欢' in page.evaluate(VIEW_TEXT))
+        check('歌单页 tab = 我的歌单/歌手/专辑/导入歌单（歌手已迁入）',
+              page.evaluate("() => [...document.querySelectorAll('#view .tabs button')]"
+                            ".map(b => b.textContent.trim())") == ['我的歌单', '歌手', '专辑', '导入歌单'])
         goto(page, '#/home', 1200)
         body = page.evaluate(VIEW_TEXT)
         for gone in ('新入库', '热门歌手', '最近播放'):

@@ -447,7 +447,7 @@ def run_ui_cases():
                 break
         check('设置页撤销后列表减少', n2 == n - 1, '%d → %d' % (n, n2))
         # 专辑页：分享入口 + 弹窗
-        pg.goto(BASE + '/#/albums')
+        pg.goto(BASE + '/#/albums?tab=albums')
         pg.wait_for_selector('.card', timeout=15000)
         pg.click('.card')
         pg.wait_for_selector('.hero .btn', timeout=15000)

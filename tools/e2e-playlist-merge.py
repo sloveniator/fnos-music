@@ -5,7 +5,7 @@
 
 验证：
   1. 侧边栏「歌单」区已删除（无 #pl-list / #pl-create / .pl-head），底部信息条仍贴底
-  2. 「专辑 / 歌单」页的「我的歌单」tab 承担全部歌单管理：列歌单 + 新建入口可用
+  2. 「歌单」页的「我的歌单」tab 承担全部歌单管理：列歌单 + 新建入口可用
   3. 新建 → 列出现 → 删除 的完整回路仍可从 tab 内完成（不留死路）
   4. 设置页、下载中心页仍正常渲染（本次改动不波及其它页）
 用法：
@@ -84,9 +84,12 @@ def main():
         check('已无 .pl-head / .pl-list 节点', s['plHead'] == 0, 'count=%d' % s['plHead'])
         check('底部信息条仍贴在侧栏底部（auto 顶底生效）', s['footBottomGap'] <= 12,
               'nav 与 footer 间距=%dpx 距底=%dpx' % (s['gapBelowNav'], s['footBottomGap']))
-        check('导航项完整（8 项含专辑/歌单）', len([x for x in s['navItems'] if x]) >= 8, ' | '.join(s['navItems']))
+        check('导航项完整且顺序正确（全部歌曲在回收站上方，歌手已并入歌单）',
+              [x for x in s['navItems'] if x] == ['首页', '歌单', '在线音乐', 'FM 电台',
+                                              '下载中心', '全部歌曲', '回收站', '设置'],
+              ' | '.join(s['navItems']))
 
-        print('二、专辑/歌单 tab 承接歌单管理')
+        print('二、歌单页 tab 承接歌单管理')
         page.goto(BASE + '/#/albums', wait_until='domcontentloaded')
         page.reload(wait_until='domcontentloaded')
         page.wait_for_timeout(1200)
@@ -161,7 +164,10 @@ def main():
         page.wait_for_timeout(900)
         st = page.evaluate("""() => ({
           secs: [...document.querySelectorAll('.set-sec-h')].map(h => h.textContent.trim()),
-          hasPlSection: /歌单/.test(document.querySelector('#view').textContent),
+          // 「我的分享」空态文案会正经提到「歌单页」，整页搜「歌单」两个字会把正常文案算成残留；
+          // 所以只认小节标题与旧节点，判据必须比文案更窄
+          hasPlSection: [...document.querySelectorAll('.set-sec-h')].some(h => /歌单/.test(h.textContent))
+            || !!document.querySelector('#view #pl-list, #view #pl-create, #view .pl-head'),
         })""")
         check('设置页渲染正常', len(st['secs']) >= 4, '小节=%s' % st['secs'])
         check('设置页里没有歌单管理残留', not st['hasPlSection'], '小节=%s' % st['secs'])

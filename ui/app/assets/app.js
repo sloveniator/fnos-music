@@ -307,10 +307,15 @@
   }
 
   // ---------------- 侧栏 / 路由 ----------------
-  const TITLES = { home: '首页', tracks: '全部歌曲', albums: '专辑', artists: '歌手', search: '搜索', online: '在线音乐', fm: 'FM 电台', downloads: '下载中心', playlists: '我的歌单', settings: '设置' }
-  function setActiveNav(name) {
+  const TITLES = { home: '首页', tracks: '全部歌曲', albums: '歌单', artists: '歌手', search: '搜索', online: '在线音乐', fm: 'FM 电台', downloads: '下载中心', playlists: '我的歌单', settings: '设置' }
+  /**
+   * 高亮侧边栏项 + 顶栏标题。
+   * title 可选：侧边栏收成「歌单」一个入口后，歌手/专辑/我的歌单这些页面
+   * 仍然要顶栏显示自己的名字，但高亮的还是「歌单」那一项。
+   */
+  function setActiveNav(name, title) {
     document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === name))
-    $('#top-title').textContent = TITLES[name] || '古四音乐'
+    $('#top-title').textContent = title || TITLES[name] || '古四音乐'
   }
   function closeDrawer() { $('#sidebar').classList.remove('open'); $('#mask').hidden = true }
   $('#menu-btn').onclick = () => { $('#sidebar').classList.add('open'); $('#mask').hidden = false }
@@ -1113,28 +1118,35 @@
   }
 
   // ---------------- 视图：专辑 / 歌手 ----------------
-  routes.albums = async () => {
-    setActiveNav('albums')
+  // 侧边栏只留「歌单」一个入口，里面四个 tab；顺序按主人的说法排：
+  // 我的歌单 / 歌手 / 专辑 / 导入歌单。tab 与 hash 双向绑定，刷新或分享链接能回到同一页。
+  const LIB_TABS = [['playlists', '我的歌单'], ['artists', '歌手'], ['albums', '专辑'], ['import', '导入歌单']]
+  routes.albums = async (args, query) => {
+    setActiveNav('albums', '歌单')
     const v = $('#view')
-    v.appendChild(el('h2', 'page', '专辑 / 歌单'))
-    let abTab = 'albums'
+    const want = new URLSearchParams(query || '').get('tab') || ''
+    let abTab = LIB_TABS.some(t => t[0] === want) ? want : 'playlists'
     const tabs = el('div', 'tabs')
-    const mk = (key, label) => {
-      const b = el('button', key === abTab ? 'on' : '', label)
-      b.onclick = () => { abTab = key; paint() }
-      return b
-    }
     const area = el('div')
     v.appendChild(tabs)
     v.appendChild(area)
     function paint() {
       tabs.innerHTML = ''
-      tabs.appendChild(mk('albums', '专辑'))
-      tabs.appendChild(mk('playlists', '我的歌单'))
-      tabs.appendChild(mk('import', '导入歌单'))
+      for (const [key, label] of LIB_TABS) {
+        const b = el('button', key === abTab ? 'on' : '', label)
+        b.onclick = () => {
+          if (abTab === key) return
+          abTab = key
+          // replaceState：切 tab 不塞历史记录，也不会触发 hashchange 重渲染整个页面
+          try { history.replaceState(null, '', '#/albums?tab=' + key) } catch {}
+          paint()
+        }
+        tabs.appendChild(b)
+      }
       area.innerHTML = ''
-      if (abTab === 'albums') paintAlbums()
-      else if (abTab === 'playlists') renderPlaylistsView(area)
+      if (abTab === 'playlists') renderPlaylistsView(area, { title: false })
+      else if (abTab === 'artists') paintArtistsInto(area)
+      else if (abTab === 'albums') paintAlbums()
       else paintImport()
     }
     async function paintAlbums() {
@@ -1226,10 +1238,8 @@ kuwo.cn/playlist_detail/280301309</pre>
     paint()
   }
 
-  routes.artists = async () => {
-    setActiveNav('artists')
-    const v = $('#view')
-    v.appendChild(el('h2', 'page', '歌手'))
+  /** 歌手网格：歌单页的「歌手」tab 与 #/artists 深链共用同一份渲染 */
+  const paintArtistsInto = async (v) => {
     const d = await api('/api/artists?size=200')
     if (!d.artists.length) return v.appendChild(el('div', 'empty', '暂无歌手'))
     const grid = el('div', 'grid')
@@ -1242,6 +1252,11 @@ kuwo.cn/playlist_detail/280301309</pre>
       grid.appendChild(c)
     }
     v.appendChild(grid)
+  }
+
+  routes.artists = async () => {
+    // 侧边栏的「歌手」已经并进歌单页：老链接一律重定向到那个 tab，只保留一个真相
+    location.replace('#/albums?tab=artists')
   }
 
   function heroBlock(coverTrack, title, metaText, onPlayAll, extraBtns) {
@@ -1273,7 +1288,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     const q = new URLSearchParams(query)
     const singer = q.get('singer') || ''
     const album = q.get('album') || ''
-    setActiveNav('albums')
+    setActiveNav('albums', '专辑')
     const v = $('#view')
     const d = await api('/api/album?singer=' + encodeURIComponent(singer) + '&album=' + encodeURIComponent(album))
     const cover = d.tracks.find(hasCoverOf)
@@ -1298,7 +1313,7 @@ kuwo.cn/playlist_detail/280301309</pre>
   routes.artist = async (args, query) => {
     const q = new URLSearchParams(query)
     const singer = q.get('singer') || ''
-    setActiveNav('artists')
+    setActiveNav('albums', '歌手')
     const v = $('#view')
     const d = await api('/api/artist?singer=' + encodeURIComponent(singer))
     const cover = d.tracks.find(hasCoverOf)
@@ -1349,9 +1364,14 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
 
   // ---------------- 视图：歌单 ----------------
-  const renderPlaylistsView = async (v) => {
+  /**
+   * 「我的歌单」区块。作为歌单页的 tab 使用时传 { title: false }：
+   * tab 名已经写着「我的歌单」，再来一个同名大标题就是两层重复，只留右上角的操作按钮。
+   */
+  const renderPlaylistsView = async (v, opt) => {
     const head = el('div', 'page-head')
-    head.appendChild(el('h2', 'page', '我的歌单'))
+    if (!opt || opt.title !== false) head.appendChild(el('h2', 'page', '我的歌单'))
+    else head.classList.add('acts-only')
     const btns = el('div', 'btns')
     const newBtn = el('button', 'btn primary')
     newBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>新建歌单</span>'
@@ -1388,16 +1408,17 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
 
   routes.playlists = async () => {
-    setActiveNav('playlists')
+    setActiveNav('albums', '我的歌单')
     const v = $('#view')
     await renderPlaylistsView(v)
   }
 
   routes.playlist = async (args) => {
     const id = decodeURIComponent(args.join('/'))
-    setActiveNav('')
     const v = $('#view')
     const d = await api('/api/playlists/' + encodeURIComponent(id))
+    // 歌单详情属于「歌单」这一段：侧边栏高亮它，顶栏换成歌单自己的名字
+    setActiveNav('albums', d.name || '歌单')
     const isFixed = id === 'default' || id === 'love'
     // 歌单里的曲目有两种：本地曲库项（source=local）与在线音源项（手机端同步进来的、
     // 以及 Web 端「加入我喜欢」存进来的）。后者带着 source + id，Web 端能解析直链播放，
