@@ -255,31 +255,33 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
 .icon-btn.on { color: var(--accent); }
 /* 静音状态：音量图标用 accent 提示已静音（底栏与歌词全屏共用） */
 #vol-ico.on, #lf-vol-ico.on { color: var(--muted); opacity: .55; }
-/* 播放/暂停：毛玻璃（半透明 + backdrop-blur + accent 染色 + 顶部高光），替掉原来的纯白实心块 —
-   纯白在深色玻璃底栏上像贴上去的贴纸，太抢视觉；柔化后仍是画面里最明确的主操作 */
+/* 播放/暂停：乳白按键（暖白圆盘 + 近黑图标 + 柔和暗投影），替掉原先偏蓝的毛玻璃 ——
+   蓝紫渐变 + accent 外发光在深色玻璃底栏上偏亮，而且点过之后那层外发光会一直留着；
+   乳白更像素净的实体按键，深色图标在浅底上对比也稳。
+   hover 只提亮、不加阴影，且只在真 hover 设备生效；按压是瞬时的缩放动画。
+   底栏 46px 与歌词全屏 56px 两处共用 .icon-btn.play。 */
 .icon-btn.play { width: 46px; height: 46px;
-  color: #fff;
+  color: #1b202b;
   background:
-    radial-gradient(112% 84% at 32% 2%, rgba(255,255,255,.42), rgba(255,255,255,0) 62%),
-    linear-gradient(140deg, rgba(79,140,255,.50), rgba(124,92,255,.36));
-  border: 1px solid rgba(255,255,255,.28);
-  backdrop-filter: blur(16px) saturate(1.7);
-  -webkit-backdrop-filter: blur(16px) saturate(1.7);
-  box-shadow: 0 8px 22px rgba(79,140,255,.30), 0 3px 12px rgba(5,8,18,.5),
-              inset 0 1px 0 rgba(255,255,255,.36),
-              inset 0 -10px 18px rgba(24,14,60,.22);
-  transition: transform .2s cubic-bezier(.2,.9,.3,1.3), box-shadow .25s ease,
-              background .25s ease, border-color .25s ease, color .2s ease; }
-/* 图标是 SVG（currentColor）：浅色玻璃上靠近白 + 轻投影保对比，不再靠纯白底 */
-.icon-btn.play svg { width: 21px; height: 21px; filter: drop-shadow(0 1px 3px rgba(4,8,20,.55)); }
-.icon-btn.play:hover { border-color: rgba(255,255,255,.42); transform: scale(1.05);
-  background:
-    radial-gradient(112% 84% at 32% 2%, rgba(255,255,255,.46), rgba(255,255,255,0) 64%),
-    linear-gradient(140deg, rgba(96,155,255,.62), rgba(140,108,255,.48));
-  box-shadow: 0 12px 30px rgba(79,140,255,.46), 0 4px 14px rgba(5,8,18,.55),
-              inset 0 1px 0 rgba(255,255,255,.44),
-              inset 0 -10px 18px rgba(24,14,60,.24); }
-.icon-btn.play:active { transform: scale(.94); }
+    radial-gradient(118% 84% at 33% 1%, rgba(255,255,255,.95), rgba(255,255,255,0) 62%),
+    linear-gradient(170deg, rgba(255,253,249,.97), rgba(232,228,220,.95));
+  border: 1px solid rgba(255,255,255,.62);
+  box-shadow: 0 5px 15px rgba(3,6,14,.42), 0 1px 3px rgba(3,6,14,.32),
+              inset 0 1px 0 rgba(255,255,255,.92),
+              inset 0 -4px 9px rgba(122,116,102,.16);
+  transition: transform .12s cubic-bezier(.2,.9,.3,1.4), filter .16s ease, box-shadow .16s ease; }
+/* 图标是 SVG（currentColor）：乳白底上收成近黑；投影只留极淡一层，不再是白色 drop-shadow */
+.icon-btn.play svg { width: 21px; height: 21px; filter: drop-shadow(0 1px 0 rgba(255,255,255,.55)); }
+@media (hover: hover) and (pointer: fine) {
+  /* 只有真 hover 设备才提亮：触屏上 hover 会黏住，点完一直亮着 */
+  .icon-btn.play:hover { filter: brightness(1.05);
+    background:
+      radial-gradient(118% 84% at 33% 1%, rgba(255,255,255,1), rgba(255,255,255,0) 64%),
+      linear-gradient(170deg, rgba(255,254,251,.99), rgba(236,232,225,.96)); }
+}
+.icon-btn.play:active { transform: scale(.92); filter: brightness(.94);
+  box-shadow: 0 2px 7px rgba(3,6,14,.4), inset 0 1px 0 rgba(255,255,255,.7),
+              inset 0 -2px 6px rgba(122,116,102,.22); }
 .seek-row { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 620px; }
 .time { font-size: 11px; color: var(--muted); width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 .seek { flex: 1; height: 5px; border-radius: 99px; background: #232b3d; position: relative; cursor: pointer; }
@@ -971,14 +973,59 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 /* —— 3.5 底栏按钮禁止被 flex 挤压（实测 390px 下收藏/下载只剩 19px 宽）—— */
 #player .np .icon-btn, #player .ctrls .icon-btn, #player .right .icon-btn { flex-shrink: 0; }
 
-/* —— 4. 触屏反馈：没有 hover，改用按压态 —— */
+/* —— 4. 点按反馈统一化：点击只给「即时动画」，不留残影 ——
+   ① :active 是唯一的点击动画（缩放 + 提亮），.08s 过渡，松手瞬间回到常态；
+   ② hover 上不再挂阴影/位移（原来播放键的 accent 外发光点过之后会一直亮着）；
+   ③ 触屏的 :hover 在点按后会一直黏住 —— 点过的卡片留着位移+阴影、按钮留着高亮底，
+      看上去就是「点击留下的影子」。所以 (hover: none) 下把只属于指针的 hover 装饰
+      全部归零，反馈只交给 :active 的即时动画。 */
+.icon-btn:active, .btn:active, .chip:active, .otab:active, .tabs button:active,
+.load-more:active, .menu button:active, .queue-head button:active, .lf-head button:active,
+.dlg-btns button:active, .iconbtn:active, .tb-btn:active, .danger-btn:active, .crumb:active,
+.nav a:active, .side-links a:active, .side-foot button:active, .q-x:active {
+  transform: scale(.94); filter: brightness(1.07);
+  transition: transform .08s ease-out, filter .08s ease-out; }
 @media (hover: none), (pointer: coarse) {
-  .icon-btn:active { background: rgba(255,255,255,.09); transform: scale(.94); }
+  /* 按压时的底色（触屏没有 hover，用它给反馈） */
+  .icon-btn:active { background: rgba(255,255,255,.09); }
   .btn:active, .chip:active, .otab:active, .tabs button:active, .load-more:active {
-    background: rgba(255,255,255,.08); transform: scale(.97); }
+    background: rgba(255,255,255,.08); }
   .nav a:active { background: rgba(255,255,255,.07); color: var(--text); }
   .tracks tr.row:active { background: rgba(79,140,255,.10); }
   .card:active, .bcard:active { transform: scale(.985); }
+
+  /* —— 触屏 hover 归零：点按后黏住的高亮 / 位移 / 阴影 —— */
+  .icon-btn:hover:not(.play) { color: var(--muted); background: none; }
+  .icon-btn.on:hover, .lyric-btn.on:hover { color: var(--accent); }
+  .iconbtn:hover, .iconbtn.dl:hover { color: var(--muted); }
+  .iconbtn.loved:hover { color: var(--danger); }
+  .crumb:hover { color: var(--muted); }
+  .q-x:hover { color: rgba(255,255,255,.45); }
+  .btn:hover:not(.primary) { background: rgba(255,255,255,.02); }
+  .btn.primary:hover { filter: none; }
+  .danger-btn:hover { background: rgba(255,255,255,.02) !important; }
+  .load-more:hover { color: var(--muted); border-color: var(--line-soft); background: none; }
+  .chip.hchip:hover, .chip.hchip.clr:hover { color: var(--muted); border-color: var(--line-soft); }
+  .nav a:hover:not(.on) { color: var(--muted); background: none; }
+  .nav a.on:hover { color: #fff; }
+  .menu button:hover { color: #cdd3e4; background: none; }
+  .queue-head button:hover, .lf-head button:hover { color: var(--muted); background: none; }
+  .dlg-btns button:hover:not(.primary) { background: none; }
+  .side-links a:hover { color: var(--muted); background: none; }
+  .side-foot button:hover { color: var(--muted); background: none; }
+  /* 卡片 / 列表行：hover 的位移与阴影就是「点过之后留下的影子」 */
+  .card:hover { transform: none; border-color: var(--line-soft); border-top-color: rgba(255,255,255,.045); box-shadow: none; }
+  .card:hover .play-fab { opacity: 0; transform: translateY(8px) scale(.85); }
+  .bcard:hover { transform: none; border-color: var(--line-soft); box-shadow: none; }
+  .fy-card:hover { transform: none; border-color: #232a3a; box-shadow: none; }
+  .fm-card:hover:not(.on) { transform: none; border-color: var(--line-soft); }
+  .coll-card:hover .cover img, .np-cover:hover { transform: none; }
+  .seek:hover { height: 5px; }
+  .seek:hover .seek-knob { transform: translateY(-50%) scale(0); }
+  .tracks tr.row:hover { background: transparent; }
+  .queue-body .q-row:hover:not(.on) { background: none; }
+  .lyric-full:hover .lf-disc { box-shadow: 0 30px 60px rgba(0,0,0,.55), inset 0 0 40px rgba(0,0,0,.7),
+    0 0 0 1px rgba(255,255,255,.05); }
 }
 
 /* —— 5. 桌面/平板横屏：布局跟着视口缩放 —— */

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""定向验证：播放/暂停按钮毛玻璃改造（带真实曲目）。
-断言：按钮不再是纯白实心块 + 毛玻璃属性生效 + 底栏各视口布局未被影响。
+"""定向验证：播放/暂停按钮乳白改造（带真实曲目）。
+断言：乳白底 + 近黑图标 + 无 accent 蓝紫外发光 + 底栏各视口布局未被影响。
 """
 import json, os, random, shutil, string, sys, time, urllib.request, urllib.error
 
@@ -113,19 +113,21 @@ try:
             pg.mouse.move(4, 4)
             d = pg.evaluate(PROBE)
             # —— 毛玻璃本体 ——
-            check('%s 按钮不再是纯白实心块' % label, d['bgColor'] in ('rgba(0, 0, 0, 0)', 'transparent'), 'background-color=%s' % d['bgColor'])
-            check('%s 玻璃层（radial + accent 渐变）' % label,
-                  'radial-gradient' in d['bgImage'] and 'linear-gradient' in d['bgImage'], d['bgImage'][:58] + '…')
-            check('%s backdrop 模糊生效' % label, 'blur' in d['backdrop'] and 'saturate' in d['backdrop'], d['backdrop'])
-            check('%s 图标为近白 + 有投影' % label, d['color'].startswith('rgb(255, 255, 255)') and 'drop-shadow' in d['iconFilter'],
+            check('%s 乳白层（radial 高光 + 暖白渐变）' % label,
+                  'radial-gradient' in d['bgImage'] and 'linear-gradient' in d['bgImage'] and '255, 253, 249' in d['bgImage'],
+                  d['bgImage'][:58] + '…')
+            check('%s 无 accent 蓝紫外发光' % label, '79, 140, 255' not in d['shadow'], d['shadow'][:52])
+            check('%s 保留柔和暗投影' % label, 'rgba(3, 6, 14' in d['shadow'], d['shadow'][:52])
+            check('%s 图标近黑 + 极淡投影（浅底对比）' % label,
+                  d['color'] == 'rgb(27, 32, 43)' and 'drop-shadow' in d['iconFilter'],
                   '%s / %s' % (d['color'], d['iconFilter']))
-            check('%s 1px 高光描边 + 外发光' % label, d['border'].startswith('1px') and 'rgba(255, 255, 255, 0.28)' in d['border'] and 'rgba(79, 140, 255' in d['shadow'],
+            check('%s 1px 高光描边' % label, d['border'].startswith('1px') and 'rgba(255, 255, 255, 0.62)' in d['border'],
                   '%s / shadow ok' % d['border'])
             check('%s 仍是正圆且尺寸 ≥42px（窄屏下限）' % label, d['w'] == d['h'] and d['w'] >= 42 and d['radius'] == '50%', '%dx%d r=%s' % (d['w'], d['h'], d['radius']))
             # —— 歌词页同款按钮 ——
-            check('%s 歌词页按钮同款玻璃' % label,
-                  'radial-gradient' in d['lfBgImage'] and 'blur' in d['lfBackdrop'] and d['lfBgColor'] in ('rgba(0, 0, 0, 0)', 'transparent'),
-                  '%dx%s blur=%s' % (d['lfW'], d['lfW'], d['lfBackdrop'][:22]))
+            check('%s 歌词页按钮同款乳白' % label,
+                  'radial-gradient' in d['lfBgImage'] and '255, 253, 249' in d['lfBgImage'],
+                  '%dpx %s' % (d['lfW'], d['lfBgImage'][:44] + '…'))
             # —— 布局回归 ——
             check('%s 底栏不出屏' % label, d['barBottom'] <= d['vh'] + 1 and d['barBottom'] > 0, '%d/%d' % (d['barBottom'], d['vh']))
             check('%s 无横向溢出' % label, d['docOverflow'] <= 0, 'overflow=%d' % d['docOverflow'])
