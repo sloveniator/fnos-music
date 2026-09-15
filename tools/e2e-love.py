@@ -19,6 +19,7 @@
  10. 移动端 390x844：#/playlist/love 不横向溢出、心形可点且 ≥34px
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
@@ -26,7 +27,7 @@ import urllib.request
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
+USER, PASSWORD = os.environ.get('GS_APP_USER', 'Slceleto'), os.environ.get('GS_APP_PASS', 'REDACTED')
 PASS = FAIL = SKIP = 0
 
 _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))

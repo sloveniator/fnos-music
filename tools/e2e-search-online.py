@@ -17,12 +17,13 @@
   8. 320px 极窄屏：底栏不横向溢出、所有传输键都在视口内
 """
 import json
+import os
 import sys
 import urllib.request
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
+USER, PASSWORD = os.environ.get('GS_APP_USER', 'Slceleto'), os.environ.get('GS_APP_PASS', 'REDACTED')
 PASS = FAIL = SKIP = 0
 
 

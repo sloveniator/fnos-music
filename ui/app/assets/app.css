@@ -141,7 +141,10 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
 .card .play-fab:active { transform: scale(.92); }
 
 /* ---------- 曲目表 ---------- */
-.tracks { width: 100%; border-collapse: collapse; }
+.tracks { width: 100%; border-collapse: collapse; table-layout: fixed;
+  /* 列宽模板：五处曲目表共用（app.js 的 COLS/colKeys 给出列集合，宽度在这） */
+  --c-name: 34%; --c-album: 20%; --c-pad: auto;
+  --c-num: 40px; --c-love: 48px; --c-dl: 48px; --c-dur: 64px; --c-order: 66px; --c-acts: 48px; }
 .tracks th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px;
   letter-spacing: .4px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); text-transform: uppercase; }
 .tracks td { padding: 10px 12px; border-bottom: 1px solid rgba(36,43,61,.4); font-size: 14px; }
@@ -155,14 +158,23 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   width: 3px; height: 16px; border-radius: 3px; background: linear-gradient(180deg, var(--accent), var(--accent2));
   animation: eqbar .9s ease-in-out infinite alternate; }
 @keyframes eqbar { from { height: 6px; } to { height: 18px; } }
-.tracks .num { width: 40px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tracks .num { width: var(--c-num); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .tracks tr.disabled { opacity: .42; cursor: default; }
 .tracks tr.disabled:hover { background: none; }
-.tracks .order-col { width: 66px; text-align: center; white-space: nowrap; }
+.tracks .order-col { width: var(--c-order); text-align: center; white-space: nowrap; }
 .tracks .order-col .iconbtn { width: 26px; height: 26px; font-size: 13px; }
-.tracks .dur { width: 60px; color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
-.tracks .love { width: 40px; text-align: center; }
-.tracks .acts { width: 44px; text-align: center; }
+.tracks .dur { width: var(--c-dur); color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.tracks .love { width: var(--c-love); text-align: center; }
+.tracks .acts { width: var(--c-acts); text-align: center; }
+.tracks .name-col { width: var(--c-name); }
+.tracks .album-col { width: var(--c-album); }
+.tracks .dl-col { width: var(--c-dl); text-align: center; }
+/* 末列只用来吃掉剩余宽度：固定布局下没有它，多余宽度会变成末列前的一段空隙 */
+.tracks .pad-col { width: var(--c-pad); padding: 0; }
+/* 表头与数值同一侧对齐，否则「时长」总是看着错位 */
+.tracks th.dur { text-align: right; }
+/* 固定布局下由列宽截断，不再用 max-width 限制专辑列 */
+.tracks .album-col.ell { max-width: none; }
 .tracks .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .tracks .ell { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tracks td .iconbtn { font-size: 16px; }
@@ -222,10 +234,10 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
 .chip.on { background: linear-gradient(135deg, var(--accent), var(--accent2));
   border-color: transparent; color: #fff; font-weight: 600; }
 .online-disabled { font-size: 13px; color: var(--gold); padding: 10px 0 2px; }
-.tracks .dur { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.tracks .dur .iconbtn { margin: 0; opacity: 0; transition: opacity .15s; }
-.tracks tr:hover .dur .iconbtn { opacity: 1; }
-.tracks tr.playing .dur .iconbtn { opacity: 1; }
+/* 下载键已独立成列（原来塞在时长格里，把时长列撑变形） */
+.tracks .dl-col .iconbtn { margin: 0; opacity: 0; transition: opacity .15s; }
+.tracks tr:hover .dl-col .iconbtn { opacity: 1; }
+.tracks tr.playing .dl-col .iconbtn { opacity: 1; }
 
 /* ---------- 播放器 ---------- */
 .player { position: fixed; left: 0; right: 0; bottom: 0; height: var(--player-h); z-index: 40;
@@ -496,6 +508,8 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .hero .cover { width: 128px; height: 128px; }
   .hero h2 { font-size: 23px; }
   .tracks .album-col { display: none; }
+  /* 窄屏没有专辑列，余量交给歌名列（与改版前一致），末列归零 */
+  .tracks { --c-name: auto; --c-album: 0px; --c-pad: 0px; --c-love: 42px; --c-dl: 42px; }
   .queue { right: 8px; left: 8px; width: auto; }
 }
 
@@ -510,7 +524,7 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .tracks td.love .iconbtn { font-size: 19px; }
   /* 收藏/行内操作图标：触屏下把可点范围撑到 ~33px（padding 扩点 + 负 margin 抵消，
      图形仍是 17px、行高列宽都不动 —— 只改命中区，不改排版） */
-  .tracks td.love .iconbtn, .tracks td.acts .iconbtn, .tracks td.dur .iconbtn,
+  .tracks td.love .iconbtn, .tracks td.acts .iconbtn, .tracks td.dl-col .iconbtn,
   .sr-tbl td.acts .iconbtn {
     padding: 8px; margin-top: -8px; margin-bottom: -8px;
   }
@@ -519,7 +533,7 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .tracks .dur { font-size: 11.5px; }
   /* 队列行移除按钮常显（触屏无 hover） */
   .q-row .q-x { opacity: 1; }
-  .tracks .dur .iconbtn { opacity: 1; }
+  .tracks .dl-col .iconbtn { opacity: 1; }
   /* 菜单弹层改为屏幕内固定定位，避免 right:0 相对窄单元格溢出 */
   .menu { position: fixed; right: 10px; top: auto; min-width: 190px; }
 
@@ -1348,6 +1362,8 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 }
 
 .dl-res-tbl .acts { width: auto; }
+/* 固定布局只认表头那一行，所以这两张表的操作列宽度得写在 th 上 */
+.tracks.sr-tbl th.acts, .tracks.dl-res-tbl th.acts { width: 132px; }
 .dl-res-tbl .acts .btn { white-space: nowrap; }
 @media (max-width: 900px) {
   .dl-res-tbl .acts .btn { padding: 6px 10px; font-size: 12px; gap: 4px; }

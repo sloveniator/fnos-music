@@ -23,7 +23,7 @@ import urllib.request
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
+USER, PASSWORD = os.environ.get('GS_APP_USER', 'Slceleto'), os.environ.get('GS_APP_PASS', 'REDACTED')
 PASS = FAIL = 0
 
 

@@ -393,87 +393,127 @@
   }
 
   // ---------------- 曲目表渲染（共享） ----------------
+  // ---------------- 曲目表统一列模板 ----------------
+  // 五处曲目表（全部歌曲 / 歌单详情 / 在线音源 / 推荐详情 / 下载中心）以前各自手写表头，
+  // 列集合与顺序稍有不一致就错列；宽度又靠 auto 布局分配，结果「歌曲」被撑到几百像素，
+  // 而末列被推到最右边、在它前面凭空留出一段空隙（量出来 156px）。
+  // 现在列定义只有这一份：表头与每一行都按同一份 colKeys 拼，缺的列补空单元格；
+  // 表格用 table-layout:fixed（宽度只认表头那一行），末列 pad 吃掉剩余宽度，因此必然逐列对齐。
+  const COLS = {
+    sel: { cls: 'sel-col' },
+    num: { cls: 'num', label: '#' },
+    cov: { cls: 'cov' },
+    name: { cls: 'name-col', label: '歌曲' },
+    album: { cls: 'album-col ell', label: '专辑' },
+    love: { cls: 'love' },
+    dl: { cls: 'dl-col' },
+    dur: { cls: 'dur', label: '时长' },
+    order: { cls: 'order-col' },
+    acts: { cls: 'acts' },
+    pad: { cls: 'pad-col' },   // 空列，只用来吃剩余宽度
+  }
+  /** 本表要哪些列：表头与行必须用同一份结果，否则一定错列 */
+  function colKeys(opts) {
+    opts = opts || {}
+    const ks = []
+    if (opts.noSelect !== true) ks.push('sel')
+    if (opts.noNum !== true) ks.push('num')
+    ks.push('cov', 'name')
+    if (opts.showAlbum !== false) ks.push('album')
+    if (opts.showLove !== false) ks.push('love')
+    if (opts.dl) ks.push('dl')
+    ks.push('dur')
+    if (opts.order) ks.push('order')
+    if (opts.menu) ks.push('acts')
+    ks.push('pad')
+    return ks
+  }
+  /** 表头行（宽度全由 th 类名决定，所以表头必须由它生成） */
+  function trackHead(opts) {
+    const htr = el('tr')
+    colKeys(opts).forEach((k) => {
+      // 勾选列的复选框只对「.row-sel」这套勾选上下文有效；下载中心另有一套批量勾选
+      // （它自己把全选框挂在批量条上），那里传 onSelHead 自己往格子里塞控件。
+      if (k === 'sel') {
+        const th = (opts && opts.plainSelHead) ? el('th', 'sel-col', '') : selHeadCell()
+        if (opts && opts.onSelHead) opts.onSelHead(th)
+        htr.appendChild(th)
+        return
+      }
+      const c = COLS[k]
+      const label = (k === 'acts' && opts && opts.actsLabel) ? opts.actsLabel : (c.label || '')
+      htr.appendChild(el('th', c.cls, label))
+    })
+    return htr
+  }
+  /** 按同一份列模板拼一行；cells 里没给的列补空单元格（宁可空着，也不错列） */
+  function trackRowEl(opts, cells) {
+    const tr = el('tr', 'row')
+    colKeys(opts).forEach((k) => tr.appendChild(cells[k] || el('td', COLS[k].cls, '')))
+    return tr
+  }
+  /** 行尾「…」菜单单元格（歌单移除 / 删除 / 分享等都在这个菜单里） */
+  function trackMenuCell(t, musics, idx) {
+    const td = el('td', 'acts')
+    const wrap = el('span', 'more-wrap')
+    const mb = el('button', 'iconbtn', '…')
+    mb.onclick = (e) => { e.stopPropagation(); openTrackMenu(mb, t, musics, idx) }
+    wrap.appendChild(mb)
+    td.appendChild(wrap)
+    return td
+  }
+
   function trackRow(t, musics, idx, opts) {
     opts = opts || {}
-    const tr = el('tr', 'row')
-    if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
+    const cells = {}
     // 首页推荐类列表不做勾选下载，故可省去多选列
-    if (opts.noSelect !== true) tr.appendChild(selRowCell(t))
-    tr.appendChild(el('td', 'num', String(idx + 1)))
+    if (opts.noSelect !== true) cells.sel = selRowCell(t)
+    cells.num = el('td', 'num', String(idx + 1))
     // NAS 曲库行内封面（hasCover 时懒加载；在线源行走 t.pic）
     const tdCov = el('td', 'cov')
     if (t.online) {
-      const im = el('img')
-      im.loading = 'lazy'
-      im.alt = ''
       tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || '')))
-      tr.appendChild(tdCov)
     } else {
       tdCov.appendChild(coverImg(t, null, (t.singer || '') + (t.album || '') + (t.name || '')))
-      tr.appendChild(tdCov)
     }
+    cells.cov = tdCov
     const tdName = el('td')
     tdName.appendChild(el('div', null, t.name))
     if (opts.showSinger !== false) tdName.appendChild(el('div', 'sub', t.singer || '未知歌手'))
-    tr.appendChild(tdName)
-    if (opts.showAlbum !== false) {
-      const tdAlbum = el('td', 'album-col ell', t.album || '—')
-      tr.appendChild(tdAlbum)
-    }
+    cells.name = tdName
+    if (opts.showAlbum !== false) cells.album = el('td', 'album-col ell', t.album || '—')
     const love = el('td', 'love')
+    cells.love = love
+    const dur = el('td', 'dur')
+    cells.dur = dur
     if (t.online) {
       // 在线音源行（手机端同步进歌单的，或 Web 端刚收藏进「我喜欢」的）：
       // 现在服务端能解析在线直链，所以这些行与在线音乐页一致——可播、可收藏、可移除。
       // 只有连 source/rid 都没有的残项才置灰（历史数据 / 导入的坏条目）。
-      if (!t.source || !(t.rid || t.id)) {
+      const broken = !t.source || !(t.rid || t.id)
+      love.appendChild(broken ? el('span', 'iconbtn', '·') : loveBtn(t))
+      dur.textContent = broken ? (t.interval || '') : fmtDur(loveIntervalMs(t) / 1000)
+      if (opts.order) cells.order = orderCell(t, musics, idx)
+      if (opts.menu) cells.acts = trackMenuCell(t, musics, idx)
+      const tr = trackRowEl(opts, cells)
+      if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
+      if (broken) {
         tr.classList.add('disabled')
         tr.onclick = () => toast('「' + t.name + '」缺少音源信息，无法播放', true)
-        love.appendChild(el('span', 'iconbtn', '·'))
-        tr.appendChild(love)
-        tr.appendChild(el('td', 'dur', t.interval || ''))
-        if (opts.order) appendOrderBtns(tr, t, musics, idx)
-        if (opts.menu) {
-          // 空 acts 容器：供歌单移除按钮挂载
-          const acts = el('td', 'acts')
-          const wrap = el('span', 'more-wrap')
-          acts.appendChild(wrap)
-          tr.appendChild(acts)
-        }
         return tr
-      }
-      love.appendChild(loveBtn(t))
-      tr.appendChild(love)
-      tr.appendChild(el('td', 'dur', fmtDur(loveIntervalMs(t) / 1000)))
-      if (opts.order) appendOrderBtns(tr, t, musics, idx)
-      if (opts.menu) {
-        const acts = el('td', 'acts')
-        const wrap = el('span', 'more-wrap')
-        const mb = el('button', 'iconbtn', '…')
-        mb.onclick = (e) => { e.stopPropagation(); openTrackMenu(mb, t, musics, idx) }
-        wrap.appendChild(mb)
-        acts.appendChild(wrap)
-        tr.appendChild(acts)
       }
       tr.onclick = () => player.play(musics, idx)
       return tr
     }
-    const lb = loveBtn(t)
     // 死引用（歌单里指向已被删/改名的曲库文件）：灰显，只留菜单里的「从歌单移除」
-    love.appendChild(t.missing ? el('span', 'iconbtn', '·') : lb)
-    if (t.missing) tr.classList.add('disabled')
-    tr.appendChild(love)
-    tr.appendChild(el('td', 'dur', t.interval || ''))
-    if (opts.order && !t.missing) appendOrderBtns(tr, t, musics, idx)
-    if (opts.menu) {
-      const acts = el('td', 'acts')
-      const wrap = el('span', 'more-wrap')
-      const mb = el('button', 'iconbtn', '…')
-      mb.onclick = (e) => { e.stopPropagation(); openTrackMenu(mb, t, musics, idx) }
-      wrap.appendChild(mb)
-      acts.appendChild(wrap)
-      tr.appendChild(acts)
-    }
+    love.appendChild(t.missing ? el('span', 'iconbtn', '·') : loveBtn(t))
+    dur.textContent = t.interval || ''
+    if (opts.order && !t.missing) cells.order = orderCell(t, musics, idx)
+    if (opts.menu) cells.acts = trackMenuCell(t, musics, idx)
+    const tr = trackRowEl(opts, cells)
+    if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
     if (t.missing) {
+      tr.classList.add('disabled')
       tr.onclick = () => toast('「' + t.name + '」的文件已不在曲库，用右侧「…」→「从歌单移除」清理', true)
       return tr
     }
@@ -482,8 +522,8 @@
     return tr
   }
 
-  /** 歌单排序按钮（↑↓）：交换后整表提交 order API */
-  function appendOrderBtns(tr, t, musics, idx) {
+  /** 歌单排序按钮（↑↓）：交换后整表提交 order API。返回单元格（列模板要按序拼） */
+  function orderCell(t, musics, idx) {
     const td = el('td', 'order-col')
     const up = el('button', 'iconbtn', '↑')
     up.title = '上移'
@@ -503,23 +543,13 @@
     dn.onclick = (e) => { e.stopPropagation(); move(idx, idx + 1) }
     td.appendChild(up)
     td.appendChild(dn)
-    tr.appendChild(td)
+    return td
   }
 
   function trackTable(musics, opts) {
     const table = el('table', 'tracks' + (opts.compact ? ' compact' : ''))
     const thead = el('thead')
-    const htr = el('tr')
-    if (opts.noSelect !== true) htr.appendChild(selHeadCell())
-    htr.appendChild(el('th', 'num', '#'))
-    htr.appendChild(el('th', 'cov', ''))
-    htr.appendChild(el('th', null, '歌曲'))
-    if (opts.showAlbum !== false) htr.appendChild(el('th', 'album-col', '专辑'))
-    htr.appendChild(el('th', 'love', ''))
-    htr.appendChild(el('th', 'dur', '时长'))
-    if (opts.order) htr.appendChild(el('th', 'order-col', ''))
-    if (opts.menu) htr.appendChild(el('th', 'acts', ''))
-    thead.appendChild(htr)
+    thead.appendChild(trackHead(opts))
     table.appendChild(thead)
     const tbody = el('tbody')
     musics.forEach((t, i) => tbody.appendChild(trackRow(t, musics, i, opts)))
@@ -956,47 +986,41 @@
   /** 推荐详情表：本地行与在线行混排（列结构一致，避免错列） */
   function mixTable(tracks) {
     const table = el('table', 'tracks compact')
+    const opts = { noSelect: true, compact: true, menu: true }
     const thead = el('thead')
-    const htr = el('tr')
-    htr.appendChild(el('th', 'num', '#'))
-    htr.appendChild(el('th', 'cov', ''))
-    htr.appendChild(el('th', null, '歌曲'))
-    htr.appendChild(el('th', 'album-col', '专辑'))
-    htr.appendChild(el('th', 'love', ''))
-    htr.appendChild(el('th', 'dur', '时长'))
-    htr.appendChild(el('th', 'acts', ''))
-    thead.appendChild(htr)
+    thead.appendChild(trackHead(opts))
     table.appendChild(thead)
     const tbody = el('tbody')
     tracks.forEach((t, i) => {
       tbody.appendChild(t.kind === 'online'
-        ? mixOnlineRow(t, tracks, i)
-        : trackRow(t, tracks, i, { noSelect: true, compact: true, menu: true }))
+        ? mixOnlineRow(t, tracks, i, opts)
+        : trackRow(t, tracks, i, opts))
     })
     table.appendChild(tbody)
     return table
   }
 
   /** 在线行：本地行右侧是「…」菜单，这里同样给「…」，列结构才对得齐 */
-  function mixOnlineRow(t, list, idx) {
-    const tr = el('tr', 'row')
-    if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
-    tr.appendChild(el('td', 'num', String(idx + 1)))
+  function mixOnlineRow(t, list, idx, opts) {
+    opts = opts || { noSelect: true, compact: true, menu: true }
+    const cells = {}
+    cells.num = el('td', 'num', String(idx + 1))
     const tdCov = el('td', 'cov')
     tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || '')))
-    tr.appendChild(tdCov)
+    cells.cov = tdCov
     const tdName = el('td')
     tdName.appendChild(el('div', null, t.name))
     tdName.appendChild(el('div', 'sub', (t.singer || '未知歌手') + ' · 在线'))
-    tr.appendChild(tdName)
-    tr.appendChild(el('td', 'album-col ell', t.album || '—'))
+    cells.name = tdName
+    cells.album = el('td', 'album-col ell', t.album || '—')
     const love = el('td', 'love')
     love.appendChild(loveBtn(t))
-    tr.appendChild(love)
-    tr.appendChild(el('td', 'dur', t.interval ? fmtDur(Number(t.interval) / 1000) : ''))
-    const acts = el('td', 'acts')
-    const wrap = el('span', 'more-wrap')
-    const mb = el('button', 'iconbtn', '…')
+    cells.love = love
+    cells.dur = el('td', 'dur', t.interval ? fmtDur(Number(t.interval) / 1000) : '')
+    const acts = trackMenuCell(t, list, idx)
+    cells.acts = acts
+    const wrap = acts.querySelector('.more-wrap')
+    const mb = wrap.querySelector('button')
     mb.onclick = (e) => {
       e.stopPropagation()
       popMenu(mb, [
@@ -1007,9 +1031,8 @@
         ['☁️ 保存到云盘', () => saveToCloud(asOnlineRows([t]))],
       ])
     }
-    wrap.appendChild(mb)
-    acts.appendChild(wrap)
-    tr.appendChild(acts)
+    const tr = trackRowEl(opts, cells)
+    if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
     tr.onclick = () => player.play(list, idx)
     return tr
   }
@@ -1223,7 +1246,7 @@ kuwo.cn/playlist_detail/280301309</pre>
           const tbl = el('table', 'tracks')
           const thead = el('thead'); onTableHead(thead); tbl.appendChild(thead)
           const tbody = el('tbody')
-          rows.forEach((t, i) => tbody.appendChild(onlineRow(t, i)))
+          rows.forEach((t, i) => tbody.appendChild(onlineRow(t, i, rows)))
           tbl.appendChild(tbody)
           result.appendChild(tbl)
         } catch (e) {
@@ -1565,13 +1588,14 @@ kuwo.cn/playlist_detail/280301309</pre>
     }))
 
     /** 单行：封面 / 歌名（多平台时给切源下拉）/ 专辑 / 时长 / 播放·下载 */
+    const SEARCH_TBL_OPTS = { noSelect: true, showLove: false, menu: true, actsLabel: '操作' }
     const buildRow = (r, i) => {
-      const tr = el('tr', 'row')
-      tr.appendChild(el('td', 'num', String(i + 1)))
+      const cells = {}
+      cells.num = el('td', 'num', String(i + 1))
       const tdCov = el('td', 'cov')
       const paintCov = () => { tdCov.innerHTML = ''; tdCov.appendChild(picImg(r.pic, null, (r.name || '') + (r.singer || ''))) }
       paintCov()
-      tr.appendChild(tdCov)
+      cells.cov = tdCov
 
       const tdName = el('td')
       tdName.appendChild(el('div', 'dl-nm', r.name || '未知曲目'))
@@ -1605,12 +1629,12 @@ kuwo.cn/playlist_detail/280301309</pre>
         sub.appendChild(el('span', 'dl-src-tag', srcLabel(r.source)))
       }
       tdName.appendChild(sub)
-      tr.appendChild(tdName)
+      cells.name = tdName
 
       tdAlbum = el('td', 'album-col ell', r.album || '—')
-      tr.appendChild(tdAlbum)
+      cells.album = tdAlbum
       tdDur = el('td', 'dur', fmtDur((r.intervalMs || 0) / 1000))
-      tr.appendChild(tdDur)
+      cells.dur = tdDur
 
       const tdAct = el('td', 'acts')
       // 行内数据是「搜索结果」（source + 原始 id），而收藏要的是「播放行」（kind/rid）；
@@ -1630,8 +1654,9 @@ kuwo.cn/playlist_detail/280301309</pre>
       tdAct.appendChild(bPlay)
       tdAct.appendChild(bDl)
       tdAct.appendChild(bLove)
-      tr.appendChild(tdAct)
+      cells.acts = tdAct
 
+      const tr = trackRowEl(SEARCH_TBL_OPTS, cells)
       tr.onclick = (e) => {
         if (e.target.closest('select, button, input, a')) return
         player.play(toRows(st.list), i)
@@ -1672,14 +1697,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       }
       const tbl = el('table', 'tracks sr-tbl')
       const thead = el('thead')
-      const htr = el('tr')
-      htr.appendChild(el('th', 'num', '#'))
-      htr.appendChild(el('th', 'cov', ''))
-      htr.appendChild(el('th', null, '歌曲'))
-      htr.appendChild(el('th', 'album-col', '专辑'))
-      htr.appendChild(el('th', 'dur', '时长'))
-      htr.appendChild(el('th', 'acts', '操作'))
-      thead.appendChild(htr)
+      thead.appendChild(trackHead(SEARCH_TBL_OPTS))
       tbl.appendChild(thead)
       const tbody = el('tbody')
       st.list.forEach((r, i) => tbody.appendChild(buildRow(r, i)))
@@ -2094,60 +2112,54 @@ kuwo.cn/playlist_detail/280301309</pre>
   let onlColl = null
   /** 集合详情是从哪个 tab 点进来的（'plaza' / 'search'）——详情页的「返回」要回到原处 */
   let onlFrom = 'plaza'
-  const onlineRow = (t, idx) => {
-    const tr = el('tr', 'row')
-    if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
-    tr.appendChild(selRowCell(t))
-    tr.appendChild(el('td', 'num', String(idx + 1)))
+  const onlineRow = (t, idx, list) => {
+    const opts = ONLINE_TABLE_OPTS
+    const cells = {}
+    cells.sel = selRowCell(t)
+    cells.num = el('td', 'num', String(idx + 1))
     const tdCov = el('td', 'cov')
     const im = el('img')
     im.loading = 'lazy'
+    im.alt = ''
     tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || '')))
-    tr.appendChild(tdCov)
+    cells.cov = tdCov
     const tdName = el('td')
     tdName.appendChild(el('div', null, t.name))
     tdName.appendChild(el('div', 'sub', t.singer || '未知歌手'))
-    tr.appendChild(tdName)
-    const tdAlbum = el('td', 'album-col ell', t.album || '—')
-    tr.appendChild(tdAlbum)
+    cells.name = tdName
+    cells.album = el('td', 'album-col ell', t.album || '—')
     // 收藏列：在线曲目与本地曲目共用「我喜欢」列表（服务端按 source+rid 存 MusicInfo）
     const tdLove = el('td', 'love')
     tdLove.appendChild(loveBtn(t))
-    tr.appendChild(tdLove)
-    const tdB = el('td', 'dur')
-    const pbtn = el('button', 'iconbtn')
-    pbtn.innerHTML = SVG.play
-    pbtn.title = '播放'
-    pbtn.onclick = (e) => { e.stopPropagation(); player.play(ostate.list, idx) }
-    const nbtn = el('button', 'iconbtn')
-    nbtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M6 4.5v15"/><path d="M10.5 5.5 19 12l-8.5 6.5Z"/></svg>'
-    nbtn.title = '下一首播放'
-    nbtn.onclick = (e) => { e.stopPropagation(); player.insertNext(ostate.list[idx]) }
+    cells.love = tdLove
+    // 下载独立成列（原来塞在「时长」格里，把时长列撑变形、表头也对不上）：
+    // 操作键成组停在专辑右边，不再孤零零挂在表格最右侧。
+    const tdDl = el('td', 'dl-col')
     const dbtn = el('button', 'iconbtn dl')
     dbtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>'
     dbtn.title = '下载'
+    dbtn.setAttribute('aria-label', '下载')
     dbtn.onclick = (e) => {
       e.stopPropagation()
       askDownload(asOnlineRows([t]), dbtn)
     }
-    tdB.appendChild(pbtn)
-    tdB.appendChild(nbtn)
-    tdB.appendChild(dbtn)
-    tdB.appendChild(el('span', 'd', fmtDur(t.interval / 1000)))
-    tr.appendChild(tdB)
-    tr.onclick = () => { player.play(ostate.list, idx) }
+    tdDl.appendChild(dbtn)
+    cells.dl = tdDl
+    cells.dur = el('td', 'dur', fmtDur(t.interval / 1000))
+    // 播放不再单独给按钮：整行点击就是播放（原来的行内「播放」按钮在歌单详情里
+    // 传的是搜索列表 ostate.list，点下去播的不是这一行），行内只留下载。
+    const tr = trackRowEl(opts, cells)
+    if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
+    // list 必须是「当前渲染的这一份列表」——歌单详情里它与 ostate.list 不是同一个数组
+    tr.onclick = () => { if (list && list.length) player.play(list, idx) }
     return tr
   }
+  /** 在线曲目表的列配置：表头与行必须共用同一份，改这里两处一起变 */
+  const ONLINE_TABLE_OPTS = { dl: true }
+  /** 下载中心结果表：勾选列 + 操作列，没有收藏列（收藏按钮在操作格里） */
+  const DL_TBL_OPTS = { noNum: true, showLove: false, menu: true, actsLabel: '操作' }
   const onTableHead = (thead) => {
-    const htr = el('tr')
-    htr.appendChild(selHeadCell())
-    htr.appendChild(el('th', 'num', '#'))
-    htr.appendChild(el('th', 'cov', ''))
-    htr.appendChild(el('th', null, '歌曲'))
-    htr.appendChild(el('th', 'album-col', '专辑'))
-    htr.appendChild(el('th', 'love', ''))
-    htr.appendChild(el('th', 'dur', '时长'))
-    thead.appendChild(htr)
+    thead.appendChild(trackHead(ONLINE_TABLE_OPTS))
   }
   const srcName = (id) => id === 'wy' ? '网易云音乐' : id === 'kw' ? '酷我音乐' : id === 'mg' ? '咪咕音乐' : id || ''
   const paintSearchTable = (container) => {
@@ -2160,7 +2172,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     const tbl = el('table', 'tracks')
     const thead = el('thead'); onTableHead(thead); tbl.appendChild(thead)
     const tbody = el('tbody')
-    ostate.list.forEach((t, i) => tbody.appendChild(onlineRow(t, i)))
+    ostate.list.forEach((t, i) => tbody.appendChild(onlineRow(t, i, ostate.list)))
     tbl.appendChild(tbody)
     result.appendChild(tbl)
     const more = el('button', 'load-more')
@@ -2243,7 +2255,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     const tbl = el('table', 'tracks')
     const thead = el('thead'); onTableHead(thead); tbl.appendChild(thead)
     const tbody = el('tbody')
-    ostate.list.forEach((t, i) => tbody.appendChild(onlineRow(t, i)))
+    ostate.list.forEach((t, i) => tbody.appendChild(onlineRow(t, i, ostate.list)))
     tbl.appendChild(tbody)
     onlArea.appendChild(tbl)
   }
@@ -2612,7 +2624,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     const tbl = el('table', 'tracks')
     const thead = el('thead'); onTableHead(thead); tbl.appendChild(thead)
     const tbody = el('tbody')
-    rows.forEach((t, i) => tbody.appendChild(onlineRow(t, i)))
+    rows.forEach((t, i) => tbody.appendChild(onlineRow(t, i, rows)))
     tbl.appendChild(tbody)
     onlArea.appendChild(tbl)
   }
@@ -2632,7 +2644,7 @@ kuwo.cn/playlist_detail/280301309</pre>
       <div class="pg-desc">粘贴后自动识别平台并拉取全量曲目，可立即播放或批量下载（不会写入本地曲库）。</div>
       <pre class="pg-sample">网易云：music.163.com/#/playlist?id=12557423433
 酷我：kuwo.cn/playlist_detail/280301309
-咪咕：music.migu.cn/v3/music/playlist/...（暂不支持展开）</pre>
+咪咕：music.migu.cn/v3/music/playlist/221603627（咪咕专辑暂不支持）</pre>
     `
     container.appendChild(guide)
     const bar = el('div', 'dl-search-bar')
@@ -2684,7 +2696,7 @@ kuwo.cn/playlist_detail/280301309</pre>
         const tbl = el('table', 'tracks')
         const thead = el('thead'); onTableHead(thead); tbl.appendChild(thead)
         const tbody = el('tbody')
-        rows.forEach((t, i) => tbody.appendChild(onlineRow(t, i)))
+        rows.forEach((t, i) => tbody.appendChild(onlineRow(t, i, rows)))
         tbl.appendChild(tbody)
         result.appendChild(tbl)
       } catch (e) {
@@ -2905,21 +2917,22 @@ kuwo.cn/playlist_detail/280301309</pre>
       res.appendChild(batchBar)
 
       const tbl = el('table', 'tracks dl-res-tbl')
-      const thead = el('thead'); const htr = el('tr')
-      const thChk = el('th', 'num')
-      const thChkCb = document.createElement('input'); thChkCb.type = 'checkbox'; thChkCb.title = '全选'
-      thChkCb.onchange = () => {
-        if (thChkCb.checked) { for (const t of dlState.list) dlSearchSelected.add(t.key) }
-        else dlSearchSelected = new Set()
-        paintDlResults()
-      }
-      thChk.appendChild(thChkCb); htr.appendChild(thChk)
-      htr.appendChild(el('th', 'cov', ''))
-      htr.appendChild(el('th', null, '歌曲'))
-      htr.appendChild(el('th', 'album-col', '专辑'))
-      htr.appendChild(el('th', 'dur', '时长'))
-      htr.appendChild(el('th', 'acts', '操作'))
-      thead.appendChild(htr); tbl.appendChild(thead)
+      const thead = el('thead')
+      // 勾选列走统一模板，全选框由本页自己提供（它另有一套批量勾选状态）
+      thead.appendChild(trackHead(Object.assign({}, DL_TBL_OPTS, {
+        onSelHead: (th) => {
+          const cb = document.createElement('input')
+          cb.type = 'checkbox'
+          cb.title = '全选'
+          cb.onchange = () => {
+            if (cb.checked) { for (const t of dlState.list) dlSearchSelected.add(t.key) }
+            else dlSearchSelected = new Set()
+            paintDlResults()
+          }
+          th.appendChild(cb)
+        },
+      })))
+      tbl.appendChild(thead)
       const tbody = el('tbody')
       for (const t of dlState.list) tbody.appendChild(dlRow(t))
       tbl.appendChild(tbody)
@@ -2967,8 +2980,8 @@ kuwo.cn/playlist_detail/280301309</pre>
 
     /** 单行：跨源合并后的歌曲，choices 多于一个时给出源切换下拉 */
     function dlRow(t) {
-      const tr = el('tr', 'row')
-      const tdChk = el('td', 'num')
+      const cells = {}
+      const tdChk = el('td', 'sel-col')
       const chk = document.createElement('input'); chk.type = 'checkbox'; chk.title = '勾选下载'
       chk.checked = dlSearchSelected.has(t.key)
       chk.onchange = () => {
@@ -2980,11 +2993,11 @@ kuwo.cn/playlist_detail/280301309</pre>
         if (allCb) allCb.checked = allChecked
         if (thCb) thCb.checked = allChecked
       }
-      tdChk.appendChild(chk); tr.appendChild(tdChk)
+      tdChk.appendChild(chk); cells.sel = tdChk
 
       const tdCov = el('td', 'cov')
       const paintCov = () => { tdCov.innerHTML = ''; tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || ''))) }
-      paintCov(); tr.appendChild(tdCov)
+      paintCov(); cells.cov = tdCov
 
       const tdName = el('td')
       tdName.appendChild(el('div', 'dl-nm', t.name))
@@ -3013,10 +3026,10 @@ kuwo.cn/playlist_detail/280301309</pre>
         sub.appendChild(el('span', 'dl-src-tag', srcShort(t.source)))
       }
       tdName.appendChild(sub)
-      tr.appendChild(tdName)
+      cells.name = tdName
 
-      tdAlbum = el('td', 'album-col ell', t.album || '—'); tr.appendChild(tdAlbum)
-      tdDur = el('td', 'dur', fmtDur((t.intervalMs || 0) / 1000)); tr.appendChild(tdDur)
+      tdAlbum = el('td', 'album-col ell', t.album || '—'); cells.album = tdAlbum
+      tdDur = el('td', 'dur', fmtDur((t.intervalMs || 0) / 1000)); cells.dur = tdDur
 
       const tdAct = el('td', 'acts')
       const bAdd = el('button', 'btn primary mini', '⬇ 下载')
@@ -3040,8 +3053,8 @@ kuwo.cn/playlist_detail/280301309</pre>
           }
         } catch (e) { toast(e.message, true); bAdd.disabled = false; bAdd.textContent = '⬇ 下载' }
       }
-      tdAct.appendChild(bAdd); tr.appendChild(tdAct)
-      return tr
+      tdAct.appendChild(bAdd); cells.acts = tdAct
+      return trackRowEl(DL_TBL_OPTS, cells)
     }
 
     // ---- 队列 ----

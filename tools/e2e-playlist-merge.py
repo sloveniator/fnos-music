@@ -11,12 +11,13 @@
 用法：
     python3 tools/e2e-playlist-merge.py
 """
+import os
 import re
 import sys
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
+USER, PASSWORD = os.environ.get('GS_APP_USER', 'Slceleto'), os.environ.get('GS_APP_PASS', 'REDACTED')
 
 PASS = FAIL = 0
 
@@ -161,7 +162,13 @@ def main():
 
         page.goto(BASE + '/#/settings')
         page.reload(wait_until='domcontentloaded')
-        page.wait_for_timeout(900)
+        # 等设置页真正画出来再断言：固定 900ms 会在慢机上撞到 boot() 还在渲染的时刻，
+        # 报出「小节=[]」的假失败（实测页面本身 300ms 就好了）
+        try:
+            page.wait_for_selector('#view .set-sec-h', timeout=8000)
+        except Exception:
+            pass
+        page.wait_for_timeout(300)
         st = page.evaluate("""() => ({
           secs: [...document.querySelectorAll('.set-sec-h')].map(h => h.textContent.trim()),
           // 「我的分享」空态文案会正经提到「歌单页」，整页搜「歌单」两个字会把正常文案算成残留；
