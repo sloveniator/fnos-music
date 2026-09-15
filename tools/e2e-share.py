@@ -412,6 +412,20 @@ def run_ui_cases():
         check('播放条显示当前曲目', '可爱女人' in pub.inner_text('#s-np-name'))
         pub.screenshot(path=os.path.join(ROOT, 'tools', 'shot-share-page.png'))
         pub.close()
+        # 手机端（分享链接大多在手机上打开）：390×844 不能横向溢出，播放条要点得到
+        mob = b.new_context(viewport={'width': 390, 'height': 844}).new_page()
+        mob.goto(BASE + '/s/' + ui_code)
+        mob.wait_for_selector('.s-item', timeout=15000)
+        mob.wait_for_timeout(500)
+        ov = mob.evaluate("() => ({sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth})")
+        check('手机端分享页无横向溢出', ov['sw'] <= ov['cw'] + 1, '%d > %d' % (ov['sw'], ov['cw']))
+        fit = mob.evaluate("() => [...document.querySelectorAll('.s-btn, .s-acts .s-ic')].every(e => { const r = e.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; })")
+        check('手机端按钮都在视口内', fit)
+        mob.click('#s-playall')
+        mob.wait_for_timeout(1200)
+        check('手机端播放条出现且不遮住列表', mob.is_visible('#s-bar'))
+        mob.screenshot(path=os.path.join(ROOT, 'tools', 'shot-share-mobile.png'))
+        mob.close()
         # 设置页「我的分享」
         pg.goto(BASE + '/#/settings')
         pg.wait_for_selector('.share-item', timeout=15000)
@@ -422,8 +436,13 @@ def run_ui_cases():
         # 撤销走应用内确认弹窗 confirm2（#dialog / #dlg-ok），不是浏览器原生 confirm
         pg.wait_for_selector('#dialog:not([hidden])', timeout=8000)
         pg.click('#dlg-ok')
-        pg.wait_for_timeout(1500)
-        n2 = pg.eval_on_selector_all('.share-item', 'els => els.length')
+        # 撤销是异步的（请求回来才重渲染），固定等待会偶发假失败 → 轮询到列表变短为止
+        n2 = n
+        for _i in range(20):
+            pg.wait_for_timeout(300)
+            n2 = pg.eval_on_selector_all('.share-item', 'els => els.length')
+            if n2 < n:
+                break
         check('设置页撤销后列表减少', n2 == n - 1, '%d → %d' % (n, n2))
         # 专辑页：分享入口 + 弹窗
         pg.goto(BASE + '/#/albums')

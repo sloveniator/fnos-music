@@ -8,6 +8,20 @@ export const esc = (s: unknown): string => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 
+// 图标统一用内联 SVG（与主 App 同一套 path）：emoji 字形在缺 emoji 字体的系统上会渲染成豆腐块，
+// 分享页是「没有账号的人看到的门面」，不能靠访问者的系统字体赌运气
+const ICON: Record<string, string> = {
+  play: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8.2 5.4v13.2L19.5 12Z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M7 5h3.8v14H7Z"/><path d="M13.2 5H17v14h-3.8Z"/></svg>',
+  prev: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M7 5h2.6v14H7Z"/><path d="M19 5v14L9.6 12Z"/></svg>',
+  next: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M14.4 5H17v14h-2.6Z"/><path d="M5 5v14L14.4 12Z"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3.6c1.5 0 2.9.8 3.6 2.1l1.5 2.7c.7 1.3 2.1 2.1 3.6 2.1H21"/><path d="M17.5 4.5 21 7l-3.5 2.5"/><path d="M3 17h3.6c1.5 0 2.9-.8 3.6-2.1l1.5-2.7c.7-1.3 2.1-2.1 3.6-2.1H21"/><path d="M17.5 14.5 21 17l-3.5 2.5"/></svg>',
+  dl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>',
+  vol: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.4L12 5.6v12.8L7.4 14.5H4Z"/><path d="M15.6 9.2a4 4 0 0 1 0 5.6"/><path d="M18.2 6.8a7.6 7.6 0 0 1 0 10.4"/></svg>',
+  more: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></svg>',
+  note: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>',
+}
+
 const BASE_CSS = `<link rel="stylesheet" href="/s/assets/share.css">`
 
 export interface SharePageInfo {
@@ -69,9 +83,9 @@ ${BASE_CSS}
 
   <main class="s-main">
     <div class="s-toolbar">
-      <button id="s-playall" class="s-btn primary" type="button">▶ 播放全部</button>
-      <button id="s-shuffle" class="s-btn" type="button">🔀 随机播放</button>
-      <button id="s-more" class="s-btn ghost" type="button">⋯</button>
+      <button id="s-playall" class="s-btn primary" type="button">${ICON.play}<span>播放全部</span></button>
+      <button id="s-shuffle" class="s-btn" type="button">${ICON.shuffle}<span>随机播放</span></button>
+      <button id="s-more" class="s-btn ghost" type="button" aria-label="更多">${ICON.more}</button>
     </div>
     <ol id="s-list" class="s-list"><li class="s-loading">正在载入曲目…</li></ol>
   </main>
@@ -90,13 +104,13 @@ ${BASE_CSS}
 
   <div id="s-bar" class="s-bar" hidden>
     <div class="s-np">
-      <div class="s-np-art" id="s-np-art">♪</div>
+      <div class="s-np-art" id="s-np-art">${ICON.note}</div>
       <div class="s-np-txt"><div class="s-np-name" id="s-np-name">未播放</div><div class="s-np-sub" id="s-np-sub"></div></div>
     </div>
     <div class="s-ctrls">
-      <button id="s-prev" class="s-ic" type="button" aria-label="上一首">⏮</button>
-      <button id="s-toggle" class="s-ic big" type="button" aria-label="播放/暂停">▶</button>
-      <button id="s-next" class="s-ic" type="button" aria-label="下一首">⏭</button>
+      <button id="s-prev" class="s-ic" type="button" aria-label="上一首">${ICON.prev}</button>
+      <button id="s-toggle" class="s-ic big" type="button" aria-label="播放/暂停">${ICON.play}</button>
+      <button id="s-next" class="s-ic" type="button" aria-label="下一首">${ICON.next}</button>
     </div>
     <div class="s-prog">
       <span id="s-cur">0:00</span>
@@ -104,7 +118,7 @@ ${BASE_CSS}
       <span id="s-dur">0:00</span>
     </div>
     <div class="s-vol">
-      <button id="s-mute" class="s-ic" type="button" aria-label="音量">🔊</button>
+      <button id="s-mute" class="s-ic" type="button" aria-label="音量">${ICON.vol}</button>
       <input id="s-vol" type="range" min="0" max="100" value="80" aria-label="音量">
     </div>
   </div>

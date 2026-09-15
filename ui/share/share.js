@@ -5,6 +5,14 @@
   var root = document.getElementById('s-root');
   if (!root) return;
   var CODE = root.dataset.code || '';
+  // 图标：内联 SVG（同 page.ts / 主 App 的 path）。emoji 字形在缺 emoji 字体的系统上是豆腐块，
+  // 分享页面向没有账号的访客，不能赌对方的系统字体
+  var I = {
+    play: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8.2 5.4v13.2L19.5 12Z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M7 5h3.8v14H7Z"/><path d="M13.2 5H17v14h-3.8Z"/></svg>',
+    dl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>',
+    note: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>',
+  }
   var API = '/s/' + CODE;
   var state = { items: [], allowDownload: false, order: [], pos: -1, title: '', subtitle: '' };
   var audio = new Audio();
@@ -109,10 +117,10 @@
         img.loading = 'lazy';
         img.alt = '';
         img.src = API + '/cover/' + i;
-        img.addEventListener('error', function () { cov.textContent = '♪'; cov.classList.add('ph'); });
+        img.addEventListener('error', function () { cov.innerHTML = I.note; cov.classList.add('ph'); });
         cov.appendChild(img);
       } else {
-        cov.textContent = '♪';
+        cov.innerHTML = I.note;
         cov.classList.add('ph');
       }
       li.appendChild(cov);
@@ -126,14 +134,15 @@
       li.appendChild(el('span', 's-du', it.interval || ''));
       var acts = el('div', 's-acts');
       if (it.playable) {
-        var bp = el('button', 's-ic sm', '▶');
+        var bp = el('button', 's-ic sm');
+        bp.innerHTML = I.play;
         bp.title = '播放这首';
         bp.addEventListener('click', function () { playAt(i, true); });
         acts.appendChild(bp);
         if (state.allowDownload) {
           var a = document.createElement('a');
           a.className = 's-ic sm';
-          a.textContent = '⬇';
+          a.innerHTML = I.dl;
           a.title = '下载这首';
           a.href = API + '/download/' + i;
           acts.appendChild(a);
@@ -157,7 +166,7 @@
       var ai = document.createElement('img');
       ai.alt = '';
       ai.src = API + '/cover/' + first;
-      ai.addEventListener('error', function () { art.textContent = '♪'; });
+      ai.addEventListener('error', function () { art.innerHTML = I.note; });
       art.innerHTML = '';
       art.appendChild(ai);
     }
@@ -184,7 +193,7 @@
   }
 
   function setPlaying(on) {
-    $('s-toggle').textContent = on ? '⏸' : '▶';
+    $('s-toggle').innerHTML = on ? I.pause : I.play;
   }
 
   function updateNow() {
@@ -198,7 +207,7 @@
     var img = document.createElement('img');
     img.alt = '';
     img.src = API + '/cover/' + state.pos;
-    img.addEventListener('error', function () { art.textContent = '♪'; });
+    img.addEventListener('error', function () { art.innerHTML = I.note; });
     art.appendChild(img);
     if ('mediaSession' in navigator && window.MediaMetadata) {
       try {
@@ -343,11 +352,11 @@
   });
   $('s-shuffle').addEventListener('click', shuffle);
   $('s-more').addEventListener('click', function () {
-    var items = [['💬 显示/隐藏歌词', toggleLyric]];
+    var items = [['显示/隐藏歌词', toggleLyric]];
     if (state.pos >= 0 && state.allowDownload) {
-      items.push(['⬇ 下载当前歌曲', function () { window.location.href = API + '/download/' + state.pos; }]);
+      items.push(['下载当前歌曲', function () { window.location.href = API + '/download/' + state.pos; }]);
     }
-    items.push(['🔗 复制本页链接', function () {
+    items.push(['复制本页链接', function () {
       var url = location.href;
       if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { toast('链接已复制'); }, function () { toast(url); });
       else toast(url);
