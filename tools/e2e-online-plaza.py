@@ -12,13 +12,13 @@
   2. 「换一批」（batch）真的换内容：kw batch=0 与 batch=1 重叠率 < 80%
   3. 服务端歌手搜索 /web/api/online/search?type=artist：四个音源都返回歌手
   4. 酷我歌单详情 /web/api/online/collection?source=kw&type=playlist：曲目可解析
-  5. 能力位：artist 四源齐全，playlist-detail 仅 kw/wy/soda（咪咕接口受限）
+  5. 能力位：artist 四源齐全，playlist-detail 四源齐全（含咪咕）
   6. UI 默认视图：进 #/online 落在「歌单广场」tab，页面上没有搜索框，卡片 > 0
   7. UI 点「搜索」tab：出现搜索框 + 类型 chips（单曲/专辑/歌单/歌手）
   8. UI 搜歌手：歌手卡片渲染，点卡片自动按歌手名搜单曲并出结果行
   9. UI 歌单广场卡片可展开：点第一张进详情，出曲目行
  10. UI 换一批：点「换一批」后卡片集合变化
- 11. UI 切音源（咪咕）：广场跟着换源，卡片带「暂不支持展开」角标
+ 11. UI 切音源（咪咕）：广场跟着换源，卡片可点开（无「暂不支持展开」角标）
 """
 import json
 import sys
@@ -164,8 +164,9 @@ def main():
             ab = (srcs.get(s) or {}).get('abilities') or []
             check('%s 有 artists 能力' % s, 'artists' in ab, ','.join(ab))
         pl_detail = {s: ('playlist-detail' in ((srcs.get(s) or {}).get('abilities') or [])) for s in ('kw', 'wy', 'mg', 'soda')}
-        check('playlist-detail 覆盖 kw/wy/soda，咪咕没有', pl_detail['kw'] and pl_detail['wy'] and pl_detail['soda'] and not pl_detail['mg'],
-              str(pl_detail))
+        # 咪咕歌单详情已接通（resourceinfo.do + resource/playlist/song/v2.0，两个通道都免签名），
+        # 所以四源现在都该有 playlist-detail；咪咕专辑仍无公开通道，不影响这一位。
+        check('playlist-detail 四源齐全（含咪咕）', all(pl_detail.values()), str(pl_detail))
     except Exception as e:
         check('能力位检查', False, repr(e)[:160])
 
@@ -244,7 +245,7 @@ def main():
         page.wait_for_timeout(800)
         st = online_state(page)
         check('切到咪咕后仍有平台歌单', st['plazaCards'] >= 6, 'cards=%d info=%s' % (st['plazaCards'], st['resInfo']))
-        check('咪咕歌单卡带「暂不支持展开」角标', st['locked'] == st['plazaCards'] and st['locked'] > 0,
+        check('咪咕歌单卡可点开（不再有「暂不支持展开」角标）', st['locked'] == 0,
               'locked=%d/%d' % (st['locked'], st['plazaCards']))
         check('页头说明跟着换源', '咪咕' in st['resInfo'], st['resInfo'])
 

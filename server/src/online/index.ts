@@ -10,13 +10,15 @@ import { kwSearch, kwPlayUrl, kwParseJSON, kwSearchAlbums, kwSearchPlaylists, kw
 import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult, OnlineCollectionDetail } from './kw'
 import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wySearchArtists, wyAlbumDetail, wyPlaylistDetail } from './wy'
 import { platformPlaylists, platformPlaylistsHint } from './plaza'
-import { mgSearch, mgPlayUrl, mgLyric, mgSearchPlaylists, mgSearchArtists } from './mg'
+import { mgSearch, mgPlayUrl, mgLyric, mgSearchPlaylists, mgSearchArtists, mgPlaylistDetail } from './mg'
 import {
   sodaSearch, sodaPlayUrl, sodaLyric, sodaSearchAlbums, sodaSearchPlaylists, sodaSearchArtists,
   sodaAlbumDetail, sodaPlaylistDetail, SODA_REFERER, SODA_AUDIO_EXT,
 } from './soda'
 import { getSettings } from '@/library'
+import { accessLog } from '@/utils/log4js'
 import { resolveFromUserSources } from './user-source'
+import { probePlayableUrl } from './probe'
 
 /** 平台定义（注册即候选，启用与否由管理后台 settings.onlineSources 决定） */
 export interface OnlineSourceDef {
@@ -68,7 +70,9 @@ const REGISTRY: Record<string, OnlineSourceDef> = {
   mg: {
     id: 'mg', name: '咪咕音乐', search: mgSearch, resolvePlayUrl: mgPlayUrl, lyric: mgLyric,
     searchPlaylists: mgSearchPlaylists, searchArtists: mgSearchArtists,
-    // 咪咕歌单曲目接口全线需要客户端签名，公开通道拿不到（searchAll 只回歌单元数据）
+    // 歌单详情走 resourceinfo.do + resource/playlist/song/v2.0（两个通道都免签名），
+    // 专辑没有对应的公开通道（且 mg 未注册专辑搜索），所以只开 playlist-detail
+    playlistDetail: mgPlaylistDetail,
   },
   soda: {
     id: 'soda',
@@ -164,9 +168,13 @@ export const onlineCollection = async (source: string, type: 'album' | 'playlist
 
 export const onlineResolvePlayUrl = async (source: string, id: string): Promise<string> => {
   if (!isOnlineSource(source)) throw new Error('在线源未启用或不存在：' + source)
-  // 第三方 JS 源优先（服务端承载；用户确认过的脚本），失败/未启用回退内置适配器
+  // 第三方 JS 源优先（服务端承载；用户确认过的脚本），但必须探活：
+  // 脚本返回字符串 ≠ 地址可用（实测有整站 404 的通道），死链会让 <audio> 报错并触发自动跳歌。
   const attempt = await resolveFromUserSources(source, id)
-  if (attempt) return attempt.url
+  if (attempt) {
+    if (await probePlayableUrl(attempt.url, onlineStreamReferer(source))) return attempt.url
+    accessLog.warn(`第三方直链不可用，回退内置适配器：source=${source} rid=${id} via=${attempt.via} url=${attempt.url.substring(0, 120)}`)
+  }
   return REGISTRY[source].resolvePlayUrl(id)
 }
 
@@ -209,31 +217,32 @@ export const importOnlineUrl = async (rawUrl: string): Promise<{ source: string;
     return { source: 'soda', type, info: detail.info, list: detail.list }
   }
 
-  const m =
-    // 网易云网页/移动
+  // 网易云 / 酷我 / 咪咕：路径段重名（都是 playlist / album），所以**不能**把三个平台
+  // 拼在一条正则里再按分组内容判源——那样第一个分支会把后两个吃掉（咪咕链接被当成
+  // 网易云 id 去查，必然 502）。这里改成按域名分别匹配，各自带自己的平台与类型语义。
+  const wy =
     /(?:music\.163\.com\/(?:#\/)?|y\.music\.163\.com\/m\/)(playlist|album)\?(?:[^#]*&)?id=(\d{1,16})/i.exec(url) ||
-    /(?:music\.163\.com\/(?:#\/)?|y\.music\.163\.com\/m\/)(playlist|album)\/(\d{1,16})/i.exec(url) ||
-    // 酷我
-    /kuwo\.cn\/(playlist_detail|album_detail)\/(\d{1,16})/i.exec(url) ||
-    // 咪咕
-    /music\.migu\.cn\/v3\/music\/(playlist|album)\/(\d{1,16})/i.exec(url)
+    /(?:music\.163\.com\/(?:#\/)?|y\.music\.163\.com\/m\/)(playlist|album)\/(\d{1,16})/i.exec(url)
+  const kw = /kuwo\.cn\/(playlist_detail|album_detail)\/(\d{1,16})/i.exec(url)
+  const mg = /music\.migu\.cn\/v3\/music\/(playlist|album)\/(\d{1,16})/i.exec(url)
 
-  if (!m) throw new Error('无法识别的分享链接（支持网易云/酷我/咪咕/汽水的歌单或专辑链接）')
-
-  let source = 'wy'
+  let source = ''
   let type: 'album' | 'playlist' = 'playlist'
   let id = ''
-  if (m[1] === 'playlist' || m[1] === 'album') {
-    type = m[1] as 'album' | 'playlist'
-    id = m[2]
-  } else if (m[1] === 'playlist_detail' || m[1] === 'album_detail') {
+  if (wy) {
+    source = 'wy'
+    type = wy[1].toLowerCase() as 'album' | 'playlist'
+    id = wy[2]
+  } else if (kw) {
     source = 'kw'
-    type = m[1] === 'playlist_detail' ? 'playlist' : 'album'
-    id = m[2]
-  } else if (m[1] === 'playlist' || m[1] === 'album') {
+    type = kw[1].toLowerCase().indexOf('album') === 0 ? 'album' : 'playlist'
+    id = kw[2]
+  } else if (mg) {
     source = 'mg'
-    type = m[1] as 'album' | 'playlist'
-    id = m[2]
+    type = mg[1].toLowerCase() as 'album' | 'playlist'
+    id = mg[2]
+  } else {
+    throw new Error('无法识别的分享链接（支持网易云/酷我/咪咕/汽水的歌单或专辑链接）')
   }
 
   if (!isOnlineSource(source)) throw new Error('该平台的在线源未启用（管理后台「在线音乐源」可开启）')
