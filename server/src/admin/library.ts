@@ -14,6 +14,7 @@ import { getTargetUsage } from '@/library/usage'
 import { getAddress } from '@/utils/tools'
 import { buildSourceScript } from './source-script'
 import { resolveFromUserSources, listUserSources, saveUserSource, deleteUserSource, setUserSourceEnabled, testUserSource, getUserSource, readScript } from '@/online/user-source'
+import { listRemoteSources, applyRemoteSources, loadRegistries, addRegistry, removeRegistry } from '@/online/source-registry'
 import { getTenantSettings, saveTenantSettings, startTenantScan, getTenantScanState, tenantLibraryStats, listTenants } from '@/library/tenant'
 import { findRegisteredUser, listRegisteredUsers } from '@/user/register'
 
@@ -765,6 +766,63 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
     } catch (e: any) {
       fail(res, 400, '导入失败：' + (e?.name === 'AbortError' ? '下载超时（20 秒）' : (e?.message || String(e))))
     }
+    return true
+  }
+
+  // ---------------- 公开源仓库：批量抓取 / 批量入库升级 ----------------
+  // 路径刻意避开 /user-sources/<id> 的单段正则，免得「registries」被当成音源 id
+  // GET /admin/api/library/source-registries[?refresh=1]
+  if (method == 'GET' && p == '/admin/api/library/source-registries') {
+    try {
+      const refresh = url.searchParams.get('refresh') === '1'
+      const r = await listRemoteSources({ refresh })
+      ok(res, {
+        fetchedAt: r.fetchedAt,
+        cached: r.cached,
+        registries: loadRegistries().map((x) => {
+          const st = r.registries.find((s) => s.id === x.id)
+          return { ...x, ok: st ? st.ok : true, error: st?.error, count: st?.count ?? 0 }
+        }),
+        stats: r.registries,
+        list: r.list,
+      })
+    } catch (e: any) {
+      fail(res, 500, '抓取源仓库失败：' + (e?.message || String(e)))
+    }
+    return true
+  }
+
+  // POST /admin/api/library/source-registries/add  { repo, name?, branch? }
+  if (method == 'POST' && p == '/admin/api/library/source-registries/add') {
+    let body: any
+    try { body = JSON.parse(await readBody(req)) } catch { fail(res, 400, 'invalid body'); return true }
+    const r = addRegistry({ repo: String(body?.repo ?? ''), name: body?.name ? String(body.name) : undefined, branch: body?.branch ? String(body.branch) : undefined })
+    if (!r.ok) { fail(res, 400, r.error || '添加失败'); return true }
+    ok(res, { registry: r.registry, registries: loadRegistries() })
+    return true
+  }
+
+  // POST /admin/api/library/source-registries/remove  { id }
+  if (method == 'POST' && p == '/admin/api/library/source-registries/remove') {
+    let body: any
+    try { body = JSON.parse(await readBody(req)) } catch { fail(res, 400, 'invalid body'); return true }
+    const id = String(body?.id ?? '').trim()
+    const removed = removeRegistry(id)
+    ok(res, { removed, registries: loadRegistries() })
+    return true
+  }
+
+  // POST /admin/api/library/source-registries/apply  { keys: [...], enable?, refresh? }
+  // 批量下载并入库：新装按 enable 决定启用与否，升级保留原有启用状态。
+  if (method == 'POST' && p == '/admin/api/library/source-registries/apply') {
+    let body: any
+    try { body = JSON.parse(await readBody(req)) } catch { fail(res, 400, 'invalid body'); return true }
+    const keys = Array.isArray(body?.keys) ? body.keys.map((x: any) => String(x)) : []
+    if (!keys.length) { fail(res, 400, '未选择要处理的音源'); return true }
+    const results = await applyRemoteSources(keys, { enable: !!body?.enable, refresh: !!body?.refresh })
+    const done = results.filter((r) => r.action === 'install' || r.action === 'upgrade').length
+    const failed = results.filter((r) => r.action === 'fail').length
+    ok(res, { results, summary: { total: results.length, done, skipped: results.filter((r) => r.action === 'skip').length, failed }, list: listUserSources() })
     return true
   }
 

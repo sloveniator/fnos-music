@@ -27,6 +27,14 @@ export interface UserSourceMeta {
   bytes: number
   updatedAt: number
   lastError?: string
+  /** 脚本头部 @version 原文（洛雪生态约定，用于版本比较/升级提示） */
+  version?: string
+  /** 脚本头部 @description */
+  description?: string
+  /** 脚本头部 @author */
+  author?: string
+  /** 来源标记：手工添加为空；公开源仓库批量导入时为 "仓库名/目录" */
+  origin?: string
 }
 
 export interface UserSourceStatus extends UserSourceMeta {
@@ -83,6 +91,39 @@ function persistMeta(): void {
 
 export const safeId = (id: string): string => (id || '').replace(/[^A-Za-z0-9_-]/g, '').substring(0, 40)
 export const isSafeId = (id: string): boolean => /^[A-Za-z0-9_-]{1,40}$/.test(id)
+
+// ============================== 脚本头部元信息 ==============================
+// 洛雪生态的自定义源普遍在文件头写注释块：@name / @version / @description / @author。
+// 解析它，一是让后台能显示版本，二是让「公开源仓库批量升级」有版本可比。
+export interface UserSourceScriptMeta {
+  name?: string
+  version?: string
+  description?: string
+  author?: string
+}
+
+const HEADER_SCAN_BYTES = 4000
+
+export const parseScriptMeta = (script: string): UserSourceScriptMeta => {
+  const head = String(script || '').slice(0, HEADER_SCAN_BYTES)
+  const pick = (key: string): string | undefined => {
+    const m = new RegExp('@' + key + '\\s*[:：]?\\s*([^\\r\\n*]+)', 'i').exec(head)
+    if (!m) return undefined
+    const v = m[1].replace(/\s+$/, '').trim()
+    return v ? v.slice(0, 160) : undefined
+  }
+  const out: UserSourceScriptMeta = {}
+  const name = pick('name')
+  const version = pick('version')
+  const description = pick('description')
+  const author = pick('author')
+  if (name) out.name = name
+  if (version) out.version = version
+  if (description) out.description = description
+  if (author) out.author = author
+  return out
+}
+
 
 // ============================== Worker 运行器 ==============================
 interface Pending { resolve: (r: { ok: boolean; data?: any; error?: string; ms?: number }) => void; timer: ReturnType<typeof setTimeout> }
@@ -275,6 +316,9 @@ export const readScript = (id: string): string | null => {
 // ============================== 管理者操作 ==============================
 export const listUserSources = (): UserSourceStatus[] => {
   ensureLoaded()
+  // 版本字段是后加的：老脚本首次列名单时补一次头部元信息，
+  // 否则后台对它们永远显示不了版本，升级比较也无从谈起。
+  if (backfillMetaFromScripts()) persistMeta()
   return metas!.map((m) => {
     const live = runners.get(m.id)
     const status = live ? live.status() : 'cold'
@@ -290,12 +334,28 @@ export const listUserSources = (): UserSourceStatus[] => {
   })
 }
 
+/** 只对缺失字段的条目做一次头部补齐，返回是否有改动 */
+function backfillMetaFromScripts(): boolean {
+  if (!metas) return false
+  let touched = false
+  for (const m of metas) {
+    if (m.version && m.description !== undefined && m.author !== undefined) continue
+    const script = readScript(m.id)
+    if (!script) continue
+    const info = parseScriptMeta(script)
+    if (info.version && !m.version) { m.version = info.version; touched = true }
+    if (info.description !== undefined && m.description === undefined) { m.description = info.description; touched = true }
+    if (info.author !== undefined && m.author === undefined) { m.author = info.author; touched = true }
+  }
+  return touched
+}
+
 export const getUserSource = (id: string): UserSourceMeta | undefined => {
   ensureLoaded()
   return metas!.find((m) => m.id === id)
 }
 
-export const saveUserSource = (input: { id?: string; name: string; script: string; enabled?: boolean }): { meta: UserSourceMeta; error?: string } => {
+export const saveUserSource = (input: { id?: string; name: string; script: string; enabled?: boolean; origin?: string }): { meta: UserSourceMeta; error?: string } => {
   ensureLoaded()
   const name = String(input.name ?? '').trim().substring(0, 80)
   const script = String(input.script ?? '')
@@ -322,6 +382,7 @@ export const saveUserSource = (input: { id?: string; name: string; script: strin
     return { meta: null as any, error: '写入脚本失败: ' + String((e as Error).message || e) }
   }
   const idx = metas!.findIndex((m) => m.id === id)
+  const info = parseScriptMeta(script)
   const meta: UserSourceMeta = {
     id,
     name,
@@ -330,6 +391,17 @@ export const saveUserSource = (input: { id?: string; name: string; script: strin
     bytes,
     updatedAt: Date.now(),
   }
+  // 头部元信息：脚本里写了就以脚本为准（它才是「这个版本到底是谁」的权威），
+  // 手工添加没写 @version 的脚本保留旧值，避免升级比较把版本抹掉。
+  if (info.version) meta.version = info.version
+  else if (idx >= 0 && metas![idx].version) meta.version = metas![idx].version
+  if (info.description !== undefined) meta.description = info.description
+  else if (idx >= 0 && metas![idx].description !== undefined) meta.description = metas![idx].description
+  if (info.author !== undefined) meta.author = info.author
+  else if (idx >= 0 && metas![idx].author !== undefined) meta.author = metas![idx].author
+  const origin = String(input.origin ?? '').trim().substring(0, 120)
+  if (origin) meta.origin = origin
+  else if (idx >= 0 && metas![idx].origin) meta.origin = metas![idx].origin
   if (idx >= 0) metas![idx] = meta
   else metas!.push(meta)
   // 脚本变更 → 回收旧 worker，下次按需以新脚本重建

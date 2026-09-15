@@ -1048,6 +1048,7 @@ const loadSources = async () => {
       sourceState.scriptSources = [...sel]
     })
     await loadUserSources()
+    if (!regState.list.length) await loadRegistry(false)
   } catch (err) {
     toast('音源配置加载失败: ' + err.message)
   }
@@ -1128,7 +1129,7 @@ const renderUserSources = () => {
     return `
     <tr data-us="${esc(s.id)}">
       <td><span class="t-name">${esc(s.name)}</span>
-        <div class="t-sub">${esc(s.id)} · ${fmtBytes(s.bytes)} · 更新 ${fmtDate(s.updatedAt)}</div>
+        <div class="t-sub">${esc(s.id)}${s.version ? ' · v' + esc(s.version) : ''} · ${fmtBytes(s.bytes)} · 更新 ${fmtDate(s.updatedAt)}${s.origin ? ' · 来自 ' + esc(s.origin) : ''}</div>
         ${s.lastError ? '<div class="t-sub" style="color:var(--danger)">' + esc(s.lastError) + '</div>' : ''}
         ${s.lastAlert?.log ? '<div class="t-sub" style="color:var(--gold)">⚠ ' + esc(s.lastAlert.log) + '</div>' : ''}</td>
       <td>${caps || '<span class="t-sub">—</span>'}</td>
@@ -1266,6 +1267,175 @@ const openUserSourceModal = (src) => {
     body.querySelector('#us-save-on').addEventListener('click', () => save(true))
   })
 }
+// ==================== 公开源仓库（批量抓取 / 升级） ====================
+// 清单来自服务端 /admin/api/library/source-registries：
+//   服务端负责列目录 + 逐镜像下载 + 解析脚本头 @version，前端只负责挑和点。
+const regState = { list: [], registries: [], fetchedAt: 0, cached: false, loading: false }
+
+const REG_STATE = {
+  new: { txt: '未安装', cls: 'new' },
+  upgrade: { txt: '可升级', cls: 'up' },
+  changed: { txt: '内容有变', cls: 'chg' },
+  same: { txt: '已是最新', cls: 'same' },
+  older: { txt: '本地更新', cls: 'older' },
+}
+
+const regSelectable = (s) => s.state === 'new' || s.state === 'upgrade' || s.state === 'changed'
+
+const renderRegistries = () => {
+  const el = $('#reg-repos')
+  if (!regState.registries.length) {
+    el.innerHTML = '<span class="muted-note">还没有配置仓库</span>'
+    return
+  }
+  el.innerHTML = regState.registries.map(r => `<span class="chip reg-repo ${r.ok ? '' : 'bad'}" data-id="${esc(r.id)}" title="${esc(r.repo)}${r.error ? ' · ' + esc(r.error) : ''}">
+    <a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener">${esc(r.name)}</a>
+    <em>${r.ok ? r.count + ' 个' : '抓取失败'}</em>
+    ${r.builtin ? '' : '<button class="reg-repo-del" title="移除该仓库">×</button>'}
+  </span>`).join('')
+}
+
+const renderRegistry = () => {
+  renderRegistries()
+  const tb = $('#reg-tbody')
+  const list = regState.list
+  if (!list.length) {
+    tb.innerHTML = '<tr><td colspan="7" class="empty">还没有拉到音源清单。点右上「刷新列表」从公开仓库抓取。</td></tr>'
+  } else {
+    tb.innerHTML = list.map(s => {
+      const st = REG_STATE[s.state] || { txt: s.state, cls: '' }
+      const inst = s.installed
+      const localVer = inst ? (inst.version ? esc(inst.version) : '未标注') + '<div class="t-sub">' + esc(inst.id) + ' · ' + fmtBytes(inst.bytes) + ' · ' + (inst.enabled ? '已启用' : '未启用') + '</div>' : '<span class="t-sub">—</span>'
+      const remoteVer = (s.versionRaw ? esc(s.versionRaw) : '未标注') + '<div class="t-sub">' + esc(s.path) + '</div>'
+      return `<tr data-key="${esc(s.key)}" class="${regSelectable(s) ? 'reg-can' : ''}">
+        <td class="chk">${regSelectable(s) ? `<input type="checkbox" class="reg-ck" data-key="${esc(s.key)}">` : ''}</td>
+        <td><span class="t-name">${esc(s.name)}</span>
+          <div class="t-sub">${esc(s.key)}${s.author ? ' · ' + esc(s.author) : ''}</div>
+          ${s.description ? '<div class="t-sub">' + esc(s.description).substring(0, 90) + '</div>' : ''}</td>
+        <td>${localVer}</td>
+        <td>${remoteVer}</td>
+        <td>${fmtBytes(s.bytes)}</td>
+        <td><span class="reg-pill ${st.cls}">${st.txt}</span></td>
+        <td><a href="https://github.com/${esc(s.repo)}" target="_blank" rel="noopener">${esc(s.registryName)}</a></td>
+      </tr>`
+    }).join('')
+  }
+  const canCnt = list.filter(regSelectable).length
+  $('#reg-all').checked = false
+  updateRegApply()
+  const when = regState.fetchedAt ? new Date(regState.fetchedAt).toLocaleString('zh-CN') : '—'
+  $('#reg-note').innerHTML = list.length
+    ? `共 ${list.length} 个音源 · 其中 ${canCnt} 个可入库/升级 · 抓取时间 ${esc(when)}${regState.cached ? '（本地缓存）' : ''}`
+    : ''
+}
+
+const updateRegApply = () => {
+  const n = document.querySelectorAll('#reg-tbody input.reg-ck:checked').length
+  const btn = $('#btn-reg-apply')
+  btn.disabled = !n || regState.loading
+  btn.textContent = n ? `导入 / 升级所选（${n}）` : '导入 / 升级所选'
+}
+
+const loadRegistry = async (refresh) => {
+  if (regState.loading) return
+  regState.loading = true
+  const btn = $('#btn-reg-refresh')
+  const oldTxt = btn.textContent
+  btn.disabled = true
+  btn.textContent = '抓取中…'
+  $('#reg-note').textContent = refresh ? '正在从公开仓库抓取清单…（首次 10~30 秒）' : '正在读取清单…'
+  try {
+    const r = await api('/admin/api/library/source-registries' + (refresh ? '?refresh=1' : ''), { method: 'GET' })
+    regState.list = r.data.list || []
+    regState.registries = r.data.registries || []
+    regState.fetchedAt = r.data.fetchedAt || 0
+    regState.cached = !!r.data.cached
+    renderRegistry()
+  } catch (err) {
+    $('#reg-note').innerHTML = '<span style="color:var(--danger)">❌ ' + esc(err.message) + '</span>'
+  } finally {
+    regState.loading = false
+    btn.disabled = false
+    btn.textContent = oldTxt
+    updateRegApply()
+  }
+}
+
+$('#btn-reg-refresh').addEventListener('click', () => loadRegistry(true))
+
+$('#reg-tbody').addEventListener('change', (e) => {
+  if (e.target.classList.contains('reg-ck')) updateRegApply()
+})
+
+$('#reg-all').addEventListener('change', (e) => {
+  document.querySelectorAll('#reg-tbody input.reg-ck').forEach((ck) => { ck.checked = e.target.checked })
+  updateRegApply()
+})
+
+$('#reg-repos').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.reg-repo-del')
+  if (!btn) return
+  const chip = btn.closest('.reg-repo')
+  const id = chip.dataset.id
+  if (!confirm('移除仓库 ' + id + '？（已入库的脚本不受影响）')) return
+  try {
+    await api('/admin/api/library/source-registries/remove', { method: 'POST', body: { id } })
+    toast('已移除仓库')
+    regState.list = []
+    loadRegistry(true)
+  } catch (err) { toast(err.message) }
+})
+
+$('#btn-reg-add').addEventListener('click', async () => {
+  const input = $('#reg-add-repo')
+  const repo = input.value.trim()
+  if (!repo) return toast('请填写 owner/repo 或 GitHub 仓库地址')
+  const btn = $('#btn-reg-add')
+  btn.disabled = true
+  try {
+    await api('/admin/api/library/source-registries/add', { method: 'POST', body: { repo } })
+    input.value = ''
+    toast('已添加仓库，正在抓取…')
+    regState.list = []
+    loadRegistry(true)
+  } catch (err) { toast(err.message) } finally { btn.disabled = false }
+})
+
+$('#btn-reg-apply').addEventListener('click', async () => {
+  const keys = [...document.querySelectorAll('#reg-tbody input.reg-ck:checked')].map((x) => x.dataset.key)
+  if (!keys.length) return toast('请先勾选要处理的音源')
+  const upd = keys.filter((k) => {
+    const s = regState.list.find((x) => x.key === k)
+    return s && (s.state === 'upgrade' || s.state === 'changed')
+  })
+  const label = upd.length === keys.length ? '升级' : (upd.length ? '入库 / 升级' : '入库')
+  if (!confirm(`将下载并${label} ${keys.length} 个脚本：\n${keys.join(', ')}\n\n升级会覆盖本地同名脚本（保留启用状态）。`)) return
+  const btn = $('#btn-reg-apply')
+  btn.disabled = true
+  const oldTxt = btn.textContent
+  btn.textContent = '下载中…'
+  try {
+    const r = await api('/admin/api/library/source-registries/apply', {
+      method: 'POST',
+      body: { keys, enable: $('#reg-enable').checked, refresh: false },
+    })
+    const sum = r.data.summary || {}
+    const fails = (r.data.results || []).filter((x) => x.action === 'fail')
+    toast(`完成：入库/升级 ${sum.done || 0} · 已是最新跳过 ${sum.skipped || 0}${sum.failed ? ' · 失败 ' + sum.failed : ''}`, 4200)
+    if (fails.length) {
+      openModal('部分音源处理失败', '<ul class="fail-list">' + fails.map((f) => `<li><b>${esc(f.key)}</b>：${esc(f.error || '未知错误')}</li>`).join('') + '</ul><div class="btns"><button class="btn" data-close>知道了</button></div>')
+    }
+    $('#reg-enable').checked = false
+    await loadUserSources()
+    await loadRegistry(false)
+  } catch (err) {
+    toast('处理失败: ' + err.message)
+  } finally {
+    btn.textContent = oldTxt
+    updateRegApply()
+  }
+})
+
 // ==================== 上传 ====================
 $('#btn-upload').addEventListener('click', () => {
   openModal('上传音频到曲库', `

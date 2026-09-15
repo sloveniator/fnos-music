@@ -77,13 +77,16 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
   transition: color .15s, background .15s; }
 .nav .tab:hover { background: rgba(255,255,255,.04); color: var(--text); }
 .nav .tab.active { background: linear-gradient(135deg, rgba(79,140,255,.18), rgba(124,92,255,.12)); color: #fff; font-weight: 600; }
-/* 服务器名与「应用/退出」分两行：同行会让两侧互相挤压折行、垂直错位 */
-.side-foot { margin-top: auto; padding: 14px 6px 2px; border-top: 1px solid var(--line-soft);
-  display: flex; flex-direction: column; align-items: stretch; gap: 2px; font-size: 12px; color: var(--muted); }
+/* 服务器名与「应用/退出」分两行：同行会让两侧互相挤压折行、垂直错位。
+   分隔线左右各缩 13px，与导航文字列（.tab 的 13px 左内边距）对齐；名字与链接同一条左基线 */
+.side-foot { margin: auto 13px 0; padding: 14px 0 4px; border-top: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; align-items: stretch; gap: 0; overflow: hidden;
+  font-size: 12px; color: var(--muted); }
 /* 服务器名超长时省略，而不是换行撑高整块 */
-.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px 4px; }
-.side-foot .side-links { display: flex; gap: 4px; align-items: center; margin-left: -4px; }
-.side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 4px 6px; border-radius: 8px; white-space: nowrap; }
+.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 0 1px; }
+/* 链接药丸左右各 6px 内边距，用负 margin 把字面拉回名字那条基线 */
+.side-foot .side-links { display: flex; gap: 2px; align-items: center; margin-left: -6px; }
+.side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 3px 6px; border-radius: 8px; white-space: nowrap; }
 .side-foot a:hover, .side-foot button:hover { color: var(--text); background: rgba(255,255,255,.05); }
 .side-foot button { font: inherit; }
 
@@ -124,8 +127,8 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
   /* 只藏服务器名（.side-links 同为 span，不能再用 .side-foot span 一刀切） */
   .brand span, .brand em, .side-foot #who { display: none; }
   .nav .tab { font-size: 12px; padding: 10px 4px; text-align: center; white-space: nowrap; }
-  /* 窄侧栏里链接竖排，否则「← 应用 + 退出」横向溢出被裁 */
-  .side-foot { align-items: center; padding: 10px 0 2px; }
+  /* 窄侧栏里链接竖排，否则「← 应用 + 退出」横向溢出被裁；76px 容不下 13px 缩进，这里归零 */
+  .side-foot { margin: auto 0 0; align-items: center; padding: 10px 0 2px; }
   .side-foot .side-links { flex-direction: column; gap: 2px; margin-left: 0; }
   .side-foot a, .side-foot button { padding: 3px 5px; font-size: 11px; }
 }
@@ -227,3 +230,22 @@ textarea { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Reg
   background: linear-gradient(160deg, #1c2336, #141a2c); border: 1px solid var(--line);
   color: var(--text); font-size: 13.5px; padding: 11px 22px; border-radius: 99px;
   box-shadow: 0 12px 40px rgba(0,0,0,.5); max-width: 86vw; text-align: center; }
+/* ==================== 公开源仓库 ==================== */
+.reg-repo { display: inline-flex; align-items: center; gap: 6px; padding-right: 8px; }
+.reg-repo a { color: inherit; text-decoration: none; }
+.reg-repo a:hover { text-decoration: underline; }
+.reg-repo em { font-style: normal; font-size: 11px; color: var(--muted); }
+.reg-repo.bad { border-color: rgba(255,95,109,.45); }
+.reg-repo.bad em { color: var(--danger); }
+.reg-repo-del { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+.reg-repo-del:hover { color: var(--danger); }
+.reg-pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 12px; border: 1px solid var(--line-soft); white-space: nowrap; }
+.reg-pill.new { color: var(--accent); border-color: rgba(79,140,255,.5); }
+.reg-pill.up { color: var(--gold, #f0b429); border-color: rgba(240,180,41,.45); }
+.reg-pill.chg { color: var(--gold, #f0b429); border-color: rgba(240,180,41,.45); }
+.reg-pill.same { color: var(--muted); }
+.reg-pill.older { color: var(--muted); }
+.table td .t-sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.reg-enable { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.reg-enable input { width: auto; }
+.fail-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }

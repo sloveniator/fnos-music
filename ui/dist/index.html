@@ -217,6 +217,28 @@
             <tbody id="us-tbody"></tbody>
           </table>
         </div>
+
+        <div class="card mt">
+          <div class="page-head"><h3>公开源仓库（批量抓取 / 升级）</h3><div class="btns">
+            <button id="btn-reg-refresh" class="btn">刷新列表</button>
+            <button id="btn-reg-apply" class="btn primary" disabled>导入 / 升级所选</button>
+          </div></div>
+          <p class="muted-note">从洛雪社区公开仓库批量拉取第三方音源脚本，按脚本头 <code>@version</code> 与本地已装版本比较：未安装的直接入库、仓库版本更高的可一键升级（升级保留原有启用状态）。</p>
+          <div class="chips" id="reg-repos"></div>
+          <div class="in-row">
+            <input id="reg-add-repo" placeholder="追加仓库：owner/repo 或 GitHub 仓库地址">
+            <button id="btn-reg-add" class="btn">添加仓库</button>
+          </div>
+          <table class="table">
+            <thead><tr>
+              <th class="chk"><input type="checkbox" id="reg-all" title="全选可入库 / 可升级的源"></th>
+              <th>音源</th><th>本地版本</th><th>仓库版本</th><th>体积</th><th>状态</th><th>来源</th>
+            </tr></thead>
+            <tbody id="reg-tbody"></tbody>
+          </table>
+          <label class="reg-enable"><input type="checkbox" id="reg-enable"> 新入库的源直接启用（默认只入库、不启用）</label>
+          <p class="muted-note" id="reg-note"></p>
+        </div>
       </section>
     </main>
   </div>
