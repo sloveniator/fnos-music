@@ -8,6 +8,8 @@
   3) 仓库增删（非法输入 / 重复 / 内置不可删）
   4) 升级链路：把 ikun 降级成仓库里的 v6 → 清单显示「可升级」→ apply 升回 v22
      → 二次 apply 变 skip；全程保留启用状态；结束时脚本内容与快照一致
+  5) 管理后台 UI：清单/药丸/版本列 → 再降一次 v6 → 勾选批量入库 → 列表立刻不再显示未安装
+  6) 收尾核对：ikun 与快照逐字节一致（含启用状态）
   5) UI：音源与代理页渲染清单、状态药丸、勾选 → 导入/升级所选 → 完成提示
 
 用法：python3 tools/e2e-admin-registry.py
@@ -156,6 +158,12 @@ def main():
     check('列表接口带上脚本版本', any((x.get('version') or '') for x in ((d.get('data') or {}).get('list') or [])), '')
 
     print('\n== 5. 管理后台 UI ==')
+    # 让 UI 段有真活干：把 ikun 再降级成 v6，UI 勾选 → 批量入库 会把它升回仓库版本，
+    # 这样「导入后不再显示未安装」这条（缓存即时性的用户路径）才真正被执行到。
+    st, _ = api('/admin/api/library/user-sources', 'POST',
+                {'id': 'ikun', 'name': snap_meta.get('name') or 'ikun音源', 'script': old_script,
+                 'enabled': bool(snap_meta.get('enabled'))}, token=token)
+    check('UI 前把 ikun 再降级为 v6（给批量入库留活干）', st == 200, 'HTTP %s' % st)
     ui_ok = run_ui(token)
     if not ui_ok:
         skipped += 1
