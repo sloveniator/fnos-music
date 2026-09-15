@@ -11,6 +11,7 @@
     dl: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.2 7l.9 12c.05.66.6 1.17 1.26 1.17h7.28c.66 0 1.21-.51 1.26-1.17l.9-12"/><path d="M10.3 10.8v6.2"/><path d="M13.7 10.8v6.2"/></svg>',
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2v11.4"/><path d="m7.8 7.4 4.2-4.2 4.2 4.2"/><path d="M5.2 13.6v5.4c0 .9.7 1.6 1.6 1.6h10.4c.9 0 1.6-.7 1.6-1.6v-5.4"/></svg>',
   }
   const $ = (s) => document.querySelector(s)
   // 网关前缀自适应：页面部署在 <base>/ 下（'/' → ''；'/app/xxx/' → '/app/xxx'）
@@ -491,6 +492,13 @@
     })
     // 歌单目前只能存曲库内的曲目，所以只对本地曲目显示（与「删除…」一致）
     if (!track.online && track.id) mk('添加到歌单…', () => askAddToPlaylist([track]))
+    // 分享这首（免登录可听的公开链接，默认 7 天、默认允许下载）
+    if (!track.online && track.id) {
+      mk('分享这首…', () => shareDialog({
+        type: 'track', ids: [String(track.id)], count: 1,
+        title: track.name, subtitle: (track.singer && track.singer !== '未知歌手') ? track.singer : '',
+      }))
+    }
     // 下载到本地：
     //   本地曲目（track.id）走 /web/media/download/<id>
     //   在线曲目（kind==='online' 且有 rid）走 /web/media/online/<source>/<rid>?dl=1
@@ -968,6 +976,7 @@
     btns.appendChild(selDlBtn())
     btns.appendChild(selDelBtn())
     btns.appendChild(selPlBtn())
+    btns.appendChild(selShareBtn())
     head.appendChild(meta); head.appendChild(btns)
     v.appendChild(head)
     tracksPage = { page: 0, size: 60, total: 0, list: [], loading: false }
@@ -1180,7 +1189,10 @@ kuwo.cn/playlist_detail/280301309</pre>
     const durStr = durSec ? ' · 总时长 ' + fmtDur(durSec / 1000) : ''
     const metaParts = [singer + ' · ' + d.tracks.length + ' 首', durStr]
     if (d.tracks[0] && d.tracks[0].year) metaParts.push(' · ' + d.tracks[0].year)
-    v.appendChild(heroBlock(cover, album, metaParts.join(''), () => player.play(d.tracks, 0), [shuf, addAll]))
+    const shareB = el('button', 'btn')
+    shareB.innerHTML = SVG.share + '<span>分享专辑</span>'
+    shareB.onclick = () => shareDialog({ type: 'album', album, artist: singer, title: album, subtitle: singer, count: d.tracks.length })
+    v.appendChild(heroBlock(cover, album, metaParts.join(''), () => player.play(d.tracks, 0), [shuf, addAll, shareB]))
     v.appendChild(trackTable(d.tracks, { showSinger: false, showAlbum: false, menu: true, autoScroll: true }))
   }
 
@@ -1196,7 +1208,10 @@ kuwo.cn/playlist_detail/280301309</pre>
     addAll.onclick = () => { player.enqueue(d.tracks); toast('已加入 ' + d.tracks.length + ' 首') }
     const shuf = shuffleBtn('随机播放')
     shuf.onclick = () => player.shufflePlay(d.tracks)
-    v.appendChild(heroBlock(cover, singer, d.tracks.length + ' 首 · ' + d.albums.length + ' 专辑', () => player.play(d.tracks, 0), [shuf, addAll]))
+    const shareB = el('button', 'btn')
+    shareB.innerHTML = SVG.share + '<span>分享歌手</span>'
+    shareB.onclick = () => shareDialog({ type: 'artist', artist: singer, title: singer, count: d.tracks.length })
+    v.appendChild(heroBlock(cover, singer, d.tracks.length + ' 首 · ' + d.albums.length + ' 专辑', () => player.play(d.tracks, 0), [shuf, addAll, shareB]))
 
     // 标签页：热门歌曲 / 专辑
     let aTab = 'hot'
@@ -1339,7 +1354,11 @@ kuwo.cn/playlist_detail/280301309</pre>
       + (deadCount > 0 ? '（' + deadCount + ' 首引用已失效，可从行内 × 移除）' : '')
     const shuf = shuffleBtn('随机播放')
     shuf.onclick = () => { if (playable.length) player.shufflePlay(playable); else toast('歌单里没有可在网页端播放的曲目', true) }
-    v.appendChild(heroBlock(tracks.find(hasCoverOf), d.name, metaText, () => playable.length && player.play(playable, 0), [shuf, ...extra]))
+    // 分享歌单：快照当前歌单内容（之后改歌单不影响已发出的链接）；在线源曲目服务端会自动跳过
+    const shareB = el('button', 'btn')
+    shareB.innerHTML = SVG.share + '<span>分享歌单</span>'
+    shareB.onclick = () => shareDialog({ type: 'playlist', listId: id, title: d.name, count: playable.length })
+    v.appendChild(heroBlock(tracks.find(hasCoverOf), d.name, metaText, () => playable.length && player.play(playable, 0), [shuf, shareB, ...extra]))
     if (!tracks.length) {
       v.appendChild(el('div', 'empty', '歌单还是空的，去曲库添加喜欢的歌吧'))
       return
@@ -1492,6 +1511,12 @@ kuwo.cn/playlist_detail/280301309</pre>
       const sp = b.querySelector('span')
       if (sp) sp.textContent = '加入歌单 (' + nLocal + ')'
     })
+    // 分享也只认本地曲目（在线曲目没有可打包的文件）
+    document.querySelectorAll('.share-sel').forEach(b => {
+      b.disabled = nLocal === 0
+      const sp = b.querySelector('span')
+      if (sp) sp.textContent = '分享选中 (' + nLocal + ')'
+    })
     const boxes = document.querySelectorAll('.row-sel')
     const hdr = document.querySelector('.all-sel')
     if (hdr) {
@@ -1569,6 +1594,109 @@ kuwo.cn/playlist_detail/280301309</pre>
     b.onclick = () => askAddToPlaylist(selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online))
     return b
   }
+  /** 「分享选中 (n)」按钮：只分享云盘曲目（在线曲目没有稳定文件，服务端会跳过） */
+  const selShareBtn = (cls) => {
+    const b = el('button', (cls || 'btn mini ghost') + ' share-sel')
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 7l4-4 4 4"/><path d="M5 14v5.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V14"/></svg><span>分享选中 (0)</span>'
+    b.disabled = true
+    b.onclick = () => {
+      const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online && t.id && !t.missing)
+      if (!items.length) { toast('请先勾选要分享的云盘歌曲', true); return }
+      shareDialog({
+        type: 'track',
+        ids: items.map(t => String(t.id)),
+        title: items.length === 1 ? items[0].name : '分享 ' + items.length + ' 首歌曲',
+        subtitle: items.length === 1 ? (items[0].singer || '') : '',
+        count: items.length,
+      })
+    }
+    return b
+  }
+
+  /**
+   * 分享弹窗：免登录可听，默认 7 天有效期、可选提取码、默认允许下载。
+   * target: { type: 'track'|'playlist'|'album'|'artist', title, subtitle, count, ids?|listId?|album?|artist? }
+   */
+  function shareDialog(target) {
+    const box = $('#share-dialog')
+    if (!box) return
+    const what = $('#share-what'), daysSel = $('#share-days'), passOn = $('#share-pass-on')
+    const passInput = $('#share-pass'), dlCb = $('#share-dl')
+    const result = $('#share-result'), link = $('#share-link'), tip = $('#share-tip')
+    const msg = $('#share-msg'), okBtn = $('#share-ok'), cancelBtn = $('#share-cancel')
+    const typeText = { track: '单曲', playlist: '歌单', album: '专辑', artist: '歌手' }[target.type] || '音乐'
+    what.innerHTML = ''
+    what.appendChild(el('div', 'share-w-title', target.title || '未命名分享'))
+    what.appendChild(el('div', 'share-w-sub', typeText + ' · ' + target.count + ' 首曲目' + (target.subtitle ? ' · ' + target.subtitle : '')))
+    // 每次打开都回到初始态：7 天 / 无提取码 / 允许下载
+    daysSel.value = '7'
+    passOn.checked = false
+    passInput.value = ''
+    passInput.disabled = true
+    dlCb.checked = true
+    result.hidden = true
+    link.value = ''
+    msg.hidden = true
+    okBtn.textContent = '生成链接'
+    okBtn.disabled = false
+    box.hidden = false
+    passOn.onchange = () => {
+      passInput.disabled = !passOn.checked
+      if (passOn.checked) passInput.focus()
+    }
+    $('#share-copy').onclick = async () => {
+      if (!link.value) return
+      try {
+        if (navigator.clipboard) await navigator.clipboard.writeText(link.value)
+        else { link.select(); document.execCommand('copy') }
+        toast('链接已复制')
+      } catch { link.select(); toast('请手动复制链接') }
+    }
+    const close = () => {
+      box.hidden = true
+      okBtn.onclick = cancelBtn.onclick = null
+    }
+    cancelBtn.onclick = close
+    okBtn.onclick = async () => {
+      // 已生成 → 按钮变「完成」，关闭即可
+      if (!result.hidden) { close(); return }
+      const days = parseInt(daysSel.value, 10)
+      const password = passOn.checked ? passInput.value.trim() : ''
+      if (passOn.checked && (password.length < 4 || password.length > 16)) {
+        msg.textContent = '提取码需 4-16 位'
+        msg.hidden = false
+        return
+      }
+      okBtn.disabled = true
+      try {
+        const d = await api('/api/share/create', {
+          method: 'POST',
+          body: {
+            type: target.type, ids: target.ids, listId: target.listId,
+            album: target.album, artist: target.artist,
+            title: target.title, subtitle: target.subtitle,
+            days, password, allowDownload: dlCb.checked,
+          },
+        })
+        link.value = d.url
+        const expire = d.expiresAt ? new Date(d.expiresAt).toLocaleString('zh-CN', { hour12: false }) : '永久有效'
+        tip.textContent = '链接有效期至 ' + expire + '，拿到链接的人免登录即可收听'
+          + (dlCb.checked ? '、可下载' : '（已关闭下载）')
+          + (d.skipped ? '；' + d.skipped + ' 首无法分享已跳过（仅支持云盘曲目）' : '')
+          + '。可在「设置 → 我的分享」里随时撤销。'
+        result.hidden = false
+        msg.hidden = true
+        okBtn.textContent = '完成'
+        try { link.select() } catch {}
+      } catch (e) {
+        msg.textContent = e.message
+        msg.hidden = false
+      } finally {
+        okBtn.disabled = false
+      }
+    }
+  }
+
   /**
    * 删除本地曲目。
    * 服务端做的是软删除：文件被移入所在曲库目录下的 .gusi-trash/，并非抹除。
@@ -3174,6 +3302,72 @@ kuwo.cn/playlist_detail/280301309</pre>
 
     dataSec.appendChild(dataGrid)
     v.appendChild(dataSec)
+
+    // 我的分享（公开链接：免登录可听、有效期、提取码、允许下载）
+    const shareSec = el('section', 'set-section')
+    shareSec.appendChild(el('h3', 'set-sec-h', '我的分享'))
+    const shareBox = el('div', 'share-list')
+    shareBox.appendChild(el('div', 'share-empty', '正在载入…'))
+    shareSec.appendChild(shareBox)
+    const shareRefresh = el('button', 'btn btn-sm', '刷新')
+    shareRefresh.onclick = () => paintShares()
+    shareSec.appendChild(shareRefresh)
+    v.appendChild(shareSec)
+
+    async function paintShares() {
+      shareBox.innerHTML = ''
+      let list = []
+      try {
+        const d = await api('/api/share/list')
+        list = d.shares || []
+      } catch (e) {
+        shareBox.appendChild(el('div', 'share-empty', '载入失败：' + e.message))
+        return
+      }
+      if (!list.length) {
+        shareBox.appendChild(el('div', 'share-empty', '还没有分享。在歌曲行菜单、专辑页、歌手页或歌单页点「分享」即可生成免登录链接。'))
+        return
+      }
+      for (const s of list) {
+        const row = el('div', 'share-item' + (s.expired ? ' dead' : ''))
+        const main = el('div', 'share-item-main')
+        main.appendChild(el('div', 'share-item-t', s.title || '(未命名)'))
+        const bits = [s.typeText, s.count + ' 首', s.hasPassword ? '有提取码' : '无提取码', s.allowDownload ? '可下载' : '仅收听']
+        const exp = s.expiresAt ? new Date(s.expiresAt).toLocaleString('zh-CN', { hour12: false }) : '永久有效'
+        bits.push((s.expired ? '已过期 ' : '有效至 ') + exp)
+        bits.push('访问 ' + (s.visits || 0) + ' 次')
+        main.appendChild(el('div', 'share-item-s', bits.join(' · ')))
+        const ln = el('input', 'share-item-url')
+        ln.value = s.url
+        ln.readOnly = true
+        ln.onclick = () => ln.select()
+        main.appendChild(ln)
+        row.appendChild(main)
+        const acts = el('div', 'share-item-acts')
+        const cp = el('button', 'btn btn-sm', '复制链接')
+        cp.onclick = async () => {
+          try {
+            if (navigator.clipboard) await navigator.clipboard.writeText(s.url)
+            else { ln.select(); document.execCommand('copy') }
+            toast('链接已复制')
+          } catch { ln.select(); toast('请手动复制') }
+        }
+        const revoke = el('button', 'btn btn-sm danger-btn', '撤销')
+        revoke.onclick = async () => {
+          if (!await confirm2('撤销分享', '撤销后这条链接立刻失效（已经拿到链接的人也听不了）。')) return
+          try {
+            await api('/api/share/remove', { method: 'POST', body: { codes: [s.code] } })
+            toast('已撤销')
+            paintShares()
+          } catch (e) { toast(e.message, true) }
+        }
+        acts.appendChild(cp)
+        acts.appendChild(revoke)
+        row.appendChild(acts)
+        shareBox.appendChild(row)
+      }
+    }
+    paintShares()
 
     // 账户
     const acctSec = el('section', 'set-section')

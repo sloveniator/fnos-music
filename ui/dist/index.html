@@ -33,6 +33,7 @@
         <button class="tab" data-tab="tenants">用户曲库</button>
         <button class="tab" data-tab="downloads">下载中心</button>
         <button class="tab" data-tab="sources">音源与代理</button>
+        <button class="tab" data-tab="shares">分享</button>
       </nav>
       <div class="side-foot">
         <span id="who"></span>
@@ -143,6 +144,21 @@
           <table class="table">
             <thead><tr><th>文件名</th><th>目标</th><th>状态</th><th>进度</th><th>操作</th></tr></thead>
             <tbody id="dl-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 分享 ============ -->
+      <section id="tab-shares" class="tab-page" hidden>
+        <div class="page-head"><h1>分享</h1><div class="btns">
+          <button id="btn-share-refresh" class="btn">刷新</button>
+        </div></div>
+        <p class="muted-note">用户创建的对外分享链接（免登录可听，默认 7 天有效、提取码可选、默认允许下载）。撤销后链接立刻失效；访问次数按每 10 分钟最多记一次。</p>
+        <div class="card"><div id="share-totals" class="muted-note">正在载入…</div></div>
+        <div class="card mt">
+          <table class="table">
+            <thead><tr><th>标题</th><th>用户</th><th>类型</th><th>曲目</th><th>有效期</th><th>提取码</th><th>下载</th><th>访问</th><th>代码</th><th>操作</th></tr></thead>
+            <tbody id="share-tbody"></tbody>
           </table>
         </div>
       </section>

@@ -153,6 +153,21 @@
   <div id="toast" class="toast" hidden></div>
   <div id="dialog" class="dialog" hidden><div class="dialog-box"><h3 id="dlg-title"></h3><input id="dlg-input"><p id="dlg-msg" hidden></p><div class="dlg-btns"><button id="dlg-cancel">取消</button><button id="dlg-ok" class="primary">确定</button></div></div></div>
 <div id="tag-dialog" class="dialog" hidden><div class="dialog-box"><h3>编辑标签</h3><div class="tag-form"><label><span>歌名</span><input id="tag-title" maxlength="200"></label><label><span>歌手</span><input id="tag-artist" maxlength="200"></label><label><span>专辑</span><input id="tag-album" maxlength="200"></label><label><span>年份</span><input id="tag-year" maxlength="10" placeholder="如 2024"></label><label><span>音轨号</span><input id="tag-track" maxlength="6" placeholder="如 3"></label></div><p id="tag-msg" class="tag-hint err" hidden></p><p class="tag-hint">留空表示不修改该字段；仅 mp3 支持写入标签</p><div class="dlg-btns"><button id="tag-cancel">取消</button><button id="tag-ok" class="primary">保存</button></div></div></div>
+<div id="share-dialog" class="dialog" hidden><div class="dialog-box wide"><h3>分享音乐</h3>
+  <div id="share-what" class="share-what"></div>
+  <div class="share-form">
+    <div class="share-row"><span class="share-k">有效期</span><select id="share-days"><option value="1">1 天</option><option value="7" selected>7 天（默认）</option><option value="30">30 天</option><option value="0">永久有效</option></select></div>
+    <div class="share-row"><span class="share-k">提取码</span><span class="share-v"><input id="share-pass" maxlength="16" placeholder="4-16 位，留空则不设" disabled><label class="set-toggle"><input type="checkbox" id="share-pass-on"><span class="set-toggle-track"></span></label></span></div>
+    <div class="share-row"><span class="share-k">允许下载</span><span class="share-v"><span class="share-note">关掉后只能在线收听</span><label class="set-toggle"><input type="checkbox" id="share-dl" checked><span class="set-toggle-track"></span></label></span></div>
+  </div>
+  <div id="share-result" class="share-result" hidden>
+    <div class="share-link-row"><input id="share-link" readonly><button id="share-copy" class="btn">复制</button></div>
+    <p class="share-tip" id="share-tip"></p>
+  </div>
+  <p id="share-msg" class="tag-hint err" hidden></p>
+  <p class="tag-hint">拿到链接的人免登录就能听；撤销后链接立刻失效。</p>
+  <div class="dlg-btns"><button id="share-cancel">关闭</button><button id="share-ok" class="primary">生成链接</button></div>
+</div></div>
 
 <script src="assets/app.js"></script>
 </body>

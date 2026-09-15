@@ -14,7 +14,7 @@ import { auditLog } from '@/utils/log4js'
  * 审计本身失败绝不影响删除动作本身。
  */
 
-export type AuditAction = 'tracks.delete' | 'trash.restore' | 'trash.purge'
+export type AuditAction = 'tracks.delete' | 'trash.restore' | 'trash.purge' | 'share.create' | 'share.update' | 'share.remove' | 'share.unlock_fail'
 
 export interface AuditActor {
   /** 曲库所属用户（App 登录名） */

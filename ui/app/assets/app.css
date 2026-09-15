@@ -1192,3 +1192,38 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 @media (max-width: 900px) {
   .dl-res-tbl .acts .btn { padding: 6px 10px; font-size: 12px; gap: 4px; }
 }
+
+/* ---------- 分享弹窗 / 我的分享 ---------- */
+.dialog-box.wide { width: min(460px, 92vw); }
+.share-what { background: rgba(10,13,20,.6); border: 1px solid var(--line-soft); border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 12px; }
+.share-w-title { font-size: 15px; font-weight: 600; word-break: break-word; }
+.share-w-sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+.share-form { display: grid; gap: 10px; }
+.share-row { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 10px; }
+.share-k { color: var(--muted); font-size: 13px; }
+.share-v { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.share-v input { flex: 1; min-width: 0; }
+.share-note { color: var(--muted); font-size: 12px; margin-left: auto; }
+.share-row select { background: rgba(10,13,20,.8); border: 1px solid var(--line-soft);
+  border-radius: 10px; padding: 9px 12px; color: inherit; font-size: 14px; }
+.share-result { margin-top: 14px; }
+.share-link-row { display: flex; gap: 8px; align-items: center; }
+.share-link-row input { flex: 1; min-width: 0; font-size: 13px; }
+.share-link-row .btn { white-space: nowrap; }
+.share-tip { margin-top: 8px !important; font-size: 12.5px !important; }
+.share-list { display: grid; gap: 10px; }
+.share-empty { color: var(--muted); font-size: 13.5px; line-height: 1.8; }
+.share-item { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  background: rgba(255,255,255,.03); border: 1px solid var(--line-soft); border-radius: 12px; padding: 12px 14px; }
+.share-item.dead { opacity: .55; }
+.share-item-main { flex: 1; min-width: 220px; }
+.share-item-t { font-size: 14.5px; }
+.share-item-s { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.share-item-url { margin-top: 6px; font-size: 12px; background: rgba(10,13,20,.8);
+  border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 9px; width: 100%; }
+.share-item-acts { display: flex; gap: 8px; }
+@media (max-width: 560px) {
+  .share-item-acts { width: 100%; }
+  .share-item-acts .btn { flex: 1; }
+}

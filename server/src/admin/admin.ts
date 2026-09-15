@@ -6,6 +6,7 @@ import { getUserSpace, releaseUserSpace, getUserDirname } from '@/user'
 import { adminCreateUser, adminRemoveUser, adminSetPassword, loadDynamicUsers } from './store'
 import { handleLibraryRequest, handleLibraryAdmin } from './library'
 import { handleWebRequest } from '@/web/api'
+import { handleShareRequest } from '@/share/router'
 import {
   findRegisteredUser, updateUserMaxGb, listRegisteredUsers,
   removeRegisteredUser, setRegisteredPassword,
@@ -13,6 +14,9 @@ import {
 import { getQuota } from '@/user/quota'
 import { setListBroadcaster } from '@/web/playlists'
 import { dropTenant } from '@/library/tenant'
+import { listShares, removeShares, isExpired as isShareExpired } from '@/share/store'
+import { auditDestructive } from '@/utils/audit'
+import { getIP } from '@/utils/tools'
 
 // ---------------------------------------------------------------------------
 // 管理后台 HTTP API + 静态 UI 托管
@@ -309,6 +313,57 @@ const handleApi = async(req: http.IncomingMessage, res: http.ServerResponse, url
     return true
   }
 
+  // 分享管理（对外公开链接）：列表 + 撤销
+  if (method == 'GET' && p == '/admin/api/shares') {
+    const now = Date.now()
+    const all = listShares().slice().sort((a, b) => b.createdAt - a.createdAt)
+    json(res, 200, {
+      shares: all.map(s => ({
+        code: s.code,
+        owner: s.owner,
+        type: s.type,
+        title: s.title,
+        subtitle: s.subtitle,
+        count: s.ids.length,
+        createdAt: s.createdAt,
+        expiresAt: s.expiresAt,
+        expired: isShareExpired(s, now),
+        allows: s.allowDownload,
+        hasPassword: !!s.passHash,
+        visits: s.visits || 0,
+        lastVisitAt: s.lastVisitAt,
+      })),
+      totals: {
+        all: all.length,
+        active: all.filter(s => !isShareExpired(s, now)).length,
+        expired: all.filter(s => isShareExpired(s, now)).length,
+        visits: all.reduce((n, s) => n + (s.visits || 0), 0),
+      },
+    })
+    return true
+  }
+  if (method == 'POST' && p == '/admin/api/shares/remove') {
+    let body: { codes?: string[] }
+    try {
+      body = JSON.parse(await readBody(req))
+    } catch {
+      json(res, 400, { message: 'invalid body' })
+      return true
+    }
+    const codes = (Array.isArray(body?.codes) ? body.codes : []).map(String).slice(0, 500)
+    if (!codes.length) {
+      json(res, 400, { message: '缺少要撤销的分享' })
+      return true
+    }
+    const gone = removeShares(codes)
+    auditDestructive('share.remove', { user: 'admin', ip: getIP(req) || '', ua: String(req.headers['user-agent'] ?? '') }, {
+      codes: gone.map(g => g.code), count: gone.length,
+      owners: [...new Set(gone.map(g => g.owner))],
+    })
+    json(res, 200, { removed: gone.length })
+    return true
+  }
+
   if (userSeg) {
     const name = decodeURIComponent(userSeg[1])
     const rest = userSeg[2] ?? ''
@@ -456,6 +511,19 @@ export const handleAdminRequest = async(req: http.IncomingMessage, res: http.Ser
   if (p.startsWith('/api/')) {
     try {
       return await handleLibraryRequest(req, res, url)
+    } catch (err: any) {
+      try {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ code: -1, msg: err?.message ?? 'internal error' }))
+      } catch {}
+      return true
+    }
+  }
+
+  // 音乐分享（公开链接 /s/<code>，免登录，独立提取码/有效期）
+  if (p == '/s' || p.startsWith('/s/')) {
+    try {
+      return await handleShareRequest(req, res, url)
     } catch (err: any) {
       try {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })

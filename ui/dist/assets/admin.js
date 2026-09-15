@@ -160,8 +160,52 @@ const switchTab = (name) => {
   if (name === 'tenants') loadTenants()
   if (name === 'downloads') loadDownloads()
   if (name === 'sources') loadSources()
+  if (name === 'shares') loadShares()
 }
 $$('.nav .tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)))
+// ==================== 分享 ====================
+const SHARE_TYPE_NAMES = { track: '单曲', playlist: '歌单', album: '专辑', artist: '歌手' }
+const loadShares = async () => {
+  let d
+  try {
+    d = await api('/admin/api/shares', { method: 'GET' })
+  } catch (err) { toast(err.message); return }
+  const list = d.shares || []
+  const t = d.totals || {}
+  $('#share-totals').textContent = '共 ' + (t.all || 0) + ' 条 · 有效 ' + (t.active || 0) + ' 条 · 已过期 '
+    + (t.expired || 0) + ' 条 · 累计访问 ' + (t.visits || 0) + ' 次'
+  const tb = $('#share-tbody')
+  if (!list.length) {
+    tb.innerHTML = '<tr><td colspan="10" class="empty">还没有分享。用户在网页端（歌曲行菜单 / 专辑页 / 歌手页 / 歌单页）点「分享」后，链接会出现在这里。</td></tr>'
+    return
+  }
+  tb.innerHTML = list.map(s => `<tr${s.expired ? ' style="opacity:.55"' : ''}>
+    <td>${esc(s.title)}${s.subtitle ? '<div class="muted-note">' + esc(s.subtitle) + '</div>' : ''}</td>
+    <td>${esc(s.owner)}</td>
+    <td>${esc(SHARE_TYPE_NAMES[s.type] || s.type)}</td>
+    <td>${s.count}</td>
+    <td>${s.expiresAt ? fmtDate(s.expiresAt) + (s.expired ? ' <span class="muted-note">已过期</span>' : '') : '永久有效'}</td>
+    <td>${s.hasPassword ? '有' : '—'}</td>
+    <td>${s.allows ? '允许' : '禁止'}</td>
+    <td>${s.visits}${s.lastVisitAt ? '<div class="muted-note">' + fmtDate(s.lastVisitAt) + '</div>' : ''}</td>
+    <td><code class="share-code">${esc(s.code)}</code> <button class="btn mini sh-copy" data-url="/s/${esc(s.code)}">复制</button></td>
+    <td><button class="btn mini danger sh-del" data-code="${esc(s.code)}">撤销</button></td>
+  </tr>`).join('')
+  tb.querySelectorAll('.sh-copy').forEach(b => b.addEventListener('click', async () => {
+    const url = location.origin + b.dataset.url
+    try { await navigator.clipboard.writeText(url); toast('链接已复制') } catch { toast(url) }
+  }))
+  tb.querySelectorAll('.sh-del').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('撤销分享 ' + b.dataset.code + '？\n撤销后该链接立刻失效，已拿到链接的人也听不了。')) return
+    try {
+      await api('/admin/api/shares/remove', { method: 'POST', body: { codes: [b.dataset.code] } })
+      toast('已撤销')
+      loadShares()
+    } catch (err) { toast(err.message) }
+  }))
+}
+$('#btn-share-refresh').addEventListener('click', loadShares)
+
 // ==================== 概览 ====================
 const loadOverview = async () => {
   try {

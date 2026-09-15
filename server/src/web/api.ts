@@ -37,6 +37,12 @@ import {
   regBlocked, regFail, regSuccess, countRegisteredUsers,
 } from '@/user/register'
 import { getQuota, canAcceptBytes } from '@/user/quota'
+import {
+  createShare, updateShare, removeShares, getShare, listSharesByOwner, isExpired as isShareExpired,
+  type ShareRecord, type ShareType,
+} from '@/share/store'
+
+const SHARE_TYPE_TEXT: Record<ShareType, string> = { track: '单曲分享', playlist: '歌单分享', album: '专辑分享', artist: '歌手分享' }
 
 // ---------------------------------------------------------------------------
 // /web/* — 消费者音乐应用 API（会话鉴权）
@@ -1023,6 +1029,171 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     } catch (err: any) {
       fail(res, 400, err?.message ?? String(err))
     }
+    return true
+  }
+
+  // ---------------- 分享（对外链接，免登录可听） ----------------
+  // 免登录直接听；默认 7 天有效期；提取码可选；粒度：单曲 / 歌单 / 专辑 / 歌手；默认允许下载
+  const shareLink = (req: http.IncomingMessage, code: string): string => {
+    const host = String(req.headers.host ?? ('localhost:' + (process.env.PORT || '23330')))
+    const proto = (req.socket as any)?.encrypted ? 'https' : ((String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim()) || 'http')
+    const base = (process.env.GS_PUBLIC_BASE_PATH ?? '').replace(/\/+$/, '')
+    return `${proto}://${host}${base}/s/${code}`
+  }
+  const shareView = (req: http.IncomingMessage, s: ShareRecord) => ({
+    code: s.code,
+    type: s.type,
+    typeText: SHARE_TYPE_TEXT[s.type] ?? '分享',
+    title: s.title,
+    subtitle: s.subtitle,
+    count: s.ids.length,
+    visits: s.visits || 0,
+    createdAt: s.createdAt,
+    expiresAt: s.expiresAt,
+    expired: isShareExpired(s),
+    allowDownload: s.allowDownload,
+    hasPassword: !!s.passHash,
+    url: shareLink(req, s.code),
+  })
+  if (method == 'GET' && p == '/web/api/share/list') {
+    const now = Date.now()
+    const mine = listSharesByOwner(userName)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(s => shareView(req, s))
+    ok(res, { shares: mine, now })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/share/create') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const type = String(body?.type ?? 'track') as ShareType
+    if (!['track', 'playlist', 'album', 'artist'].includes(type)) return fail(res, 400, '不支持的分享类型'), true
+    const days = Math.max(0, Math.min(3650, Number.isFinite(+body?.days) ? Math.floor(+body.days) : 7))
+    const password = String(body?.password ?? '').trim()
+    if (password && (password.length < 4 || password.length > 16)) return fail(res, 400, '提取码需 4-16 位'), true
+    const allowDownload = body?.allowDownload !== false
+    // 解析曲目 id 快照；只分享云盘（本地曲库）曲目，在线曲目没有可稳定的文件
+    const ids: string[] = []
+    const seen = new Set<string>()
+    let skipped = 0
+    let listName = ''
+    const push = (id: string) => {
+      const key = String(id)
+      if (!key || seen.has(key)) return
+      if (!getTenantTrack(userName, key)) { skipped++; return }
+      seen.add(key)
+      ids.push(key)
+    }
+    if (type === 'track') {
+      for (const id of (Array.isArray(body?.ids) ? body.ids : []).slice(0, 500)) push(String(id).replace(/^local_/, ''))
+    } else if (type === 'playlist') {
+      const listId = String(body?.listId ?? '')
+      const data = await getListDataStable(userName)
+      let musics: any[] | null = null
+      if (listId == LIST_IDS.DEFAULT) { musics = data.defaultList; listName = '我的歌单' }
+      else if (listId == LIST_IDS.LOVE) { musics = data.loveList; listName = '我喜欢' }
+      else {
+        const l = data.userList.find((x: any) => x.id === listId)
+        if (l) { musics = l.list as any[]; listName = l.name }
+      }
+      if (!musics) return fail(res, 404, '歌单不存在'), true
+      for (const m of musics) {
+        const mid = String(m?.id ?? '')
+        if (m?.source === 'local' && mid.startsWith('local_')) push(mid.substring(6))
+        else skipped++
+      }
+    } else {
+      const tracks = getTenantTracks(userName)
+      const album = String(body?.album ?? '').trim()
+      const artist = String(body?.artist ?? '').trim()
+      // 标签可能为空：界面把空专辑/空歌手显示为「单曲 / 未知专辑 / 未知歌手」，
+      // 这里必须做同样的归一，否则从专辑页、歌手页发起分享会「没有可分享的曲目」
+      const emptyAlbum = (a: string) => !a || a === '单曲' || a === '未知专辑'
+      const emptySinger = (s: string) => !s || s === '未知歌手' || s === '未知'
+      const matched = tracks.filter(t => {
+        if (album) {
+          const okAlbum = emptyAlbum(album) ? emptyAlbum(t.album) : t.album === album
+          const okArtist = !artist || (emptySinger(artist) ? emptySinger(t.singer) : t.singer === artist)
+          return okAlbum && okArtist
+        }
+        return emptySinger(artist) ? emptySinger(t.singer) : t.singer === artist
+      }).sort((a, b) => ((a.trackNum ?? 0) - (b.trackNum ?? 0)) || a.name.localeCompare(b.name, 'zh'))
+      for (const t of matched.slice(0, 500)) push(t.id)
+    }
+    if (!ids.length) return fail(res, 400, '没有可分享的曲目（只支持云盘曲目）'), true
+    const first = getTenantTrack(userName, ids[0])!
+    let title = String(body?.title ?? '').trim()
+    let subtitle = String(body?.subtitle ?? '').trim()
+    if (!title) {
+      if (type === 'track') title = first.name
+      else if (type === 'playlist') title = listName || '我的歌单'
+      else if (type === 'album') title = first.album || '未知专辑'
+      else title = first.singer || '未知歌手'
+    }
+    if (!subtitle) {
+      if (type === 'track') subtitle = first.singer
+      else if (type === 'album') subtitle = first.singer
+    }
+    const coverTrack = ids.map(id => getTenantTrack(userName, id)).find(t => t?.hasCover)
+    let rec: ShareRecord
+    try {
+      rec = await createShare({
+        owner: userName, type, title, subtitle, ids,
+        coverId: (coverTrack ?? first).id,
+        days, password, allowDownload,
+      })
+    } catch (err: any) {
+      return fail(res, 500, '创建分享失败：' + (err?.message ?? String(err))), true
+    }
+    auditDestructive('share.create', auditActor(req, userName), {
+      code: rec.code, type, title: rec.title, count: ids.length, days, password: !!password, allowDownload,
+    })
+    ok(res, { ...shareView(req, rec), skipped })
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/share/update') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const code = String(body?.code ?? '')
+    const mine = getShare(code)
+    if (!mine || mine.owner !== userName) return fail(res, 404, '分享不存在'), true
+    const password = typeof body?.password === 'string' ? body.password.trim() : undefined
+    if (password && (password.length < 4 || password.length > 16)) return fail(res, 400, '提取码需 4-16 位'), true
+    const rec = await updateShare(code, {
+      days: body?.days === undefined ? undefined : Math.max(0, Math.min(3650, Math.floor(+body.days) || 0)),
+      allowDownload: typeof body?.allowDownload == 'boolean' ? body.allowDownload : undefined,
+      password,
+      clearPassword: body?.clearPassword === true,
+    })
+    if (!rec) return fail(res, 404, '分享不存在'), true
+    auditDestructive('share.update', auditActor(req, userName), {
+      code, days: body?.days, allowDownload: body?.allowDownload, passwordChanged: !!password, clearPassword: body?.clearPassword === true,
+    })
+    ok(res, shareView(req, rec))
+    return true
+  }
+  if (method == 'POST' && p == '/web/api/share/remove') {
+    let body: any
+    try {
+      body = parseJson(await readBody(req))
+    } catch {
+      return fail(res, 400, '请求体异常'), true
+    }
+    const codes = (Array.isArray(body?.codes) ? body.codes : []).map(String).slice(0, 200)
+    if (!codes.length) return fail(res, 400, '请选择要撤销的分享'), true
+    const gone = removeShares(codes, userName)
+    auditDestructive('share.remove', auditActor(req, userName), {
+      codes: gone.map(g => g.code), count: gone.length,
+    })
+    ok(res, { removed: gone.length })
     return true
   }
 
