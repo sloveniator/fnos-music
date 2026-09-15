@@ -15,10 +15,11 @@ import {
 } from './session'
 import {
   createPlaylist, renamePlaylist, removePlaylists, addTrackIds, removeMusicIds,
-  clearPlaylist, toggleLove, recordPlayed, getPlayed, overwritePlaylistOrder, migrateTrackRefs, dropTrackRefs,
+  clearPlaylist, toggleLove, recordPlayed, recordPlayedOnline, getPlayed, overwritePlaylistOrder, migrateTrackRefs, dropTrackRefs,
   getListDataStable,
 } from './playlists'
 import { getUserSpace } from '@/user'
+import { forYou } from '@/library/for-you'
 import { LIST_IDS } from '@/constants'
 import { lyricWithFallback } from '@/online/lyric-fallback'
 import { fmChannels, fmNext } from '@/online'
@@ -835,152 +836,15 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     return true
   }
 
-  // ---------------- 发现页 ----------------
-  // 返回今日推荐 / 新入库 / 热门歌手三区块，供首页发现页一次性渲染。
-  // dailyMix：按「当天日期 + 用户名」种子 Fisher-Yates 洗牌，同歌手最多 2 首，取 20
-  // newArrivals：按 mtime 倒序取 20
-  // hotArtists：复用 tenantListArtists（已按曲目数降序），取前 12
-  if (method == 'GET' && p == '/web/api/settings') {
-    ok(res, getTenantSettings(userName))
-    return true
-  }
-  if (method === 'PUT' && p == '/web/api/settings') {
-    let body: any = {}
-    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
-    const patch: { dirs?: string[], coverAuto?: boolean } = {}
-    if (typeof body?.coverAuto === 'boolean') patch.coverAuto = body.coverAuto
-    if (Array.isArray(body?.dirs)) patch.dirs = body.dirs
-    ok(res, saveTenantSettings(userName, patch))
-    return true
-  }
-  // ---------------- 封面回填（在线源 → 本地持久化缓存） ----------------
-  if (method == 'GET' && p == '/web/api/covers/state') {
-    const tracks = getTenantTracks(userName)
-    const noCover = tracks.filter(t => !t.hasCover)
-    const cache = coverCacheStats(safeUserName(userName))
-    ok(res, {
-      total: tracks.length,
-      noCover: noCover.length,
-      pending: Math.max(0, noCover.length - cache.total),
-      cache,
-      job: coverBackfillState(safeUserName(userName)),
-    })
-    return true
-  }
-  if (method == 'POST' && p == '/web/api/covers/backfill') {
-    let body: any = {}
-    try { body = parseJson(await readBody(req)) } catch { body = {} }
-    const safeUser = safeUserName(userName)
-    if (coverBackfillState(safeUser).running) return fail(res, 409, '回填任务正在进行中'), true
-    const num = (v: unknown): number | undefined =>
-      typeof v === 'number' && Number.isFinite(v) ? v : undefined
-    void runCoverBackfill(userName, {
-      force: !!body?.force,
-      limit: num(body?.limit),
-      delayMs: num(body?.delayMs),
-      sources: Array.isArray(body?.sources)
-        ? body.sources.filter((x: unknown) => typeof x === 'string').slice(0, 3)
-        : undefined,
-    }).catch(() => { /* 失败原因已记录在 job.state.error */ })
-    ok(res, { started: true, job: coverBackfillState(safeUser) })
-    return true
-  }
-  if (method == 'POST' && p == '/web/api/covers/backfill/cancel') {
-    cancelCoverBackfill(safeUserName(userName))
-    ok(res, { job: coverBackfillState(safeUserName(userName)) })
-    return true
-  }
-  if (method == 'POST' && p == '/web/api/covers/cache/clear') {
-    const removed = clearCoverCache(safeUserName(userName))
-    refreshCoverFlags(userName)
-    ok(res, { removed })
-    return true
-  }
-  // SSE：封面回填进度
-  if (method == 'GET' && p == '/web/api/covers/events') {
-    const safeUser = safeUserName(userName)
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    })
-    res.write('retry: 5000\r\n\r\n')
-    const push = (s: unknown) => { res.write('event: cover\r\ndata: ' + JSON.stringify(s) + '\r\n\r\n') }
-    push(coverBackfillState(safeUser))
-    const unsubscribe = subscribeCoverBackfill((su, s) => { if (su === safeUser) push(s) })
-    req.on('close', () => unsubscribe())
-    return true
-  }
-  if (method == 'GET' && p == '/web/api/discover') {
-    const seed = tenantGroupingSeed(userName)
-    const all = seed.tracks
-    const strip = <T extends { filePath?: string }>(t: T) => ({ ...t, filePath: undefined })
-
-    // mulberry32 PRNG：当天稳定（每日推荐不变），次日自动换
-    let h = 0
-    const tag = new Date().toISOString().slice(0, 10) + ':' + userName
-    for (let i = 0; i < tag.length; i++) h = (Math.imul(h, 31) + tag.charCodeAt(i)) | 0
-    const m32 = (n: number) => {
-      n = n | 0
-      let t = Math.imul(n ^ (n >>> 15), 1 | n)
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-    }
-    const shuffled = [...all]
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(m32(h + i) * (i + 1))
-      const tmp = shuffled[i]!; shuffled[i] = shuffled[j]!; shuffled[j] = tmp
-    }
-    const seen = new Map<string, number>()
-    const dailyMix = []
-    for (const t of shuffled) {
-      const s = t.singer || '未知歌手'
-      if ((seen.get(s) ?? 0) >= 2) continue
-      seen.set(s, (seen.get(s) ?? 0) + 1)
-      dailyMix.push(strip(t))
-      if (dailyMix.length >= 20) break
-    }
-
-    const newArrivals = [...all].sort((a, b) => b.mtime - a.mtime).slice(0, 20).map(strip)
-
-    const hotArtists = tenantListArtists(userName, seed.tracks, seed.scannedAt, seed.maxMtime, { page: 1, size: 12 }).artists
-
-    ok(res, { dailyMix, newArrivals, hotArtists })
-    return true
-  }
-
-  // ---------------- 猜你喜欢 ----------------
-  // 基于最近播放历史做加权推荐：同歌手曲目优先，其次同专辑，再补新曲。组内洗牌，取 16。
-  if (method == 'GET' && p == '/web/api/recommend') {
-    const seed = tenantGroupingSeed(userName)
-    const all = seed.tracks
-    const played = getPlayed(userName)
-    const playedIds = new Set(played.map(t => t.id))
-    const playedSingers = new Set<string>()
-    const playedAlbums = new Set<string>()
-    for (const t of played) {
-      if (t.singer) playedSingers.add(t.singer)
-      if (t.album) playedAlbums.add(t.album)
-    }
-    const strip = <T extends { filePath?: string }>(t: T) => ({ ...t, filePath: undefined })
-    const high: typeof all = []
-    const mid: typeof all = []
-    const low: typeof all = []
-    for (const t of all) {
-      if (playedIds.has(t.id)) continue
-      if (t.singer && playedSingers.has(t.singer)) high.push(t)
-      else if (t.album && playedAlbums.has(t.album)) mid.push(t)
-      else low.push(t)
-    }
-    const shuffle = (arr: typeof all) => {
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        const tmp = arr[i]!; arr[i] = arr[j]!; arr[j] = tmp
-      }
-      return arr
-    }
-    const rec = [...shuffle(high), ...shuffle(mid), ...shuffle(low)].slice(0, 16).map(strip)
-    ok(res, { tracks: rec })
+  // ---------------- 为你推荐（按账户听歌喜好） ----------------
+  // 旧实现是「今日推荐 = 按日期随机洗牌」「猜你喜欢 = 只看最近播放的歌手」，
+  // 跟账户口味基本无关；现在改成真正的口味画像（library/for-you.ts）：
+  //   播放历史（近因加权）+ 我喜欢 + 自建歌单 + 在线播放记录 → 歌手/专辑权重
+  //   → 本地投票选题 + 按画像头部歌手去在线源补「你还没有的」新歌。
+  // 结果按用户缓存 5 分钟，今日推荐用「日期+用户名」做种子（当天稳定、次日自动换）；
+  // 第三方超时或失败自动退化为纯本地，首页不会因为在线源挂了而空掉。
+  if (method == 'GET' && p == '/web/api/for-you') {
+    ok(res, await forYou(userName))
     return true
   }
 
@@ -997,6 +861,25 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
       return fail(res, 400, '请求体异常'), true
     }
     recordPlayed(userName, String(body?.trackId ?? ''))
+    ok(res, {})
+    return true
+  }
+
+  // 在线曲目播放记录：在线曲目不在曲库索引里，走不了上面那条，
+  // 但「听的是谁」是口味画像的关键信号，单独记一份（不参与同步）。
+  if (method == 'POST' && p == '/web/api/played/online') {
+    let body: any = {}
+    try { body = parseJson(await readBody(req)) } catch { return fail(res, 400, '请求体异常'), true }
+    const source = String(body?.source ?? '')
+    const rid = String(body?.rid ?? '')
+    if (!source || !rid) return fail(res, 400, '缺少 source/rid'), true
+    recordPlayedOnline(userName, {
+      source,
+      rid,
+      name: String(body?.name ?? ''),
+      singer: String(body?.singer ?? ''),
+      album: String(body?.album ?? ''),
+    })
     ok(res, {})
     return true
   }

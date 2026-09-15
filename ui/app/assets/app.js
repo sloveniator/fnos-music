@@ -697,16 +697,10 @@
     const hour = new Date().getHours()
     v.appendChild(el('h2', 'page', hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'))
 
-    // 骨架屏占位
-    v.appendChild(skeletonRows(5))
+    // 骨架屏占位（只等统计——推荐区单独异步填，在线补歌要等第三方，别拖住整页）
+    v.appendChild(skeletonRows(3))
 
-    // 并发拉取：统计卡片 + 发现页数据 + 猜你喜欢 + 最近播放
-    const [stats, discover, recommend, played] = await Promise.all([
-      api('/api/stats'),
-      api('/api/discover'),
-      api('/api/recommend'),
-      api('/api/played'),
-    ])
+    const stats = await api('/api/stats')
 
     // 清除骨架屏
     v.querySelectorAll('.sk-wrap').forEach(s => s.remove())
@@ -732,6 +726,13 @@
       quick.appendChild(c)
     }
     v.appendChild(quick)
+
+    // 为你推荐：按账户口味生成的两份歌单（今日推荐 / 猜你喜欢）。
+    // 这里是「UI 封面」形态 —— 只给封面 + 推荐依据，点开才进详情（#/mix/daily、#/mix/guess）。
+    const fyBox = el('div', 'foryou-slot')
+    fyBox.appendChild(forYouSkeleton())
+    v.appendChild(fyBox)
+    paintForYou(fyBox).catch(() => { fyBox.remove() })
 
     // 推荐歌单（网易云推荐歌单 · 横向滚动卡片）
     try {
@@ -764,89 +765,6 @@
       }
     } catch (e) { /* 推荐歌单失败不阻塞首页 */ }
 
-    // 今日推荐（dailyMix：每天种子洗牌，同歌手最多 2 首）
-    if (discover.dailyMix && discover.dailyMix.length) {
-      const rh = el('div', 'row-head')
-      rh.appendChild(el('h3', null, '今日推荐'))
-      const btns = el('div', 'btns')
-      const bAll = el('button', 'btn ghost')
-      bAll.innerHTML = SVG.play + '<span>播放全部</span>'
-      bAll.onclick = () => player.play(discover.dailyMix, 0)
-      const bShuf = el('button', 'btn ghost')
-      bShuf.innerHTML = SVG.shuffle + '<span>随机播放</span>'
-      bShuf.onclick = () => player.shufflePlay(discover.dailyMix)
-      btns.appendChild(bAll); btns.appendChild(bShuf)
-      rh.appendChild(btns)
-      v.appendChild(rh)
-      v.appendChild(sectionTracks(discover.dailyMix, { menu: true }))
-    }
-
-    // 猜你喜欢（基于最近播放的加权推荐）
-    if (recommend.tracks && recommend.tracks.length) {
-      const rh = el('div', 'row-head')
-      rh.appendChild(el('h3', null, '猜你喜欢'))
-      const btns = el('div', 'btns')
-      const bAll = el('button', 'btn ghost')
-      bAll.innerHTML = SVG.play + '<span>播放全部</span>'
-      bAll.onclick = () => player.play(recommend.tracks, 0)
-      const bShuf = el('button', 'btn ghost')
-      bShuf.innerHTML = SVG.shuffle + '<span>随机播放</span>'
-      bShuf.onclick = () => player.shufflePlay(recommend.tracks)
-      btns.appendChild(bAll); btns.appendChild(bShuf)
-      rh.appendChild(btns)
-      v.appendChild(rh)
-      v.appendChild(sectionTracks(recommend.tracks, { menu: true }))
-    }
-
-
-    // 新入库（按 mtime 倒序）
-    if (discover.newArrivals && discover.newArrivals.length) {
-      const rh = el('div', 'row-head')
-      rh.appendChild(el('h3', null, '新入库'))
-      const btns = el('div', 'btns')
-      const bAll = el('button', 'btn ghost', '播放全部')
-      bAll.onclick = () => player.play(discover.newArrivals, 0)
-      btns.appendChild(bAll)
-      rh.appendChild(btns)
-      v.appendChild(rh)
-      v.appendChild(sectionTracks(discover.newArrivals, { menu: true, showAlbum: false }))
-    }
-
-    // 热门歌手（按曲目数降序，横向卡片网格）
-    if (discover.hotArtists && discover.hotArtists.length) {
-      const rh = el('div', 'row-head')
-      rh.appendChild(el('h3', null, '热门歌手'))
-      v.appendChild(rh)
-      const grid = el('div', 'grid')
-      grid.style.marginBottom = '24px'
-      for (const a of discover.hotArtists) {
-        const c = el('div', 'card')
-        c.appendChild(coverImg(a.coverTrackId ? { id: a.coverTrackId, hasCover: true } : null, 'cover round', a.name || ''))
-        c.appendChild(el('div', 't', a.name))
-        c.appendChild(el('div', 's', a.count + ' 首 · ' + a.albumCount + ' 张'))
-        c.onclick = () => { location.hash = '#/artist?singer=' + encodeURIComponent(a.name) }
-        grid.appendChild(c)
-      }
-      v.appendChild(grid)
-    }
-
-    // 最近播放（保留）
-    if (played.tracks && played.tracks.length) {
-      const rh = el('div', 'row-head')
-      rh.appendChild(el('h3', null, '最近播放'))
-      const playedBtns = el('div', 'btns')
-      const bAll = el('button', 'btn ghost')
-      bAll.innerHTML = SVG.play + '<span>播放全部</span>'
-      bAll.onclick = () => player.play(played.tracks, 0)
-      const bShuf = el('button', 'btn ghost')
-      bShuf.innerHTML = SVG.shuffle + '<span>随机播放</span>'
-      bShuf.onclick = () => player.shufflePlay(played.tracks)
-      playedBtns.appendChild(bAll); playedBtns.appendChild(bShuf)
-      rh.appendChild(playedBtns)
-      v.appendChild(rh)
-      const list = played.tracks.slice(0, 10)
-      v.appendChild(trackTable(list, { menu: true, noSelect: true, compact: true }))
-    }
     if (!stats.tracks) {
       const tip = el('div', 'empty', '曲库还是空的。到管理后台「音乐库」添加目录并扫描，或把音乐放进 NAS 共享目录后授权给本应用。')
       const a = el('a', 'btn primary')
@@ -859,6 +777,174 @@
       tip.appendChild(a)
       v.appendChild(tip)
     }
+  }
+
+  // ---------------- 为你推荐（首页入口卡片 + 详情页） ----------------
+  /** 推荐封面拼图：本地曲目走封面接口、在线曲目走源图，最多 4 张 */
+  function fyCollage(items, cls) {
+    const box = el('div', cls || 'fy-cov')
+    const list = (items || []).slice(0, 4)
+    if (list.length <= 1) box.classList.add('one')
+    if (!list.length) {
+      box.appendChild(el('div', 'fy-cov-ph', '♪'))
+      return box
+    }
+    for (const t of list) {
+      const seed = (t.name || '') + (t.singer || '')
+      if (t.kind === 'online') box.appendChild(picImg(t.pic, null, seed))
+      else box.appendChild(coverImg(t.hasCover ? { id: t.id, hasCover: true } : null, null, seed))
+    }
+    return box
+  }
+
+  /** 首页推荐区加载占位（与卡片同尺寸，数据到达后原地替换） */
+  function forYouSkeleton() {
+    const wrap = el('div', 'foryou')
+    for (let i = 0; i < 2; i++) {
+      const card = el('div', 'fy-card sk')
+      card.appendChild(el('div', 'fy-cov'))
+      const body = el('div', 'fy-body')
+      body.appendChild(el('div', 'sk-line'))
+      body.appendChild(el('div', 'sk-line short'))
+      card.appendChild(body)
+      wrap.appendChild(card)
+    }
+    return wrap
+  }
+
+  /** 渲染「为你推荐」两张入口卡片：表面是 UI 封面 + 推荐依据，点开进详情 */
+  async function paintForYou(box) {
+    const d = await api('/api/for-you')
+    box.innerHTML = ''
+    const rh = el('div', 'row-head')
+    rh.appendChild(el('h3', null, '为你推荐'))
+    rh.appendChild(el('div', 'fy-tip', '按本账户的收听习惯生成 · 每日更新'))
+    box.appendChild(rh)
+    const grid = el('div', 'foryou')
+    for (const mix of [d.daily, d.guess]) {
+      if (!mix || !(mix.tracks || []).length) continue
+      const card = el('div', 'fy-card')
+      card.appendChild(fyCollage(mix.cover))
+      const body = el('div', 'fy-body')
+      body.appendChild(el('div', 'fy-name', mix.name))
+      body.appendChild(el('div', 'fy-reason', mix.reason || ''))
+      const meta = []
+      if (mix.localCount) meta.push(mix.localCount + ' 首本地')
+      if (mix.onlineCount) meta.push(mix.onlineCount + ' 首在线')
+      body.appendChild(el('div', 'fy-meta', (meta.join(' · ') || '—') + ' · 点开看详情'))
+      card.appendChild(body)
+      card.onclick = () => { location.hash = '#/mix/' + mix.id }
+      grid.appendChild(card)
+    }
+    box.appendChild(grid)
+  }
+
+  /** 推荐详情表：本地行与在线行混排（列结构一致，避免错列） */
+  function mixTable(tracks) {
+    const table = el('table', 'tracks compact')
+    const thead = el('thead')
+    const htr = el('tr')
+    htr.appendChild(el('th', 'num', '#'))
+    htr.appendChild(el('th', 'cov', ''))
+    htr.appendChild(el('th', null, '歌曲'))
+    htr.appendChild(el('th', 'album-col', '专辑'))
+    htr.appendChild(el('th', 'love', ''))
+    htr.appendChild(el('th', 'dur', '时长'))
+    htr.appendChild(el('th', 'acts', ''))
+    thead.appendChild(htr)
+    table.appendChild(thead)
+    const tbody = el('tbody')
+    tracks.forEach((t, i) => {
+      tbody.appendChild(t.kind === 'online'
+        ? mixOnlineRow(t, tracks, i)
+        : trackRow(t, tracks, i, { noSelect: true, compact: true, menu: true }))
+    })
+    table.appendChild(tbody)
+    return table
+  }
+
+  /** 在线行：本地行右侧是「…」菜单，这里同样给「…」，列结构才对得齐 */
+  function mixOnlineRow(t, list, idx) {
+    const tr = el('tr', 'row')
+    if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
+    tr.appendChild(el('td', 'num', String(idx + 1)))
+    const tdCov = el('td', 'cov')
+    tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || '')))
+    tr.appendChild(tdCov)
+    const tdName = el('td')
+    tdName.appendChild(el('div', null, t.name))
+    tdName.appendChild(el('div', 'sub', (t.singer || '未知歌手') + ' · 在线'))
+    tr.appendChild(tdName)
+    tr.appendChild(el('td', 'album-col ell', t.album || '—'))
+    const love = el('td', 'love off')
+    const lb = el('button', 'iconbtn')
+    lb.innerHTML = SVG.heart
+    lb.title = '在线曲目暂不支持收藏'
+    lb.onclick = (e) => { e.stopPropagation(); toast('在线歌曲暂不支持收藏，可到手机端添加') }
+    love.appendChild(lb)
+    tr.appendChild(love)
+    tr.appendChild(el('td', 'dur', t.interval ? fmtDur(Number(t.interval) / 1000) : ''))
+    const acts = el('td', 'acts')
+    const wrap = el('span', 'more-wrap')
+    const mb = el('button', 'iconbtn', '…')
+    mb.onclick = (e) => {
+      e.stopPropagation()
+      popMenu(mb, [
+        ['▶ 立即播放', () => player.play(list, idx)],
+        ['⏭ 下一首播放', () => player.insertNext(t)],
+        ['💻 下载到本机', () => askDownload(asOnlineRows([t]), mb)],
+        ['☁️ 保存到云盘', () => saveToCloud(asOnlineRows([t]))],
+      ])
+    }
+    wrap.appendChild(mb)
+    acts.appendChild(wrap)
+    tr.appendChild(acts)
+    tr.onclick = () => player.play(list, idx)
+    return tr
+  }
+
+  // ---------------- 视图：推荐详情（今日推荐 / 猜你喜欢） ----------------
+  routes.mix = async (args) => {
+    setActiveNav('home')
+    const v = $('#view')
+    const kind = args[0] === 'guess' ? 'guess' : 'daily'
+    v.appendChild(skeletonRows(4))
+    const d = await api('/api/for-you')
+    v.querySelectorAll('.sk-wrap').forEach(s => s.remove())
+    const mix = (kind === 'guess' ? d.guess : d.daily) || { tracks: [] }
+    const tracks = mix.tracks || []
+
+    const hero = el('div', 'fy-hero')
+    hero.appendChild(fyCollage(mix.cover, 'fy-cov big'))
+    const box = el('div')
+    const crumb = el('div', 'crumb', '‹ 为你推荐')
+    crumb.onclick = () => { location.hash = '#/home' }
+    box.appendChild(crumb)
+    box.appendChild(el('h2', null, mix.name))
+    const bits = []
+    if (mix.reason) bits.push(mix.reason)
+    bits.push(tracks.length + ' 首（本地 ' + (mix.localCount || 0) + (mix.onlineCount ? ' + 在线 ' + mix.onlineCount : '') + '）')
+    box.appendChild(el('div', 'meta', bits.join(' · ')))
+    const btns = el('div', 'btns')
+    const pb = el('button', 'btn primary')
+    pb.innerHTML = SVG.play + '<span>播放全部</span>'
+    pb.onclick = () => player.play(tracks, 0)
+    const sb = shuffleBtn('随机播放')
+    sb.onclick = () => player.shufflePlay(tracks)
+    const ab = el('button', 'btn')
+    ab.textContent = '＋ 全部加到队列'
+    ab.onclick = () => { player.enqueue(tracks); toast('已加入 ' + tracks.length + ' 首') }
+    btns.appendChild(pb); btns.appendChild(sb); btns.appendChild(ab)
+    box.appendChild(btns)
+    hero.appendChild(box)
+    v.appendChild(hero)
+
+    if (!tracks.length) {
+      v.appendChild(el('div', 'empty', '还没有足够的数据生成推荐。多听几首（本地或在线的都算），这里会跟着变准。'))
+      return
+    }
+    v.appendChild(mixTable(tracks))
+    if (kind === 'daily') v.appendChild(el('div', 'fy-note', '今日推荐每天换一批，同一天内保持不变；「猜你喜欢」更贴近你最近在听的内容。'))
   }
 
   // ---------------- 视图：全部歌曲 ----------------
@@ -3663,6 +3749,8 @@ kuwo.cn/playlist_detail/280301309</pre>
       if (t.kind === 'online') {
         // 在线源：经 NAS 中转拉流（第三方直链不暴露给浏览器）
         this.audio.src = BASE + '/web/media/online/' + encodeURIComponent(t.source) + '/' + encodeURIComponent(t.rid) + '?k=' + encodeURIComponent(token)
+        // 听在线歌也算口味信号：曲库索引里没有这些曲目，单独记一份给推荐用
+        api('/api/played/online', { method: 'POST', body: { source: t.source, rid: t.rid, name: t.name, singer: t.singer, album: t.album } }).catch(() => {})
       } else {
         this.audio.src = mediaUrl('stream', t.id)
         api('/api/played', { method: 'POST', body: { trackId: t.id } }).catch(() => {})

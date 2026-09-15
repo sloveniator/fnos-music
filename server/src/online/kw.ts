@@ -6,8 +6,26 @@
 //   说明：仅用于 Web 播放器的在线搜索/试听；不做 VIP/无损解锁，纯公开内容。
 // ---------------------------------------------------------------------------
 
+import { decodeName } from '@/utils/common'
+
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
+/**
+ * 上游字段里混着两类脏字符，都要洗掉：
+ *   1) HTML 实体：`Baby&nbsp;Don&apos;t&nbsp;Hurt&nbsp;Me`
+ *   2) 「字面量 \uXXXX」：上游把 & 双重转义成 \u0026，JSON.parse 之后仍是这六个字符
+ * 不洗的话，搜索结果与推荐列表会把这些转义串原样显示出来。
+ */
+const cleanText = (raw: unknown): string =>
+  decodeName(
+    String(raw ?? '')
+      // 上游把 & 双重转义成 \\u0026（字符串里就是「反斜杠反斜杠 u0026」），
+      // 所以反斜杠要允许出现多个，否则会吃掉一层后留下「\&」
+      .replace(/\\+u([0-9a-fA-F]{4})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)))
+      // 兜底：双重转义被剥一层后残留的「\&」「\"」这类反斜杠
+      .replace(/\\([&,'"、])/g, '$1'),
+  ).replace(/\s+/g, ' ').trim()
 
 const SINGLE_RE = /('(?=(,\s*')))|('(?=:))|((?<=([:,]\s*))')|((?<={)')|('(?=}))/g
 
@@ -85,9 +103,9 @@ export const kwSearch = async (keyword: string, page: number, size: number): Pro
       return {
         source: 'kw',
         id: rid,
-        name: String(it.NAME || it.SONGNAME || '未知歌曲'),
-        singer: String(it.ARTIST || it.AARTIST || '未知歌手').replace(/&nbsp;/g, ' ').replace(/&/g, '、'),
-        album: String(it.ALBUM || '').replace(/&nbsp;/g, ' '),
+        name: cleanText(it.NAME || it.SONGNAME || '未知歌曲'),
+        singer: cleanText(it.ARTIST || it.AARTIST || '未知歌手').replace(/&/g, '、'),
+        album: cleanText(it.ALBUM || ''),
         intervalMs: (parseInt(String(it.DURATION ?? '0'), 10) || 0) * 1000,
         // web_albumpic_short 形如 120/s4s34/98/932410455.jpg；
         // 旧域名 img1.kuwo.cn 已停用（404），改用 sycdn 图床并把尺寸从 120 提到 240
@@ -128,8 +146,8 @@ export const kwSearchAlbums = async (keyword: string, page: number, size: number
     .map((it) => ({
       source: 'kw',
       id: String(it.albumid || it.id),
-      name: String(it.name || it.ALBUM || '未知专辑').replace(/&nbsp;/g, ' '),
-      creator: String(it.artist || it.aartist || '').replace(/&nbsp;/g, ' ').replace(/&/g, '、'),
+      name: cleanText(it.name || it.ALBUM || '未知专辑'),
+      creator: cleanText(it.artist || it.aartist || '').replace(/&/g, '、'),
       trackCount: parseInt(String(it.songnum ?? '0'), 10) || 0,
       pic: (() => {
         const p = String(it.img || it.hts_img || '')
@@ -154,8 +172,8 @@ export const kwSearchPlaylists = async (keyword: string, page: number, size: num
     .map((it) => ({
       source: 'kw',
       id: String(it.playlistid),
-      name: String(it.name || '未知歌单').replace(/&nbsp;/g, ' '),
-      creator: String(it.nickname || '').replace(/&nbsp;/g, ' '),
+      name: cleanText(it.name || '未知歌单'),
+      creator: cleanText(it.nickname || ''),
       trackCount: parseInt(String(it.songnum ?? '0'), 10) || 0,
       pic: (() => {
         const p = String(it.pic || it.hts_pic || '')

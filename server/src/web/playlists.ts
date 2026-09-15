@@ -266,15 +266,104 @@ export const recordPlayed = (userName: string, trackId: string): void => {
 
 /** 退出前刷盘全部用户的待落盘播放记录 */
 export const flushAllPlayed = (): void => {
-  for (const userName of [...playedCache.keys()]) {
+  const users = new Set([...playedCache.keys(), ...onlinePlayedCache.keys()])
+  for (const userName of users) {
     const t = playedTimers.get(userName)
     if (t) clearTimeout(t)
     playedTimers.delete(userName)
     flushPlayed(userName)
+    const t2 = onlinePlayedTimers.get(userName)
+    if (t2) clearTimeout(t2)
+    onlinePlayedTimers.delete(userName)
+    flushPlayedOnline(userName)
   }
 }
 
 export const getPlayed = (userName: string): TrackInfo[] => {
   const ids = loadPlayed(userName)
   return ids.map(id => getTenantTrack(userName, id)).filter(Boolean) as TrackInfo[]
+}
+
+// ---------------------------------------------------------------------------
+// 在线播放记录（Web 端本地记录，每用户一份，不参与同步）
+//   在线曲目不在曲库索引里，但「听的是谁」是口味画像的关键信号，所以单独存一份
+//   { source, rid, name, singer, album, at }。写入防抖与本地播放记录一致，
+//   避免每次播放都整份重写。
+// ---------------------------------------------------------------------------
+
+export interface OnlinePlayed {
+  source: string
+  rid: string
+  name: string
+  singer: string
+  album: string
+  at: number
+}
+
+const onlinePlayedFile = (userName: string): string =>
+  path.join(global.lx.userPath, getUserDirname(userName), 'web-played-online.json')
+
+const ONLINE_PLAYED_LIMIT = 100
+const onlinePlayedCache = new Map<string, OnlinePlayed[]>()
+const onlinePlayedTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+const loadPlayedOnline = (userName: string): OnlinePlayed[] => {
+  const hit = onlinePlayedCache.get(userName)
+  if (hit) return hit
+  let list: OnlinePlayed[] = []
+  try {
+    const data = JSON.parse(fs.readFileSync(onlinePlayedFile(userName), 'utf8'))
+    if (Array.isArray(data?.list)) {
+      list = data.list.filter((x: any) => x && typeof x.rid == 'string' && typeof x.source == 'string')
+    }
+  } catch {}
+  onlinePlayedCache.set(userName, list)
+  return list
+}
+
+const flushPlayedOnline = (userName: string): void => {
+  const list = onlinePlayedCache.get(userName) ?? []
+  try {
+    fs.mkdirSync(path.dirname(onlinePlayedFile(userName)), { recursive: true })
+    fs.writeFileSync(onlinePlayedFile(userName) + '.tmp', JSON.stringify({ version: 1, list }))
+    fs.renameSync(onlinePlayedFile(userName) + '.tmp', onlinePlayedFile(userName))
+  } catch (err: any) {
+    console.error('flush online played failed:', err?.message)
+  }
+}
+
+/** 在线曲目开始播放时记一笔（同一首再听置顶去重） */
+export const recordPlayedOnline = (userName: string, item: Omit<OnlinePlayed, 'at'>): void => {
+  if (!item?.source || !item?.rid) return
+  const prev = loadPlayedOnline(userName)
+  const rest = prev.filter(x => !(x.source == item.source && x.rid == item.rid))
+  const next = [{ ...item, at: Date.now() }, ...rest].slice(0, ONLINE_PLAYED_LIMIT)
+  onlinePlayedCache.set(userName, next)
+  const old = onlinePlayedTimers.get(userName)
+  if (old) clearTimeout(old)
+  const t = setTimeout(() => {
+    onlinePlayedTimers.delete(userName)
+    flushPlayedOnline(userName)
+  }, PLAYED_FLUSH_MS)
+  t.unref?.()
+  onlinePlayedTimers.set(userName, t)
+}
+
+/** 在线播放记录，最近在前 */
+export const getPlayedOnline = (userName: string): OnlinePlayed[] => loadPlayedOnline(userName)
+
+/**
+ * 口味画像用：一次取齐「我喜欢」与全部自建歌单的曲目（原始 MusicInfo，含 singer/album）。
+ * 只读不改；单只歌单读失败不影响整体画像。
+ */
+export const tasteLibrary = async(userName: string): Promise<{ loved: LX.Music.MusicInfo[], playlists: LX.Music.MusicInfo[][] }> => {
+  const userSpace = getUserSpace(userName)
+  const data = await getListDataStable(userName)
+  const playlists: LX.Music.MusicInfo[][] = []
+  for (const item of data.userList) {
+    try {
+      playlists.push(await userSpace.listManage.listDataManage.getListMusics(item.id))
+    } catch { /* 跳过读不出来的歌单 */ }
+  }
+  return { loved: data.loveList, playlists }
 }
