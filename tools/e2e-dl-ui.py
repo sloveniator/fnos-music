@@ -5,8 +5,8 @@
 跨源聚合搜索（同一首歌合并成一行，行内下拉可切换下载源），队列改为常驻区块。
 
 验证：
-  1. 平台 Tab / 页内 Tab 全部消失，搜索框只此一个
-  2. Hero：搜索框 + 已启用平台提示 + 容量统计行
+  1. 平台 Tab / 页内 Tab 全部消失，搜索框只此一个，平台清单与说明段落不再占版面
+  2. Hero：搜索框平时窄条（≤420px）、点击输入后展开；页头只有云盘容量一项
   3. 回车搜索走跨源聚合：结果行 > 0，统计行含「N 首」与各平台命中数
   4. 同曲多源行出现「源切换下拉」，切换后时长/源随之变化（不重绘整表）
   5. 全选 → 已选计数 = 行数、批量下载按钮可用（不真入队，避免污染队列）
@@ -72,7 +72,12 @@ def main():
             chips: [...v.querySelectorAll('.chip, .chips button')].map(c => c.textContent.trim()),
             hasQueue: !!v.querySelector('.dl-qsec') && !!v.querySelector('#dl-queue'),
             tip: (v.querySelector('.dl-hero-tip') || {}).textContent || '',
+            tipHidden: !!(v.querySelector('.dl-hero-tip') || {}).hidden,
             meta: (v.querySelector('#dl-meta') || {}).textContent || '',
+            metaTitle: (v.querySelector('#dl-meta .dm-quota') || {}).title || '',
+            ph: (v.querySelector('.dl-hero-bar input') || {}).placeholder || '',
+            inpTitle: (v.querySelector('.dl-hero-bar input') || {}).title || '',
+            resTxt: (v.querySelector('#dl-res') || {}).textContent || '',
             qhead: (v.querySelector('.dl-qtitle') || {}).textContent || '',
             qcount: (v.querySelector('#dl-qcount') || {}).textContent || '',
             platformMentions: ['酷我', '网易', '咪咕', '汽水'].filter(n => txt.includes(n)).length,
@@ -87,11 +92,32 @@ def main():
         check('旧的「搜索 / 下载队列」Tab 文案已消失', sk['oldTabLabels'] is False)
         check('平台 Tab 已移除（搜索区无 chip 按钮）', '酷我' not in sk['chips'] and '网易云音乐' not in sk['chips'],
               'chips=%s' % sk['chips'])
-        check('已启用平台改为提示文案', all(n in sk['tip'] for n in ['酷我', '网易', '咪咕', '汽水']),
-              sk['tip'][:80])
-        check('容量/统计行仍在', ('首' in sk['meta']) and ('GB' in sk['meta']), sk['meta'][:80])
+        check('平台清单不再占版面（无提示/说明文案）',
+              sk['tipHidden'] and not sk['tip'] and sk['platformMentions'] == 0,
+              'tipHidden=%s tip=%r 平台名出现=%d 次' % (sk['tipHidden'], sk['tip'][:60], sk['platformMentions']))
+        check('未搜索时结果区不放说明段子', sk['resTxt'].strip() == '', repr(sk['resTxt'][:60]))
+        check('搜索框 placeholder 简短、详细说明进 tooltip',
+              sk['ph'] == '搜索歌曲 / 歌手' and '一次搜索覆盖' in sk['inpTitle'] and '合并' in sk['inpTitle'],
+              'ph=%r tooltip=%r' % (sk['ph'], sk['inpTitle'][:50]))
+        check('页头只显示云盘容量（队列数量/目录已撤走）',
+              'GB' in sk['meta'] and '首' not in sk['meta'] and '📁' not in sk['meta'],
+              sk['meta'][:80])
+        check('下载目录移进容量 tooltip', '下载保存到' in sk['metaTitle'],
+              sk['metaTitle'].replace('\n', ' | ')[:90])
         check('队列区块常驻可见', sk['hasQueue'] and sk['qhead'] == '下载队列', sk['qcount'])
         check('页面无 JS 报错', not errs, str(errs)[:160])
+
+        print('一之二、搜索框：平时窄、点了展开')
+        idle = page.evaluate("() => Math.round(document.querySelector('.dl-hero-bar').getBoundingClientRect().width)")
+        page.click('.dl-hero-bar input')
+        page.wait_for_timeout(500)
+        grown = page.evaluate("() => Math.round(document.querySelector('.dl-hero-bar').getBoundingClientRect().width)")
+        check('平时是窄条（≤420px）', idle <= 421, 'idle=%dpx' % idle)
+        check('点击输入后展开变宽', grown > idle + 100, '%d → %d px' % (idle, grown))
+        page.evaluate("() => document.querySelector('.dl-hero-bar input').blur()")
+        page.wait_for_timeout(500)
+        back = page.evaluate("() => Math.round(document.querySelector('.dl-hero-bar').getBoundingClientRect().width)")
+        check('失焦后收回窄条', abs(back - idle) <= 2, '%d → %d px' % (grown, back))
         page.screenshot(path=SHOT_DESK, full_page=False)
 
         print('二、跨源聚合搜索')

@@ -811,13 +811,8 @@ img.ph {
 /* ============ 下载中心：精简头部（原 banner/目录条/容量卡/统计卡占视口 46%） ============ */
 .dl-otabs { margin: 0 0 10px; }
 .otab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 9px; font-size: 11px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #4f8cff, #7b5cff); vertical-align: middle; }
-.dl-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 14px; padding: 0 2px 10px; margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, .06); font-size: 12.5px; color: var(--muted); }
-.dm-i { white-space: nowrap; }
-.dm-strong { color: #fff; font-weight: 600; }
-.dm-run { color: #60a5fa; }
-.dm-ok { color: #4ade80; }
-.dm-bad { color: #f87171; }
-.dm-dir { cursor: help; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
+/* 页头只放云盘容量（队列数量在「下载队列」标题上，目录在容量的 tooltip 里） */
+.dl-head-quota { display: flex; align-items: center; gap: 10px; margin-left: auto; font-size: 12.5px; color: var(--muted); }
 .dm-quota { display: inline-flex; align-items: center; gap: 7px; }
 .dm-q-bar { display: inline-block; width: 56px; height: 5px; border-radius: 99px; background: rgba(255, 255, 255, .1); overflow: hidden; }
 .dm-q-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #4f9dff, #7bd38f); }
@@ -1153,15 +1148,17 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 
 
 /* ---- 下载中心：搜索 Hero + 常驻队列区块（去掉平台 Tab / 搜索 Tab） ---- */
-.dl-hero { background: linear-gradient(135deg, rgba(79,140,255,.10), rgba(124,92,255,.06)); border: 1px solid rgba(79,140,255,.20); border-radius: 16px; padding: 14px 16px 12px; margin: 0 0 18px; }
-.dl-hero-bar { display: flex; align-items: center; gap: 10px; background: rgba(9,12,20,.55); border: 1px solid var(--line-soft); border-radius: 12px; padding: 4px 5px 4px 13px; transition: border-color .15s, box-shadow .15s; }
+/* 外层卡片去掉：搜索框平时就一小条（420px），点进来才展开到满宽 */
+.dl-hero { margin: 0 0 18px; }
+.dl-hero-bar { display: flex; align-items: center; gap: 10px; max-width: 420px; background: rgba(9,12,20,.55); border: 1px solid var(--line-soft); border-radius: 12px; padding: 4px 5px 4px 13px; transition: max-width .24s ease, border-color .15s, box-shadow .15s; }
+.dl-hero:focus-within .dl-hero-bar { max-width: 100%; }
 .dl-hero-bar:focus-within { border-color: rgba(79,140,255,.6); box-shadow: 0 0 0 3px rgba(79,140,255,.10); }
 .dl-hero-ic { font-size: 14px; opacity: .7; }
 .dl-hero-bar input { flex: 1; min-width: 0; border: none; background: transparent; color: #fff; font-size: 14px; padding: 9px 2px; outline: none; }
 .dl-hero-bar input::placeholder { color: #64748b; }
 .dl-hero-btn { padding: 8px 22px; border-radius: 9px; }
-.dl-hero-tip { font-size: 12px; color: var(--muted); margin: 9px 2px 0; line-height: 1.5; }
-.dl-hero .dl-meta { margin-top: 10px; }
+/* 只在「全部在线源被停用」时出现的一行告警 */
+.dl-hero-tip { font-size: 12px; color: #fbbf24; margin: 9px 2px 0; line-height: 1.5; }
 .dl-res-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin: 0 0 10px 2px; }
 .dl-res-q { color: #fff; font-weight: 600; font-size: 13px; }
 .dl-res-n { color: #cbd5e1; }
@@ -1181,7 +1178,6 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 .dl-qcount.busy { color: #7dd3fc; }
 .dl-qcount.has-bad { color: #fca5a5; }
 @media (max-width: 720px) {
-  .dl-hero { padding: 12px 12px 10px; border-radius: 14px; }
   .dl-hero-btn { padding: 8px 14px; }
   .dl-hero-tip { margin-top: 8px; }
   .dl-res-info { gap: 8px; }

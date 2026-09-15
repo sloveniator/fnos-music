@@ -2227,11 +2227,6 @@ kuwo.cn/playlist_detail/280301309</pre>
   let dlStatsCache = null
   let dlMetaLast = 0
 
-  function shortDir(p) {
-    if (!p) return ''
-    const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
-    return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/')
-  }
   /** 队列区块统计（共 N 项 · N 下载中 · N 失败） */
   function paintDlBadge() {
     const box = document.getElementById('dl-qcount')
@@ -2244,7 +2239,11 @@ kuwo.cn/playlist_detail/280301309</pre>
     box.textContent = bits.join(' · ')
     box.className = 'dl-qcount' + (s.downloading ? ' busy' : '') + (s.failed ? ' has-bad' : '')
   }
-  /** 拉取队列统计 / 配额 / 下载目录，渲染成单行 meta */
+  /**
+   * 拉取队列统计 / 配额 / 下载目录。
+   * 页头（#dl-meta）只显示**云盘空间容量**一项 —— 队列数量在「下载队列」标题上、
+   * 下载目录放进容量条的 tooltip，别的信息不往页头堆。
+   */
   async function refreshDlMeta() {
     dlMetaLast = Date.now()
     const box = document.getElementById('dl-meta')
@@ -2258,25 +2257,9 @@ kuwo.cn/playlist_detail/280301309</pre>
     if (dir) dlDir = { current: dir.current || '', dirs: dir.dirs || [], authed: dir.authed || [], userDir: dir.userDir || '', autoAssigned: !!dir.autoAssigned }
     dlQuota = quota
     box.innerHTML = ''
-    const add = (cls, txt, title) => {
-      const n = el('span', cls, txt)
-      if (title) n.title = title
-      box.appendChild(n)
-      return n
-    }
-    if (stats) {
-      add('dm-i dm-strong', stats.total + ' 首')
-      if (stats.downloading) add('dm-i dm-run', stats.downloading + ' 下载中')
-      if (stats.done) add('dm-i dm-ok', stats.done + ' 完成')
-      if (stats.failed) add('dm-i dm-bad', stats.failed + ' 失败')
-      add('dm-i', fmtBytes(stats.bytes))
-    } else {
-      add('dm-i', '统计不可用')
-    }
-    const dirPath = dlDir.current || dlDir.userDir || ''
-    if (dirPath) add('dm-i dm-dir', '📁 ' + shortDir(dirPath), '下载目录：' + dirPath + (dlDir.autoAssigned ? '（自动分配）' : ''))
     if (quota && quota.effectiveGb) {
       const gb = 1024 * 1024 * 1024
+      const used = (quota.usedBytes / gb).toFixed(2)
       const pct = Math.min(100, (quota.usedBytes / gb) / Math.max(quota.effectiveGb, 0.0001) * 100)
       const q = el('span', 'dm-quota')
       const bar = el('span', 'dm-q-bar')
@@ -2286,9 +2269,14 @@ kuwo.cn/playlist_detail/280301309</pre>
       fill.style.width = pct.toFixed(1) + '%'
       bar.appendChild(fill)
       q.appendChild(bar)
-      q.appendChild(el('span', 'dm-q-txt', (quota.usedBytes / gb).toFixed(2) + ' / ' + quota.effectiveGb + ' GB'))
-      q.title = quota.note || '存储配额'
+      q.appendChild(el('span', 'dm-q-txt', used + ' / ' + quota.effectiveGb + ' GB'))
+      const dirPath = dlDir.current || dlDir.userDir || ''
+      q.title = '云盘空间 ' + used + ' / ' + quota.effectiveGb + ' GB'
+        + (dirPath ? '\n下载保存到：' + dirPath + (dlDir.autoAssigned ? '（自动分配）' : '') : '')
+        + (quota.note ? '\n' + quota.note : '')
       box.appendChild(q)
+    } else {
+      box.appendChild(el('span', 'dm-q-txt', '容量不可用'))
     }
     paintDlBadge()
   }
@@ -2296,24 +2284,29 @@ kuwo.cn/playlist_detail/280301309</pre>
   const renderDlCenter = async (v) => {
     if (dlSse) { try { dlSse.close() } catch {} dlSse = null }
     v.innerHTML = ''
-    v.appendChild(el('h2', 'page', '下载中心'))
+    // ---- 页头：标题 + 云盘空间容量（页头只有这一项信息） ----
+    const head = el('div', 'page-head')
+    head.appendChild(el('h2', 'page', '下载中心'))
+    const metaBar = el('div', 'dl-head-quota'); metaBar.id = 'dl-meta'
+    head.appendChild(metaBar)
+    v.appendChild(head)
 
-    // ---- 顶部：搜索 Hero（搜索框常驻，不再有「搜索」Tab 与平台 Tab） ----
+    // ---- 搜索框：平时一小条，点进来（focus）才展开 ----
     const hero = el('div', 'dl-hero')
     const bar = el('div', 'dl-hero-bar')
     bar.appendChild(el('span', 'dl-hero-ic', '🔍'))
     const inp = el('input')
     inp.type = 'search'
-    inp.placeholder = '搜索歌曲 / 歌手，自动搜全平台并合并'
+    inp.placeholder = '搜索歌曲 / 歌手'
+    inp.title = '一次搜索覆盖全部已启用平台；同一首歌自动合并成一行，可在曲目上切换下载源'
     inp.value = dlState.q
     inp.maxLength = 100
     const btn = el('button', 'btn primary dl-hero-btn', '搜索')
     bar.appendChild(inp); bar.appendChild(btn)
     hero.appendChild(bar)
-    const tip = el('div', 'dl-hero-tip'); tip.id = 'dl-hero-tip'
+    // 只在「所有在线源都被停用」时才出现的一行告警，平时不占位
+    const tip = el('div', 'dl-hero-tip'); tip.id = 'dl-hero-tip'; tip.hidden = true
     hero.appendChild(tip)
-    const metaBar = el('div', 'dl-meta'); metaBar.id = 'dl-meta'
-    hero.appendChild(metaBar)
     v.appendChild(hero)
 
     const res = el('div', 'dl-res'); res.id = 'dl-res'
@@ -2330,10 +2323,11 @@ kuwo.cn/playlist_detail/280301309</pre>
     v.appendChild(qsec)
 
     function paintHeroTip() {
-      const enabled = onlineSourcesCache.filter(s => s.enabled)
-      tip.textContent = enabled.length
-        ? '一次搜索覆盖 ' + enabled.map(s => s.name).join(' · ') + '；同一首歌自动合并成一行，可在曲目上切换下载源'
-        : '⚠ 全部在线源已在管理后台停用，请到「音源与代理」页开启'
+      // 平台清单这类说明不占版面：只在全部源被停用时提示一句
+      const list = onlineSourcesCache || []
+      const none = list.length > 0 && !list.some(s => s.enabled)
+      tip.hidden = !none
+      tip.textContent = none ? '⚠ 全部在线源已在管理后台停用，请到「音源与代理」页开启' : ''
     }
     paintHeroTip()
     // 进页面时刷新在线源（init 快照不可靠）
@@ -2369,10 +2363,8 @@ kuwo.cn/playlist_detail/280301309</pre>
 
     function paintDlResults() {
       res.innerHTML = ''
-      if (!dlState.q) {
-        res.appendChild(el('div', 'dl-res-empty', '输入关键词，一次搜遍全部已启用平台；同一首歌只占一行，可在曲目上切换下载源'))
-        return
-      }
+      // 未搜索时不放任何说明文案：搜索框的 placeholder + tooltip 已经说清楚了
+      if (!dlState.q) return
       const info = el('div', 'dl-res-info')
       info.appendChild(el('span', 'dl-res-q', '「' + dlState.q + '」'))
       info.appendChild(el('span', 'dl-res-n', dlState.list.length + ' 首'))
