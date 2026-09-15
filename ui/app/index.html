@@ -21,21 +21,24 @@
       <h1>古四音乐</h1>
       <p class="login-sub">NAS 私人音乐库</p>
       <label>用户名<input id="login-name" autocomplete="username" required></label>
-      <label>连接码<input id="login-pass" type="password" autocomplete="current-password" required></label>
+      <label>密码<input id="login-pass" type="password" autocomplete="current-password" required></label>
       <button type="submit" class="primary" id="login-btn">登 录</button>
       <p id="login-err" class="login-err"></p>
       <p class="login-hint" id="login-hint"></p>
+      <p class="login-switch" id="to-register-wrap" hidden>还没有账号？<button type="button" id="to-register">立即注册</button></p>
     </form>
     <form id="register-form" class="login-card" hidden>
       <img src="assets/icon.png" alt="" class="login-logo">
       <h1>创建账户</h1>
-      <p class="login-sub">首个用户注册后自动开启服务</p>
+      <p class="login-sub">账号 + 密码 + 邮箱，注册后自动登录</p>
       <label>用户名（1-32 位字母/数字/_）<input id="reg-name" autocomplete="username" minlength="1" maxlength="32" pattern="[A-Za-z0-9_]+" required></label>
-      <label>密码（至少 6 位）<input id="reg-pass" type="password" autocomplete="new-password" minlength="6" required></label>
-      <label>确认密码<input id="reg-pass2" type="password" autocomplete="new-password" minlength="6" required></label>
+      <label>邮箱<input id="reg-email" type="email" autocomplete="email" maxlength="128" placeholder="you@example.com" required></label>
+      <label>密码（6-128 位，含大小写字母、数字与符号）<input id="reg-pass" type="password" autocomplete="new-password" minlength="6" maxlength="128" required></label>
+      <label>确认密码<input id="reg-pass2" type="password" autocomplete="new-password" minlength="6" maxlength="128" required></label>
       <button type="submit" class="primary" id="reg-btn">注 册 并 登 录</button>
       <p id="reg-err" class="login-err"></p>
       <p class="login-hint">注册后可下载最多 1GB 网盘容量，每年 +2GB，最高 10GB</p>
+      <p class="login-switch" id="to-login-wrap" hidden>已有账号？<button type="button" id="to-login">返回登录</button></p>
     </form>
   </div>
 

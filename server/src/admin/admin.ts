@@ -2,11 +2,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { getUserSpace, releaseUserSpace } from '@/user'
+import { getUserSpace, releaseUserSpace, getUserDirname } from '@/user'
 import { adminCreateUser, adminRemoveUser, adminSetPassword, loadDynamicUsers } from './store'
 import { handleLibraryRequest, handleLibraryAdmin } from './library'
 import { handleWebRequest } from '@/web/api'
-import { findRegisteredUser, updateUserMaxGb } from '@/user/register'
+import {
+  findRegisteredUser, updateUserMaxGb, listRegisteredUsers,
+  removeRegisteredUser, setRegisteredPassword,
+} from '@/user/register'
 import { getQuota } from '@/user/quota'
 import { setListBroadcaster } from '@/web/playlists'
 
@@ -17,7 +20,7 @@ import { setListBroadcaster } from '@/web/playlists'
 // 登录限流：与 Web 端共用封禁器（独立桶前缀），防局域网弱密码爆破
 // ---------------------------------------------------------------------------
 
-import { loginBlocked, loginFail, loginSuccess } from '@/web/session'
+import { loginBlocked, loginFail, loginSuccess, dropUserSessions } from '@/web/session'
 
 const clientIp = (req: http.IncomingMessage): string => {
   if (global.lx.config['proxy.enabled']) {
@@ -255,7 +258,11 @@ const handleApi = async(req: http.IncomingMessage, res: http.ServerResponse, url
       message: st.message,
       address: st.address,
       connections: hooks.getConnectionCount(),
-      users: global.lx.config.users.length,
+      // 内置同步用户 + 网页自助注册用户（同名只算一个）
+      users: new Set([
+        ...global.lx.config.users.map(u => u.name),
+        ...listRegisteredUsers().map(u => u.name),
+      ]).size,
       serverName: global.lx.config.serverName,
       version: '1.0.0',
       uptime: Math.floor(process.uptime()),
@@ -263,13 +270,24 @@ const handleApi = async(req: http.IncomingMessage, res: http.ServerResponse, url
     return true
   }
 
+  // 用户列表 = 内置（config.js / admin-users.json）+ 网页自助注册（users.json）
+  //   source: 'builtin' 内置同步用户（用户名 + 密码，手机端同步用）
+  //           'web'     网页注册用户（账号 + 密码 + 邮箱，各自独立曲库与配额）
   if (method == 'GET' && p == '/admin/api/users') {
-    const users = await Promise.all(global.lx.config.users.map(u =>
+    const builtin = await Promise.all(global.lx.config.users.map(u =>
       userDeviceInfo(u.name)
-        .then(devices => ({ name: u.name, deviceCount: devices.length }))
-        .catch(() => ({ name: u.name, deviceCount: 0 }))
+        .then(devices => ({ name: u.name, deviceCount: devices.length, email: '', source: 'builtin' }))
+        .catch(() => ({ name: u.name, deviceCount: 0, email: '', source: 'builtin' }))
     ))
-    json(res, 200, { users })
+    const builtinNames = new Set(global.lx.config.users.map(u => u.name))
+    const web = await Promise.all(listRegisteredUsers()
+      .filter(u => !builtinNames.has(u.name))
+      .map(u =>
+        userDeviceInfo(u.name)
+          .then(devices => ({ name: u.name, deviceCount: devices.length, email: u.email ?? '', source: 'web' }))
+          .catch(() => ({ name: u.name, deviceCount: 0, email: u.email ?? '', source: 'web' }))
+      ))
+    json(res, 200, { users: [...builtin, ...web] })
     return true
   }
 
@@ -297,7 +315,15 @@ const handleApi = async(req: http.IncomingMessage, res: http.ServerResponse, url
     if (method == 'DELETE' && !rest) {
       try {
         hooks.kickUser(name)
-        adminRemoveUser(name, url.searchParams.get('purge') == '1')
+        dropUserSessions(name)
+        const purge = url.searchParams.get('purge') == '1'
+        if (!global.lx.config.users.some(u => u.name == name)) {
+          // 网页自助注册用户：从 users.json 摘掉（内置用户走 adminRemoveUser）
+          if (!removeRegisteredUser(name)) throw new Error('用户不存在')
+          if (purge) fs.rmSync(path.join(global.lx.userPath, getUserDirname(name)), { recursive: true, force: true })
+        } else {
+          adminRemoveUser(name, purge)
+        }
         json(res, 200, { success: true })
       } catch (err: any) {
         json(res, 400, { message: err.message })
@@ -313,8 +339,16 @@ const handleApi = async(req: http.IncomingMessage, res: http.ServerResponse, url
         json(res, 400, { message: 'invalid body' })
         return true
       }
+      const pwd = String(body.password ?? '')
       try {
-        adminSetPassword(name, String(body.password ?? ''))
+        if (!global.lx.config.users.some(u => u.name == name)) {
+          // 网页注册用户：密码是 scrypt 哈希，重设后踢掉旧会话
+          if (pwd.trim().length < 6) throw new Error('密码至少 6 位')
+          if (!await setRegisteredPassword(name, pwd)) throw new Error('用户不存在')
+          dropUserSessions(name)
+        } else {
+          adminSetPassword(name, pwd)
+        }
         json(res, 200, { success: true })
       } catch (err: any) {
         json(res, 400, { message: err.message })

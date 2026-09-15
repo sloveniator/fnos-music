@@ -14,8 +14,11 @@
   5. 在线行有「在线」标记与「…」菜单（下载到本机 / 保存到云盘）
   6. 桌面两卡并排、窄屏单列，无横向溢出
 """
+import glob
 import json
+import os
 import sys
+import time
 import urllib.request
 from playwright.sync_api import sync_playwright
 
@@ -50,6 +53,29 @@ def api(path, token=None, method='GET', body=None):
         return json.loads(r.read().decode())
 
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def online_played_names(timeout=6.0):
+    """读服务端「在线播放」口味信号库（在线曲目不在曲库索引里，不进本地播放历史）。
+
+    落盘有 2s 防抖，所以轮询等待；返回最近的曲名列表（最近在前）。
+    """
+    pat = os.path.join(ROOT, 'server', 'data', 'users', USER + '_*', 'web-played-online.json')
+    deadline = time.time() + timeout
+    while True:
+        for f in glob.glob(pat):
+            try:
+                data = json.load(open(f, encoding='utf-8'))
+            except Exception:
+                continue
+            if isinstance(data.get('list'), list):
+                return [x.get('name') or '' for x in data['list']]
+        if time.time() > deadline:
+            return []
+        time.sleep(0.4)
+
+
 def web_token():
     req = urllib.request.Request(BASE + '/web/login', method='POST')
     req.add_header('Content-Type', 'application/json')
@@ -73,6 +99,28 @@ def goto(page, h, wait=900):
 
 
 VIEW_TEXT = "() => document.querySelector('#view').innerText"
+
+
+def check_rec_playlists_daily(token, page):
+    """推荐歌单：当天固定（同日多次请求一致），列表非空、卡片铺满"""
+    a = api('/api/online/rec-playlists?source=wy&limit=12', token)['data']['list']
+    b = api('/api/online/rec-playlists?source=wy&limit=12', token)['data']['list']
+    ids_a = [x['id'] for x in a]
+    ids_b = [x['id'] for x in b]
+    check('推荐歌单当天固定（同一天两次请求完全一致）',
+          bool(ids_a) and ids_a == ids_b, '%d 张' % len(ids_a))
+    check('推荐歌单每张都有名字与封面字段',
+          all(x['name'] and 'id' in x for x in a), ' | '.join(x['name'][:10] for x in a[:3]))
+    try:
+        page.wait_for_selector('.rec-grid .card', timeout=25000)
+    except Exception:
+        pass
+    cards = page.query_selector_all('.rec-grid .card')
+    check('首页「推荐歌单」铺出当天这批卡片', len(cards) == len(ids_a),
+          'DOM=%d API=%d' % (len(cards), len(ids_a)))
+    names = page.eval_on_selector_all('.rec-grid .card .t', 'els => els.map(e => e.textContent.trim())')
+    check('首页推荐歌单顺序与接口一致（每日轮换的当天顺序）', names == [x['name'] for x in a],
+          ' | '.join(names[:2]))
 
 
 def main():
@@ -115,6 +163,7 @@ def main():
         for gone in ('新入库', '热门歌手', '最近播放'):
             check('首页已删掉「%s」' % gone, gone not in body)
         check('推荐歌单保留', '推荐歌单' in body)
+        check_rec_playlists_daily(token, page)
 
         print('\n— 2. 为你推荐卡片 —')
         try:
@@ -141,7 +190,12 @@ def main():
               'imgs=%d loaded=%d' % (len(imgs), sum(1 for i in imgs if i['n'])))
         check('卡片里没有残留拼图占位符（♪）',
               page.query_selector('.foryou-slot .fy-cov-ph') is None)
-        check('首页推荐区有说明（按账户口味 · 每日更新）', '按本账户的收听习惯生成' in body)
+        # 用户要求：删掉「按本账户的收听习惯生成 · 每日更新」说明与空曲库引导，首页只留内容
+        check('推荐区不再有「按本账户的收听习惯生成 · 每日更新」说明',
+              '按本账户的收听习惯生成' not in body and page.query_selector('.fy-tip') is None)
+        check('首页不再有「曲库还是空的」提示与「去管理后台」引导',
+              '曲库还是空的' not in body and '去管理后台' not in body
+              and 'NAS 共享目录' not in body)
         page.screenshot(path='tools/home-foryou-desktop.png')
 
         print('\n— 3. 点开 → 歌曲详情 —')
@@ -171,10 +225,18 @@ def main():
         check('点「播放全部」底栏起播', page.evaluate("() => { const p = document.getElementById('player'); return getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().height > 40 }"))
         np_name = page.evaluate("() => document.getElementById('np-name').textContent.trim()")
         check('底栏曲名 = 列表第一首', np_name == first_name, '底栏=%s 首行=%s' % (np_name, first_name))
-        played = api('/api/played', token)['data']['tracks']
-        check('服务端播放历史记到这一首（口味画像的输入）',
-              bool(played) and played[0]['name'] == first_name and played[0]['singer'],
-              (played[0]['name'] + ' — ' + played[0]['singer']) if played else '无')
+        row0 = (api('/api/for-you', token)['data']['daily']['tracks'] or [{}])[0]
+        if row0.get('kind') == 'online':
+            # 在线曲目走单独的口味信号库：曲库索引里没有它们，本地播放历史里也不会有
+            names = online_played_names()
+            check('在线播放记进口味信号库（web-played-online.json 最近一条 = 这一首）',
+                  bool(names) and names[0] == first_name,
+                  ('最近一条 = ' + names[0]) if names else '库为空')
+        else:
+            played = api('/api/played', token)['data']['tracks']
+            check('本地曲目播放记进服务端播放历史（口味画像的输入）',
+                  bool(played) and played[0]['name'] == first_name and played[0]['singer'],
+                  (played[0]['name'] + ' — ' + played[0]['singer']) if played else '无')
 
         print('\n— 5. 猜你喜欢 + 在线行 —')
         goto(page, '#/mix/guess', 1500)

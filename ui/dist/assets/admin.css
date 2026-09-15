@@ -168,7 +168,9 @@ textarea { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Reg
 .table th.cov, .table td.cov { width: 54px; }
 .table .cov-img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, #262d3f, #1a1f2e); }
 .table .t-name { font-weight: 600; }
-.table .t-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.table .t-sub { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.table .t-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 99px;
+  background: rgba(79,140,255,.16); color: var(--accent); font-size: 11px; font-weight: 600; vertical-align: middle; }
 .table .row-acts { display: flex; gap: 6px; flex-wrap: wrap; }
 .batch-bar { display: flex; align-items: center; gap: 12px; padding: 8px 2px; color: var(--muted); font-size: 13px; }
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px 0 4px; color: var(--muted); font-size: 13px; }

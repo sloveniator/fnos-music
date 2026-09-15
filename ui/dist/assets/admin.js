@@ -177,7 +177,7 @@ const loadOverview = async () => {
       statCard('运行时长', Math.floor((s.uptime || 0) / 60) + ' 分钟', 'up'),
       statCard('服务地址', esc(s.address || '—'), 'addr'),
       statCard('连接设备', String(s.connections ?? 0) + ' 台', 'conn'),
-      statCard('同步用户', String(s.users ?? 0) + ' 个', 'users'),
+      statCard('用户', String(s.users ?? 0) + ' 个', 'users'),
     ].join('')
     // 曲库统计卡片
     $('#lib-cards').innerHTML = [
@@ -213,7 +213,7 @@ const loadOverview = async () => {
 const statCard = (label, value, cls) =>
   '<div class="stat"><span>' + esc(label) + '</span><b class="st-' + cls + '">' + value + '</b></div>'
 
-// ==================== 同步用户 ====================
+// ==================== 用户（同步 / 网页注册） ====================
 const loadUsers = async () => {
   try {
     const r = await api('/admin/api/users', { method: 'GET' })
@@ -227,19 +227,21 @@ const loadUsers = async () => {
 const renderUsers = () => {
   const tb = $('#user-tbody')
   if (!userList.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="empty">暂无同步用户。点击右上「新建用户」创建（用户名 + 连接码）。</td></tr>'
+    tb.innerHTML = '<tr><td colspan="4" class="empty">暂无用户。点击右上「新建用户」创建（用户名 + 密码），网页端用户可在首页自行注册（账号 + 密码 + 邮箱）。</td></tr>'
     return
   }
   tb.innerHTML = userList.map(u => `
     <tr data-user="${esc(u.name)}">
-      <td><span class="t-name">${esc(u.name)}</span></td>
+      <td><span class="t-name">${esc(u.name)}</span>
+        ${u.source === 'web' ? '<span class="t-badge">网页注册</span>' : ''}
+        ${u.email ? '<span class="t-sub">' + esc(u.email) + '</span>' : ''}</td>
       <td>${u.deviceCount ?? 0} 台</td>
       <td class="u-quota">—</td>
       <td>
         <div class="row-acts">
           <button class="btn mini act-quota">配额</button>
           <button class="btn mini act-devices">设备</button>
-          <button class="btn mini act-pwd">重置连接码</button>
+          <button class="btn mini act-pwd">重置密码</button>
           <button class="btn mini danger act-del">删除</button>
         </div>
       </td>
@@ -274,16 +276,16 @@ $('#user-tbody').addEventListener('click', async (e) => {
       loadUsers()
     } catch (err) { toast(err.message) }
   } else if (btn.classList.contains('act-pwd')) {
-    openModal('重置连接码：' + name, `
-      <label>新连接码（密码）<input type="text" id="m-new-pwd" autocomplete="off"></label>
+    openModal('重置密码：' + name, `
+      <label>新密码<input type="text" id="m-new-pwd" autocomplete="off"></label>
       <div class="btns"><button class="btn" data-close>取消</button><button class="btn primary" id="m-pwd-ok">保存</button></div>
     `, (body) => {
       body.querySelector('#m-pwd-ok').addEventListener('click', async () => {
         const pwd = body.querySelector('#m-new-pwd').value.trim()
-        if (!pwd) return toast('请输入连接码')
+        if (!pwd) return toast('请输入新密码')
         try {
           await api('/admin/api/users/' + encodeURIComponent(name) + '/password', { method: 'POST', body: { password: pwd } })
-          toast('连接码已更新')
+          toast('密码已更新')
           closeModal()
         } catch (err) { toast(err.message) }
       })
@@ -339,15 +341,15 @@ $('#user-tbody').addEventListener('click', async (e) => {
 })
 
 $('#btn-user-add').addEventListener('click', () => {
-  openModal('新建同步用户', `
+  openModal('新建用户', `
     <label>用户名（登录名 = 手机端连接账号）<input type="text" id="m-user-name" autocomplete="off"></label>
-    <label>连接码（密码，手机端登录用）<input type="text" id="m-user-pwd" autocomplete="off"></label>
+    <label>密码（手机端同步登录用）<input type="text" id="m-user-pwd" autocomplete="off"></label>
     <div class="btns"><button class="btn" data-close>取消</button><button class="btn primary" id="m-user-ok">创建</button></div>
   `, (body) => {
     body.querySelector('#m-user-ok').addEventListener('click', async () => {
       const name = body.querySelector('#m-user-name').value.trim()
       const pwd = body.querySelector('#m-user-pwd').value.trim()
-      if (!name || !pwd) return toast('用户名与连接码不能为空')
+      if (!name || !pwd) return toast('用户名与密码不能为空')
       try {
         await api('/admin/api/users', { method: 'POST', body: { name, password: pwd } })
         toast('用户 ' + name + ' 已创建')
@@ -622,7 +624,7 @@ const loadTenants = async () => {
 const renderTenants = () => {
   const box = $('#tenant-list')
   if (!tenantData.length) {
-    box.innerHTML = '<div class="card"><p class="muted-note" style="margin:0">暂无同步用户。在「同步用户」页创建后，即可为每个用户配置独立曲库目录。</p></div>'
+    box.innerHTML = '<div class="card"><p class="muted-note" style="margin:0">暂无用户。在「用户」页创建（或让用户在网页首页自行注册）后，即可为每个用户配置独立曲库目录。</p></div>'
     return
   }
   box.innerHTML = tenantData.map(u => {

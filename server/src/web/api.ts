@@ -34,7 +34,7 @@ import {
 } from '@/downloads/queue'
 import {
   isRegisterOpen, registerUser, findRegisteredUser, verifyPassword,
-  regBlocked, regFail, regSuccess,
+  regBlocked, regFail, regSuccess, countRegisteredUsers,
 } from '@/user/register'
 import { getQuota, canAcceptBytes } from '@/user/quota'
 
@@ -137,7 +137,9 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
 
   // ---------------- 登录状态（无需鉴权，前端启动时调用以决定 UI 分支） ----------------
   if (method == 'GET' && p == '/web/login-state') {
-    ok(res, { registerOpen: isRegisterOpen() })
+    // firstRun：还没有任何账号（内置 + 网页注册都为 0）—— 此时前端直接进注册表单
+    const firstRun = countRegisteredUsers() === 0 && (global.lx.config.users || []).length === 0
+    ok(res, { registerOpen: isRegisterOpen(), firstRun })
     return true
   }
 
@@ -152,8 +154,9 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     const name = String(body?.name ?? '').trim()
     const password = String(body?.password ?? '')
     const confirm = String(body?.confirm ?? '')
+    const email = String(body?.email ?? '').trim()
     if (password !== confirm) return fail(res, 400, '两次输入的密码不一致'), true
-    const r = await registerUser(name, password)
+    const r = await registerUser(name, password, email)
     if (!r.ok) { regFail(ip); return fail(res, 400, r.reason), true }
     regSuccess(ip)
     // 注册成功后自动登录
@@ -190,7 +193,7 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     }
     if (!authenticated) {
       loginFail(ip)
-      return fail(res, 401, '用户名或连接码错误'), true
+      return fail(res, 401, '用户名或密码错误'), true
     }
     loginSuccess(ip)
     const token = createSession(authName)

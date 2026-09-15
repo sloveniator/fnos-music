@@ -8,7 +8,8 @@
 
 import { kwSearch, kwPlayUrl, kwParseJSON, kwSearchAlbums, kwSearchPlaylists } from './kw'
 import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult, OnlineCollectionDetail } from './kw'
-import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wyAlbumDetail, wyPlaylistDetail, wyRecPlaylists } from './wy'
+import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wyAlbumDetail, wyPlaylistDetail } from './wy'
+import { dailyRecPlaylists } from './daily'
 import { mgSearch, mgPlayUrl, mgLyric } from './mg'
 import {
   sodaSearch, sodaPlayUrl, sodaLyric, sodaSearchAlbums, sodaSearchPlaylists,
@@ -94,9 +95,12 @@ const sourceAbilities = (def: OnlineSourceDef): string[] => {
   return a
 }
 
-/** 推荐歌单：优先 wy（推荐接口），其余源不支持时返回空 */
+/**
+ * 推荐歌单：优先 wy（推荐接口），其余源不支持时返回空。
+ * 走「每日轮换」缓存：同一天固定一批，第二天自动换（见 ./daily）。
+ */
 export const onlineRecPlaylists = async (source: string, limit: number): Promise<{ id: string, name: string, pic: string, trackCount: number, creator: string }[]> => {
-  if (source === 'wy') return wyRecPlaylists(Math.min(Math.max(limit, 1), 30))
+  if (source === 'wy') return dailyRecPlaylists(limit)
   return []
 }
 

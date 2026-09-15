@@ -68,13 +68,17 @@
 
   async function api(path, opt) {
     opt = opt || {}
+    // 没会话就别发鉴权请求：退出登录后残留的页面渲染不该再往服务端打一串 401
+    if (!token && !opt.skipAuth) throw new Error('未登录')
     const headers = {}
     if (token && !opt.skipAuth) headers['X-Web-Token'] = token
     if (opt.body) headers['Content-Type'] = 'application/json'
     const res = await fetch(BASE + '/web' + path, {
       method: opt.method || 'GET', headers, body: opt.body ? JSON.stringify(opt.body) : undefined,
     })
-    if (res.status === 401 && !opt.skipAuth) { logout(); throw new Error('登录已过期') }
+    // 401 只在「这次确实带着 token」时才当会话过期：登录页没有 token，
+    // 那里的 401 是业务错误（用户名或密码错误），得把服务端文案原样透出去
+    if (res.status === 401 && token && !opt.skipAuth) { logout(); throw new Error('登录已过期') }
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.code === -1) throw new Error(data.msg || data.message || ('HTTP ' + res.status))
     return data.data
@@ -111,23 +115,37 @@
   function showLogin() {
     $('#login').hidden = false
     $('#shell').hidden = true
-    $('#login-name').focus()
     loadLoginState()
   }
-  /** 拉取注册开关，决定 UI 分支：registerOpen=true 时只显示注册表单 */
+  /** 登录 ⇄ 注册 两个表单互切 */
+  function authForm(mode) {
+    const reg = mode === 'register'
+    $('#login-form').hidden = reg
+    $('#register-form').hidden = !reg
+    $('#to-login-wrap').hidden = !reg
+    if (reg) $('#reg-name').focus()
+    else $('#login-name').focus()
+  }
+  /**
+   * 拉取注册开关，决定 UI 分支：
+   *   firstRun（还没有任何用户）→ 直接进注册表单，登录无处可登；
+   *   registerOpen（默认开放）→ 登录页 + 「立即注册」入口；
+   *   都不满足 → 只留登录表单。
+   */
   async function loadLoginState() {
     try {
       const d = await api('/login-state', { skipAuth: true })
       const open = !!(d && d.registerOpen)
-      $('#login-form').hidden = open
-      $('#register-form').hidden = !open
-      $('#login-hint').textContent = open ? '首次使用？请先创建账户' : ''
-      if (!open) { $('#login-name').focus() } else { $('#reg-name').focus() }
+      const first = !!(d && d.firstRun)
+      $('#to-register-wrap').hidden = !open || first
+      $('#login-hint').textContent = first ? '首次使用，请先创建账户' : ''
+      authForm(open && first ? 'register' : 'login')
     } catch {
-      $('#login-form').hidden = false
-      $('#register-form').hidden = true
+      authForm('login')
     }
   }
+  $('#to-register').onclick = () => { $('#login-err').textContent = ''; authForm('register') }
+  $('#to-login').onclick = () => { $('#reg-err').textContent = ''; authForm('login') }
   async function enterApp() {
     $('#login').hidden = true
     $('#shell').hidden = false
@@ -142,7 +160,7 @@
     $('#login-err').textContent = ''
     $('#login-btn').disabled = true
     try {
-      const d = await api('/login', { method: 'POST', body: { name: $('#login-name').value.trim(), password: $('#login-pass').value } })
+      const d = await api('/login', { method: 'POST', body: { name: $('#login-name').value.trim(), password: $('#login-pass').value }, skipAuth: true })
       token = d.token
       localStorage.setItem('gusi-web-token', token)
       me = { name: d.name }
@@ -161,14 +179,20 @@
       const name = $('#reg-name').value.trim()
       const pw = $('#reg-pass').value
       const cf = $('#reg-pass2').value
+      const email = $('#reg-email').value.trim()
       if (pw !== cf) throw new Error('两次输入的密码不一致')
-      const d = await api('/register', { method: 'POST', body: { name, password: pw, confirm: cf }, skipAuth: true })
+      // 与后端同规则的前置校验：早提示，别等服务端绕一圈
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('邮箱格式不正确')
+      if (pw.length < 6) throw new Error('密码至少 6 位')
+      if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s])/.test(pw)) throw new Error('密码需包含大小写字母、数字和符号')
+      const d = await api('/register', { method: 'POST', body: { name, password: pw, confirm: cf, email }, skipAuth: true })
       token = d.token
       localStorage.setItem('gusi-web-token', token)
       me = { name: d.name }
       $('#reg-name').value = ''
       $('#reg-pass').value = ''
       $('#reg-pass2').value = ''
+      $('#reg-email').value = ''
       await enterApp()
     } catch (err) {
       $('#reg-err').textContent = err.message || '注册失败'
@@ -697,17 +721,9 @@
     const hour = new Date().getHours()
     v.appendChild(el('h2', 'page', hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'))
 
-    // 骨架屏占位（只等统计——推荐区单独异步填，在线补歌要等第三方，别拖住整页）
-    v.appendChild(skeletonRows(3))
-
-    const stats = await api('/api/stats')
-
-    // 清除骨架屏
-    v.querySelectorAll('.sk-wrap').forEach(s => s.remove())
-
     // 统计条（专辑 27 张 / 歌手 22 位 / 全部歌曲 32 首 / 我喜欢 0 首）已按需求下线：
     // 专辑·歌手·全部歌曲 在侧边栏，「我喜欢」在「专辑/歌单 → 我的歌单」里，
-    // 首屏直接进「为你推荐」更干净。
+    // 首屏直接进「为你推荐」更干净。空曲库提示与「去管理后台」引导也已按需求删除（首页只留内容）。
 
     // 为你推荐：按账户口味生成的两份歌单（今日推荐 / 猜你喜欢）。
     // 这里是「UI 封面」形态 —— 只给封面 + 推荐依据，点开才进详情（#/mix/daily、#/mix/guess）。
@@ -746,19 +762,6 @@
         v.appendChild(sc)
       }
     } catch (e) { /* 推荐歌单失败不阻塞首页 */ }
-
-    if (!stats.tracks) {
-      const tip = el('div', 'empty', '曲库还是空的。到管理后台「音乐库」添加目录并扫描，或把音乐放进 NAS 共享目录后授权给本应用。')
-      const a = el('a', 'btn primary')
-      a.href = BASE + '/admin/'
-      a.textContent = '去管理后台 →'
-      a.style.display = 'inline-block'
-      a.style.marginTop = '12px'
-      tip.style.textAlign = 'center'
-      tip.appendChild(el('br'))
-      tip.appendChild(a)
-      v.appendChild(tip)
-    }
   }
 
   // ---------------- 为你推荐（首页入口卡片 + 详情页） ----------------
@@ -816,7 +819,6 @@
     box.innerHTML = ''
     const rh = el('div', 'row-head')
     rh.appendChild(el('h3', null, '为你推荐'))
-    rh.appendChild(el('div', 'fy-tip', '按本账户的收听习惯生成 · 每日更新'))
     box.appendChild(rh)
     const grid = el('div', 'foryou')
     for (const mix of [d.daily, d.guess]) {

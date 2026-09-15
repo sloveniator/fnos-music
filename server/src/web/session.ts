@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 // ---------------------------------------------------------------------------
-// Web 消费者端会话：用户名 + 连接码登录（与同步用户同账号体系），
+// Web 消费者端会话：用户名 + 密码登录（内置同步用户与网页注册用户同账号体系），
 // token 走 X-Web-Token 头或媒体 URL 的 k 查询参数；失败限流防爆破
 // ---------------------------------------------------------------------------
 
@@ -69,6 +69,15 @@ export const verifySession = (token: string | null | undefined): Session | null 
 
 export const destroySession = (token: string): void => {
   sessions.delete(token)
+}
+
+/** 踢掉某个用户的全部网页会话（改密码 / 删用户时用） */
+export const dropUserSessions = (name: string): number => {
+  let n = 0
+  for (const [t, s] of sessions) {
+    if (s.name == name) { sessions.delete(t); n++ }
+  }
+  return n
 }
 
 // 每 15 分钟清扫过期会话
