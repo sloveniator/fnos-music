@@ -80,6 +80,9 @@ PLAY_PROBE = """() => {
     w: Math.round(r.width), h: Math.round(r.height), radius: cs.borderTopLeftRadius,
     bgImage: cs.backgroundImage, bgColor: cs.backgroundColor, shadow: cs.boxShadow,
     color: cs.color, iconFilter: ic.filter, border: cs.borderTopWidth + ' ' + cs.borderTopColor,
+    glowLayers: ((cs.boxShadow.match(/rgba?\([^)]*\)/g) || [])
+                 .filter(x => /150, 188, 255|79, 140, 255/.test(x))).length,
+    hardRing: /0px 0px 0px/.test(cs.boxShadow),
     lfW: Math.round(lf.getBoundingClientRect().width), lfBg: lcs.backgroundImage, lfColor: lcs.color,
     lfShadow: lcs.boxShadow,
     barBottom: Math.round(bar.bottom), vh: window.innerHeight,
@@ -165,18 +168,18 @@ try:
         base_shadow = d['shadow']
         print('   desktop play: %dx%d %s' % (d['w'], d['h'], d['color']))
 
-        # 2026-09-15 主人反馈「底栏播放键太突兀」：乳白实心 → 玻璃按键（#player .icon-btn.play）。
+        # 2026-09-15 主人反馈链：①「底栏播放键太突兀」乳白实心 → 玻璃按键；
+        # ②「圆圈边缘太生硬，做扩散美化」→ 去 1px 描边 / 去 0 0 0 4px 实心环，改多层递减外扩散。
         # 歌词全屏那颗仍是乳白，下面 B 段继续盯它。
-        check('A 玻璃底：半透明白渐变 + 细描边（不是乳白实心）',
-              'linear-gradient' in d['bgImage'] and 'rgba(255, 255, 255, 0.19)' in d['bgImage']
-              and '255, 253, 249' not in d['bgImage'], d['bgImage'][:70] + '…')
+        check('A 玻璃底：径向化开的半透明白（不是乳白实心）',
+              'radial-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage'], d['bgImage'][:70] + '…')
         check('A 图标亮白（深色玻璃底上对比稳）', d['color'] == 'rgb(241, 245, 255)', d['color'])
-        check('A accent 只剩极淡光晕环，不是外发光块',
-              'rgba(79, 140, 255, 0.07) 0px 0px 0px 4px' in d['shadow'] and '124, 92, 255' not in d['shadow'],
-              d['shadow'][:70])
+        check('A 边缘柔化：没有硬描边、没有实心环',
+              d['border'].startswith('0px') and not d['hardRing'] and '124, 92, 255' not in d['shadow'],
+              '%s | %s' % (d['border'], d['shadow'][:60]))
+        check('A 边缘柔化：≥3 层由近及远递减的 accent 扩散', d['glowLayers'] >= 3, 'layers=%s' % d['glowLayers'])
         check('A 保留柔和暗投影（有 depth）', 'rgba(2, 5, 12' in d['shadow'], d['shadow'][:70])
         check('A 图标投影是深色投影（不是白色重影）', 'drop-shadow' in d['iconFilter'], d['iconFilter'])
-        check('A 1px 半透明高光描边', 'rgba(255, 255, 255, 0.24)' in d['border'], d['border'])
         check('A 仍是正圆、尺寸 ≥42px', d['w'] == d['h'] and d['w'] >= 42 and d['radius'] == '50%', '%dx%d %s' % (d['w'], d['h'], d['radius']))
 
         # hover：只提亮，不加阴影、不改位移
@@ -193,8 +196,14 @@ try:
         box = pg.eval_on_selector('#btn-play', 'e => { const r = e.getBoundingClientRect(); return {x: r.x + r.width/2, y: r.y + r.height/2}; }')
         pg.mouse.move(box['x'], box['y'])
         pg.mouse.down()
-        pg.wait_for_timeout(120)
-        press = pg.eval_on_selector('#btn-play', 'e => getComputedStyle(e).transform')
+        # 无头 Chromium 里 :active 不一定在 mouse.down 后立刻落到样式上（渲染帧要等一次强制更新），
+        # 固定 120ms 采样会偶发读到 'none' —— 改成轮询到出现变换为止（仍是「按下即有动画」的语义）。
+        press = 'none'
+        for _ in range(14):
+            press = pg.eval_on_selector('#btn-play', 'e => getComputedStyle(e).transform')
+            if press not in ('none', ''):
+                break
+            pg.wait_for_timeout(60)
         pg.screenshot(path=os.path.join(ROOT, 'tools/shot-milky-desktop-press.png'))
         pg.mouse.up()
         pg.wait_for_timeout(60)
@@ -216,8 +225,12 @@ try:
             bx = pg.eval_on_selector(sel, 'e => { const r = e.getBoundingClientRect(); return {x: r.x + r.width/2, y: r.y + r.height/2}; }')
             pg.mouse.move(bx['x'], bx['y'])
             pg.mouse.down()
-            pg.wait_for_timeout(120)
-            mid = pg.eval_on_selector(sel, 'e => getComputedStyle(e).transform')
+            mid = 'none'
+            for _ in range(14):
+                mid = pg.eval_on_selector(sel, 'e => getComputedStyle(e).transform')
+                if mid not in ('none', ''):
+                    break
+                pg.wait_for_timeout(60)
             pg.mouse.up()
             pg.mouse.move(4, 4)
             pg.wait_for_timeout(450)
@@ -284,9 +297,10 @@ try:
         check('B tap 播放键后无残留（样式不因点击而停留）', not diff, str(diff)[:140] if diff else '与基态一致')
         # 玻璃配色在手机上同样生效 + 布局
         d = pg.evaluate(PLAY_PROBE)
-        check('B 手机底栏播放键同款玻璃',
-              'linear-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage']
-              and 'rgba(79, 140, 255, 0.07)' in d['shadow'], d['bgImage'][:60] + '…')
+        check('B 手机底栏播放键同款玻璃（径向化开 + 无硬环扩散）',
+              'radial-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage']
+              and not d['hardRing'] and d['glowLayers'] >= 3,
+              d['bgImage'][:60] + '…')
         check('B 手机底栏不出屏', 0 < d['barBottom'] <= d['vh'] + 1, '%d/%d' % (d['barBottom'], d['vh']))
         check('B 手机无横向溢出', d['overflow'] <= 0, 'overflow=%d' % d['overflow'])
         check('B 手机播放键 ≥44px 正圆', d['w'] == d['h'] and d['w'] >= 44, '%dx%d' % (d['w'], d['h']))
@@ -321,8 +335,8 @@ try:
             check('C %s 播放键 ≥42px 正圆' % label, d['w'] == d['h'] and d['w'] >= 42, '%dx%d' % (d['w'], d['h']))
             check('C %s 底栏不出屏 / 无横向溢出' % label, 0 < d['barBottom'] <= d['vh'] + 1 and d['overflow'] <= 0,
                   'bar=%d/%d ovf=%d' % (d['barBottom'], d['vh'], d['overflow']))
-            check('C %s 玻璃配色生效' % label,
-                  'linear-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage'], d['bgImage'][:48] + '…')
+            check('C %s 玻璃配色生效（径向化开，不是乳白）' % label,
+                  'radial-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage'], d['bgImage'][:48] + '…')
             ctx.close()
         br.close()
     print('\n== %d passed, %d failed ==' % (P, F))

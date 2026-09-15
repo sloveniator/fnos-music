@@ -67,6 +67,9 @@ PROBE = """() => {
     border: cs.borderTopWidth + ' ' + cs.borderTopColor,
     radius: cs.borderTopLeftRadius,
     iconFilter: getComputedStyle(document.querySelector('#btn-play svg')).filter,
+    glowLayers: ((cs.boxShadow.match(/rgba?\([^)]*\)/g) || [])
+                 .filter(x => /150, 188, 255|79, 140, 255/.test(x))).length,
+    hardRing: /0px 0px 0px/.test(cs.boxShadow),
     lfW: Math.round(lf.getBoundingClientRect().width),
     lfBgColor: lcs.backgroundColor, lfBgImage: lcs.backgroundImage,
     lfBackdrop: lcs.backdropFilter || lcs.webkitBackdropFilter || '',
@@ -114,21 +117,20 @@ try:
             pg.wait_for_timeout(800)
             pg.mouse.move(4, 4)
             d = pg.evaluate(PROBE)
-            # —— 底栏播放键：2026-09-15 主人反馈「底栏那个播放按钮现在太突兀了」，
-            #    乳白实心圆盘 → 与其它图标同族的玻璃按键（见 app.css #player .icon-btn.play）。
-            #    这几条断言跟着新决定走；乳白那条已移到「歌词页」名下继续看着。
-            check('%s 玻璃底：半透明白渐变（不再是乳白实心）' % label,
-                  'linear-gradient' in d['bgImage'] and 'rgba(255, 255, 255, 0.19)' in d['bgImage']
-                  and '255, 253, 249' not in d['bgImage'],
+            # —— 底栏播放键：决定链 ①乳白实心 → ②玻璃按键（与其它图标同族）
+            #    → ③2026-09-15「圆圈边缘太生硬，做扩散美化」：去掉 1px 硬描边与 0 0 0 4px 实心环，
+            #      改成由近及远多层递减的外扩散。尺寸没动（46px，窄屏 42px）。
+            check('%s 玻璃底：径向化开的半透明白（不再是乳白实心）' % label,
+                  'radial-gradient' in d['bgImage'] and '255, 253, 249' not in d['bgImage'],
                   d['bgImage'][:58] + '…')
-            check('%s accent 只剩极淡光晕环（不是外发光块）' % label,
-                  'rgba(79, 140, 255, 0.07) 0px 0px 0px 4px' in d['shadow'], d['shadow'][:52])
+            check('%s 边缘柔化：没有 1px 硬描边' % label, d['border'].startswith('0px'), d['border'])
+            check('%s 边缘柔化：没有 0 0 0 Npx 实心环' % label, not d['hardRing'], d['shadow'][:52])
+            check('%s 边缘柔化：≥3 层由近及远递减的 accent 扩散' % label, d['glowLayers'] >= 3,
+                  'layers=%s' % d['glowLayers'])
             check('%s 保留柔和暗投影' % label, 'rgba(2, 5, 12' in d['shadow'], d['shadow'][:52])
             check('%s 图标亮白 + 投影（深底上对比稳）' % label,
                   d['color'] == 'rgb(241, 245, 255)' and 'drop-shadow' in d['iconFilter'],
                   '%s / %s' % (d['color'], d['iconFilter']))
-            check('%s 1px 半透明高光描边' % label, d['border'].startswith('1px') and 'rgba(255, 255, 255, 0.24)' in d['border'],
-                  d['border'])
             check('%s 仍是正圆且尺寸 ≥42px（窄屏下限）' % label, d['w'] == d['h'] and d['w'] >= 42 and d['radius'] == '50%', '%dx%d r=%s' % (d['w'], d['h'], d['radius']))
             # —— 歌词页按钮：仍是乳白（本轮只改了底栏那一个） ——
             check('%s 歌词页按钮仍是乳白' % label,

@@ -264,13 +264,19 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
    底栏 46px 与歌词全屏 56px 两处共用 .icon-btn.play。 */
 .icon-btn.play { width: 46px; height: 46px;
   color: #1b202b;
+  /* 2026-09-15 主人：「圆圈边缘太生硬，做扩散美化」。去掉 1px 白描边，
+     改成「中心亮 → 边缘化开」的径向填充（最外 7% 由 .86 淡到 .6），
+     外缘再补两层很淡的暖白扩散。圆盘是化出去的，不是割出来的一圈。尺寸不动。 */
   background:
     radial-gradient(118% 84% at 33% 1%, rgba(255,255,255,.95), rgba(255,255,255,0) 62%),
+    radial-gradient(102% 102% at 50% 42%, rgba(255,253,249,.97) 46%, rgba(246,243,238,.94) 76%,
+                    rgba(232,228,220,.86) 93%, rgba(232,228,220,.6) 100%),
     linear-gradient(170deg, rgba(255,253,249,.97), rgba(232,228,220,.95));
-  border: 1px solid rgba(255,255,255,.62);
-  box-shadow: 0 5px 15px rgba(3,6,14,.42), 0 1px 3px rgba(3,6,14,.32),
-              inset 0 1px 0 rgba(255,255,255,.92),
-              inset 0 -4px 9px rgba(122,116,102,.16);
+  box-shadow: 0 7px 18px rgba(3,6,14,.42),
+              0 0 16px 2px rgba(255,253,249,.11),
+              0 0 38px 12px rgba(255,253,249,.05),
+              inset 0 1px 0 rgba(255,255,255,.9),
+              inset 0 -7px 16px rgba(122,116,102,.15);
   transition: transform .12s cubic-bezier(.2,.9,.3,1.4), filter .16s ease, box-shadow .16s ease; }
 /* 图标是 SVG（currentColor）：乳白底上收成近黑；投影只留极淡一层，不再是白色 drop-shadow */
 .icon-btn.play svg { width: 21px; height: 21px; filter: drop-shadow(0 1px 0 rgba(255,255,255,.55)); }
@@ -282,25 +288,45 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
       linear-gradient(170deg, rgba(255,254,251,.99), rgba(236,232,225,.96)); }
 }
 .icon-btn.play:active { transform: scale(.92); filter: brightness(.94);
-  box-shadow: 0 2px 7px rgba(3,6,14,.4), inset 0 1px 0 rgba(255,255,255,.7),
-              inset 0 -2px 6px rgba(122,116,102,.22); }
+  box-shadow: 0 3px 9px rgba(3,6,14,.4), 0 0 12px 2px rgba(255,253,249,.08),
+              inset 0 1px 0 rgba(255,255,255,.72),
+              inset 0 -4px 10px rgba(122,116,102,.2); }
 /* 2026-09-15 主人反馈「底栏那个播放按钮现在太突兀了」：乳白实心圆盘落在深色玻璃底栏上像贴了张贴纸。
    底栏（#player）内改为与其它图标同族的玻璃按键：淡白渐变 + 细描边 + 极淡 accent 光晕，图标留白。
-   歌词全屏（#lyric）仍保留乳白实心 —— 那是主人上一次点名要的，不动。 */
+   歌词全屏（#lyric）仍保留乳白实心 —— 那是主人上一次点名要的，不动。
+   同日主人再反馈「圆圈边缘太生硬，做扩散美化」：这一版把 1px 描边和 0 0 0 4px 的实心环都去掉，
+   改成两层径向填充（中心微亮 → 边缘 alpha 递减）＋ 由近及远三层递减外扩散 ＋ 内侧柔化阴影，
+   落在底栏上是一团柔光而不是一个带圈的圆片。尺寸 46px 不动（主人没让改）。
+   hover 只提亮填充，**不动 box-shadow**（点完不留外发光，e2e-btn-feedback 有断言）。 */
 #player .icon-btn.play { color: #f1f5ff;
-  background: linear-gradient(160deg, rgba(255,255,255,.19), rgba(255,255,255,.05));
-  border: 1px solid rgba(255,255,255,.24);
-  box-shadow: 0 6px 18px rgba(2,5,12,.42), 0 0 0 4px rgba(79,140,255,.07),
-              inset 0 1px 0 rgba(255,255,255,.16); }
+  background:
+    radial-gradient(120% 120% at 34% 4%, rgba(255,255,255,.34), rgba(255,255,255,.16) 42%,
+                    rgba(255,255,255,.09) 68%, rgba(255,255,255,.045) 100%),
+    radial-gradient(100% 100% at 50% 46%, rgba(160,195,255,.10) 60%, rgba(120,170,255,.02) 100%);
+  box-shadow: 0 8px 20px rgba(2,5,12,.44),
+              0 0 14px 1px rgba(150,188,255,.22),
+              0 0 32px 8px rgba(79,140,255,.15),
+              0 0 60px 18px rgba(79,140,255,.07),
+              inset 0 1px 0 rgba(255,255,255,.22),
+              inset 0 -10px 20px rgba(2,5,12,.22); }
 #player .icon-btn.play svg { filter: drop-shadow(0 1px 2px rgba(2,5,12,.45)); }
 @media (hover: hover) and (pointer: fine) {
   #player .icon-btn.play:hover { filter: none;
-    background: linear-gradient(160deg, rgba(255,255,255,.26), rgba(255,255,255,.09));
-    border-color: rgba(255,255,255,.32); }
+    background:
+      radial-gradient(120% 120% at 34% 4%, rgba(255,255,255,.44), rgba(255,255,255,.21) 42%,
+                      rgba(255,255,255,.12) 68%, rgba(255,255,255,.06) 100%),
+      radial-gradient(100% 100% at 50% 46%, rgba(170,200,255,.13) 60%, rgba(120,170,255,.03) 100%); }
 }
 #player .icon-btn.play:active { transform: scale(.94); filter: none;
-  background: linear-gradient(160deg, rgba(255,255,255,.14), rgba(255,255,255,.04));
-  box-shadow: 0 3px 10px rgba(2,5,12,.45), inset 0 1px 0 rgba(255,255,255,.12); }
+  background:
+    radial-gradient(120% 120% at 34% 4%, rgba(255,255,255,.26), rgba(255,255,255,.12) 42%,
+                    rgba(255,255,255,.07) 68%, rgba(255,255,255,.035) 100%),
+    radial-gradient(100% 100% at 50% 46%, rgba(160,195,255,.08) 60%, rgba(120,170,255,.02) 100%);
+  box-shadow: 0 3px 10px rgba(2,5,12,.45),
+              0 0 10px 1px rgba(150,188,255,.16),
+              0 0 22px 6px rgba(79,140,255,.10),
+              inset 0 1px 0 rgba(255,255,255,.16),
+              inset 0 -6px 12px rgba(2,5,12,.2); }
 .seek-row { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 620px; }
 .time { font-size: 11px; color: var(--muted); width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 .seek { flex: 1; height: 5px; border-radius: 99px; background: #232b3d; position: relative; cursor: pointer; }
@@ -597,20 +623,21 @@ img.ph {
 .bh-name { font-size: 19px; font-weight: 700; flex: 1; }
 
 
-/* ============ 0016：歌词全屏内播放控制条（移动端主控台） ============ */
-.lf-ctrls { display: none; }
-@media (max-width: 900px) {
-  .lf-ctrls { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px;
-    padding: 8px 18px calc(env(safe-area-inset-bottom, 0px) + 14px);
-    background: linear-gradient(0deg, rgba(8,10,16,.85), transparent); }
-  .lf-ctrls .lf-seek { width: 100%; max-width: none; }
-  .lf-btns { display: flex; align-items: center; justify-content: center; gap: 18px; }
-  .lf-btns .icon-btn { width: 44px; height: 44px; }
-  .lf-btns .icon-btn.play { width: 56px; height: 56px; }
-  .lf-btns .icon-btn.play svg { width: 24px; height: 24px; }
-  .lf-btns .vol-wrap input { width: 74px; }
-  .lf-btns .icon-btn.play.on-pause svg { display: none; }
-}
+/* ============ 0016：歌词全屏内播放控制条（主控台） ============ */
+/* 2026-09-15 主人反馈「全屏歌曲播放时，没有控制按钮，补上」：
+   这条原来只在 ≤900px 显示（.lf-ctrls { display:none } 是默认值），而全屏层 z-index 50
+   压住底栏 z-index 40 —— 桌面端进全屏就只剩 CD + 歌词，一个传输键都点不到。
+   现在默认全宽显示，尺寸走下面这一档；>900px 的桌面档在「桌面端底栏」段里再放大。 */
+.lf-ctrls { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 18px calc(env(safe-area-inset-bottom, 0px) + 14px);
+  background: linear-gradient(0deg, rgba(8,10,16,.85), transparent); }
+.lf-ctrls .lf-seek { width: 100%; max-width: none; }
+.lf-btns { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.lf-btns .icon-btn { width: 44px; height: 44px; }
+.lf-btns .icon-btn.play { width: 56px; height: 56px; }
+.lf-btns .icon-btn.play svg { width: 24px; height: 24px; }
+.lf-btns .vol-wrap input { width: 74px; }
+.lf-btns .icon-btn.play.on-pause svg { display: none; }
 
 /* ============ 0012：搜索历史 / 快捷键面板 / 队列增强 ============ */
 .s-hist { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
@@ -1199,6 +1226,31 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 @media (orientation: landscape) and (max-width: 900px) {
   .player { padding-left: max(10px, env(safe-area-inset-left, 0px));
             padding-right: max(10px, env(safe-area-inset-right, 0px)); }
+}
+
+/* —— 9.8 桌面端（>900px）底栏 / 全屏控制条：加高一档、按钮放大放宽 —— */
+/* 2026-09-15 主人反馈「缩小时的播放导航高度再增加一点，按钮太紧凑，放大一点，再放宽松」：
+   原来桌面底栏 71px 高、图标 36px、间距 10px，五个传输键挤成一小撮。
+   这里条高抬到 ~80px（2000px 以上仍有更宽的那档），传输键 44px、间距 16px，右侧歌词/音量也松一点。
+   播放键尺寸刻意不动（主人没让改），只把边缘做柔（见 #player .icon-btn.play）。
+   放在「高分屏」段之前：min-width:2000px 那档仍按原顺序覆盖 --player-h。 */
+@media (min-width: 901px) {
+  :root { --player-h: clamp(74px, 4.8vh + 42px, 100px); }
+  #player .ctrls { gap: 16px; }
+  #player .ctrls .icon-btn { width: 44px; height: 44px; }
+  #player .ctrls .icon-btn svg { width: 21px; height: 21px; }
+  /* 播放键尺寸不动：写在「传输键统一 44px」之后，否则同权重会被 44 覆盖 */
+  #player .ctrls .icon-btn.play { width: 46px; height: 46px; }
+  #player .right { gap: 14px; }
+  /* 全屏控制条：桌面一档（seek 居中限宽，按钮/间距比移动端大一档） */
+  .lf-ctrls { gap: 9px; padding: 12px 26px 18px; }
+  .lf-ctrls .lf-seek { max-width: 780px; margin: 0 auto; }
+  .lf-btns { gap: 24px; }
+  .lf-btns .icon-btn { width: 46px; height: 46px; }
+  .lf-btns .icon-btn svg { width: 22px; height: 22px; }
+  .lf-btns .icon-btn.play { width: 56px; height: 56px; }
+  .lf-btns .icon-btn.play svg { width: 24px; height: 24px; }
+  .lf-btns .vol-wrap input { width: 104px; }
 }
 
 /* —— 10. 高分屏 / 大屏（2K 以上）：内容不再缩在中间一小条 —— */
