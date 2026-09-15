@@ -1392,79 +1392,176 @@ kuwo.cn/playlist_detail/280301309</pre>
   // 新建入口就在那个 tab 里，不再有两套入口各自为政。
 
   // ---------------- 视图：搜索 ----------------
+  // ---------------- 视图：搜索（一次搜全部在线平台） ----------------
+  // 主人 2026-09-15 决定：搜索框不再查本地曲库，改为一次并发查全部已启用在线源。
+  // 服务端 /web/api/downloads/search 已按「歌名 + 歌手」跨源合并去重（含 &nbsp; 解码、
+  // 默认挑有封面且优先级高的源），前端只负责渲染 + 切源 + 播放 + 下载。
   routes.search = async (args, query) => {
     setActiveNav('search')
     const v = $('#view')
     v.appendChild(el('h2', 'page', '搜索'))
     const box = el('div', 'search-box')
     const input = el('input')
-    input.placeholder = '搜索歌曲、歌手、专辑…'
+    input.placeholder = '搜索歌曲、歌手…（一次搜全部平台）'
+    input.autocomplete = 'off'
     const btn = el('button', 'btn primary', '搜索')
     box.appendChild(input)
     box.appendChild(btn)
     v.appendChild(box)
-    const hist = histChips('gusi-lh', (q) => { input.value = q; doSearch() })
-    v.appendChild(hist)
+    v.appendChild(histChips('gusi-lh', (q) => { input.value = q; doSearch() }))
     const result = el('div')
     v.appendChild(result)
-    let tab = 'tracks'
+
+    const SRC_LABEL = { kw: '酷我', wy: '网易云', mg: '咪咕', soda: '汽水' }
+    const srcLabel = (id) => SRC_LABEL[id] || srcName(id) || id
+    const st = { q: '', list: [], perSource: [], loading: false }
     const q0 = new URLSearchParams(query).get('q') || ''
+
+    /** 合并行 → 播放行：队列/歌词/媒体流全靠 kind=online + source + rid 解析 */
+    const toRows = (list) => list.map(r => ({
+      id: r.source + '_' + String(r.id == null ? '' : r.id).replace(/^MUSIC_/, ''), kind: 'online',
+      source: r.source, rid: r.id,
+      name: r.name, singer: r.singer, album: r.album,
+      interval: r.intervalMs, pic: r.pic,
+    }))
+
+    /** 单行：封面 / 歌名（多平台时给切源下拉）/ 专辑 / 时长 / 播放·下载 */
+    const buildRow = (r, i) => {
+      const tr = el('tr', 'row')
+      tr.appendChild(el('td', 'num', String(i + 1)))
+      const tdCov = el('td', 'cov')
+      const paintCov = () => { tdCov.innerHTML = ''; tdCov.appendChild(picImg(r.pic, null, (r.name || '') + (r.singer || ''))) }
+      paintCov()
+      tr.appendChild(tdCov)
+
+      const tdName = el('td')
+      tdName.appendChild(el('div', 'dl-nm', r.name || '未知曲目'))
+      const sub = el('div', 'dl-sub')
+      sub.appendChild(el('span', 'dl-sg', r.singer || '未知歌手'))
+      let tdAlbum = null, tdDur = null
+      if ((r.choices || []).length > 1) {
+        const sel = el('select', 'dl-src-sel')
+        sel.title = '这首歌在 ' + r.choices.length + ' 个平台都有，可切换来源'
+        for (const c of r.choices) {
+          const o = document.createElement('option')
+          o.value = c.source
+          o.textContent = srcLabel(c.source)
+          sel.appendChild(o)
+        }
+        sel.value = r.source
+        sel.onclick = (e) => e.stopPropagation()
+        sel.onchange = () => {
+          const c = (r.choices || []).find(x => x.source === sel.value)
+          if (!c) return
+          r.source = c.source; r.id = c.id; r.intervalMs = c.intervalMs
+          if (c.pic && c.pic !== r.pic) { r.pic = c.pic; paintCov() }
+          if (c.album) { r.album = c.album; if (tdAlbum) tdAlbum.textContent = c.album }
+          if (tdDur) tdDur.textContent = fmtDur((r.intervalMs || 0) / 1000)
+        }
+        sub.appendChild(sel)
+      } else if (r.source) {
+        sub.appendChild(el('span', 'dl-src-tag', srcLabel(r.source)))
+      }
+      tdName.appendChild(sub)
+      tr.appendChild(tdName)
+
+      tdAlbum = el('td', 'album-col ell', r.album || '—')
+      tr.appendChild(tdAlbum)
+      tdDur = el('td', 'dur', fmtDur((r.intervalMs || 0) / 1000))
+      tr.appendChild(tdDur)
+
+      const tdAct = el('td', 'acts')
+      const bPlay = el('button', 'iconbtn', SVG.play)
+      bPlay.title = '播放'
+      bPlay.onclick = (e) => { e.stopPropagation(); player.play(toRows(st.list), i) }
+      const bDl = el('button', 'iconbtn dl', SVG.dl)
+      bDl.title = '下载'
+      bDl.onclick = (e) => { e.stopPropagation(); askDownload(asOnlineRows([r]), bDl) }
+      tdAct.appendChild(bPlay)
+      tdAct.appendChild(bDl)
+      tr.appendChild(tdAct)
+
+      tr.onclick = (e) => {
+        if (e.target.closest('select, button, input, a')) return
+        player.play(toRows(st.list), i)
+      }
+      return tr
+    }
+
+    const paint = () => {
+      result.innerHTML = ''
+      if (!st.q) return
+      const head = el('div', 'row-head')
+      head.appendChild(el('h3', null, '「' + st.q + '」· ' + st.list.length + ' 首'))
+      const btns = el('div', 'btns')
+      const bAll = el('button', 'btn ghost')
+      bAll.innerHTML = SVG.play + '<span>播放全部</span>'
+      bAll.disabled = !st.list.length
+      bAll.onclick = () => player.play(toRows(st.list), 0)
+      const bShuf = el('button', 'btn ghost')
+      bShuf.innerHTML = SVG.shuffle + '<span>随机播放</span>'
+      bShuf.disabled = !st.list.length
+      bShuf.onclick = () => player.shufflePlay(toRows(st.list))
+      btns.appendChild(bAll)
+      btns.appendChild(bShuf)
+      head.appendChild(btns)
+      result.appendChild(head)
+
+      const hit = (st.perSource || []).filter(x => x.count > 0).map(x => srcLabel(x.id) + ' ' + x.count)
+      const bad = (st.perSource || []).filter(x => x.error).map(x => srcLabel(x.id))
+      if (hit.length || bad.length) {
+        result.appendChild(el('div', 'sr-meta',
+          '平台命中：' + (hit.join(' · ') || '无') + (bad.length ? ' · 未响应：' + bad.join('、') : '')))
+      }
+      if (!st.list.length) {
+        result.appendChild(el('div', 'empty', st.perSource.length
+          ? '没有找到相关歌曲，换个关键词试试'
+          : '在线音源已在管理后台停用，请到「音源与代理」页开启后再搜索'))
+        return
+      }
+      const tbl = el('table', 'tracks sr-tbl')
+      const thead = el('thead')
+      const htr = el('tr')
+      htr.appendChild(el('th', 'num', '#'))
+      htr.appendChild(el('th', 'cov', ''))
+      htr.appendChild(el('th', null, '歌曲'))
+      htr.appendChild(el('th', 'album-col', '专辑'))
+      htr.appendChild(el('th', 'dur', '时长'))
+      htr.appendChild(el('th', 'acts', '操作'))
+      thead.appendChild(htr)
+      tbl.appendChild(thead)
+      const tbody = el('tbody')
+      st.list.forEach((r, i) => tbody.appendChild(buildRow(r, i)))
+      tbl.appendChild(tbody)
+      result.appendChild(tbl)
+    }
+
     const doSearch = async () => {
       const q = input.value.trim()
-      if (!q) return
+      if (!q || st.loading) return
       pushHist('gusi-lh', q)
-      location.hash = '#/search?q=' + encodeURIComponent(q)
+      // 写进地址栏，刷新/分享能回到同一结果；已经是这个关键词就不再改（避免 hashchange 重跑一遍）
+      if (new URLSearchParams(query).get('q') !== q) location.hash = '#/search?q=' + encodeURIComponent(q)
+      st.q = q
+      st.loading = true
+      st.list = []
+      st.perSource = []
       result.innerHTML = ''
-      const tabs = el('div', 'tabs')
-      for (const [key, label] of [['tracks', '歌曲'], ['albums', '专辑'], ['artists', '歌手']]) {
-        const b = el('button', key === tab ? 'on' : '', label)
-        b.onclick = () => { tab = key; doSearch() }
-        tabs.appendChild(b)
+      result.appendChild(el('div', 'dl-loading', '正在搜索全部平台…'))
+      try {
+        const d = await api('/api/downloads/search?q=' + encodeURIComponent(q) + '&size=30')
+        st.list = d.list || []
+        st.perSource = d.perSource || []
+      } catch (e) {
+        st.loading = false
+        result.innerHTML = ''
+        result.appendChild(el('div', 'empty', '搜索失败：' + e.message))
+        return
       }
-      result.appendChild(tabs)
-      const enc = encodeURIComponent(q)
-      if (tab === 'tracks') {
-        const d = await api('/api/tracks?q=' + enc + '&size=100')
-        if (!d.tracks.length) return result.appendChild(el('div', 'empty', '没有匹配的歌曲'))
-        const rh = el('div', 'row-head')
-        rh.appendChild(el('h3', null, '歌曲 · ' + d.total))
-        const btns = el('div', 'btns')
-        const bAll = el('button', 'btn ghost')
-        bAll.innerHTML = SVG.play + '<span>播放全部</span>'
-        bAll.onclick = () => player.play(d.tracks, 0)
-        const bShuf = el('button', 'btn ghost')
-        bShuf.innerHTML = SVG.shuffle + '<span>随机播放</span>'
-        bShuf.onclick = () => player.shufflePlay(d.tracks)
-        btns.appendChild(bAll); btns.appendChild(bShuf)
-        rh.appendChild(btns)
-        result.appendChild(rh)
-        result.appendChild(trackTable(d.tracks, { menu: true }))
-      } else if (tab === 'albums') {
-        const d = await api('/api/albums?q=' + enc + '&size=100')
-        const grid = el('div', 'grid')
-        for (const a of d.albums) {
-          const c = el('div', 'card')
-          c.appendChild(coverImg(a.coverTrackId ? { id: a.coverTrackId, hasCover: true } : null, 'cover'))
-          c.appendChild(el('div', 't', a.name))
-          c.appendChild(el('div', 's', a.singer))
-          c.onclick = () => { location.hash = '#/album?singer=' + encodeURIComponent(a.singer) + '&album=' + encodeURIComponent(a.name) }
-          grid.appendChild(c)
-        }
-        result.appendChild(grid)
-      } else {
-        const d = await api('/api/artists?q=' + enc + '&size=100')
-        const grid = el('div', 'grid')
-        for (const a of d.artists) {
-          const c = el('div', 'card')
-          c.appendChild(coverImg(a.coverTrackId ? { id: a.coverTrackId, hasCover: true } : null, 'cover round'))
-          c.appendChild(el('div', 't', a.name))
-          c.appendChild(el('div', 's', a.count + ' 首'))
-          c.onclick = () => { location.hash = '#/artist?singer=' + encodeURIComponent(a.name) }
-          grid.appendChild(c)
-        }
-        result.appendChild(grid)
-      }
+      st.loading = false
+      paint()
     }
+
     btn.onclick = doSearch
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch() })
     if (q0) { input.value = q0; doSearch() }
@@ -1475,7 +1572,10 @@ kuwo.cn/playlist_detail/280301309</pre>
   let onlChips = null
   let onlTabs = null
   let onlArea = null
-  let ostate = { view: 'search', type: 'song', q: '', source: 'kw', page: 0, size: 20, total: 0, list: [], boards: [], bid: '', loading: false }
+  // view 默认 'plaza'（平台歌单广场）：进在线音乐先看歌单，想看搜索框点「搜索」tab
+  let ostate = { view: 'plaza', type: 'song', q: '', source: 'kw', page: 0, size: 20, total: 0, list: [], boards: [], bid: '', loading: false, autoRun: false }
+  // 歌单广场缓存（按音源各存一份 batch/list/hint），切回来不必重放请求
+  const plazaState = new Map()
 
   // ---- 在线列表：多选 + 批量下载 ----
   // selCtx.list 绑定当前渲染的在线列表，sel 存 rid（切换视图时重置）
@@ -1817,6 +1917,8 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
   // 在线集合（专辑/歌单）详情缓存：{ source,type,id } -> OnlineCollectionDetail
   let onlColl = null
+  /** 集合详情是从哪个 tab 点进来的（'plaza' / 'search'）——详情页的「返回」要回到原处 */
+  let onlFrom = 'plaza'
   const onlineRow = (t, idx) => {
     const tr = el('tr', 'row')
     if (player.cur && player.cur.id === t.id) tr.classList.add('playing')
@@ -1892,15 +1994,17 @@ kuwo.cn/playlist_detail/280301309</pre>
     ostate.loading = true
     try {
       const isColl = ostate.type === 'album' || ostate.type === 'playlist'
+      const isArtist = ostate.type === 'artist'
       const d = await api('/api/online/search?source=' + encodeURIComponent(ostate.source) +
         '&q=' + encodeURIComponent(ostate.q) + '&type=' + ostate.type +
         '&page=' + (ostate.page + 1) + '&size=' + ostate.size)
       ostate.page++
       ostate.total = d.total
-      if (isColl) {
+      if (isColl || isArtist) {
         ostate.list = ostate.page === 1 ? d.list : ostate.list.concat(d.list)
         if (ostate.page === 1) initSel(ostate.list); else rebindSel(ostate.list)
-        paintCollectionGrid(container)
+        if (isArtist) paintArtistGrid(container)
+        else paintCollectionGrid(container)
       } else {
         const rows = d.list.map(x => ({
           id: x.source + '_' + x.id.replace(/^MUSIC_/, ''),
@@ -1996,59 +2100,98 @@ kuwo.cn/playlist_detail/280301309</pre>
     }
     renderBoardDetail()
   }
-  // ---- 歌单广场：直接浏览在线推荐歌单（不用先搜索） ----
-  let plazaCache = null
-  let plazaPage = 0
+  // ---- 歌单广场：默认视图，直接浏览当前音源的在线歌单（不用先搜索） ----
+  const PLAZA_PER = 24
+
+  /** 该音源的歌单能不能点开（详情接口受限的源只能看卡片） */
+  const canOpenPlaylist = (source) => {
+    const s = onlineSourcesCache.find(x => x.id === source)
+    return !!s && (s.abilities || []).includes('playlist-detail')
+  }
+
+  /** 歌单卡片网格（歌单广场 / 歌单搜索共用同一套渲染） */
+  const paintPlaylistCards = (source, list, container) => {
+    const grid = el('div', 'grid coll-grid')
+    for (const p of list) {
+      const card = el('div', 'card coll-card')
+      const cov = el('div', 'cover')
+      if (p.pic) cov.appendChild(picImg(p.pic, null, p.name))
+      else cov.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h10"/></svg>'
+      card.appendChild(cov)
+      card.appendChild(el('div', 't', p.name))
+      card.appendChild(el('div', 's', (p.creator ? p.creator + ' · ' : '') + (p.trackCount ? p.trackCount + ' 首' : '歌单')))
+      if (!canOpenPlaylist(source)) card.appendChild(el('span', 'coll-lock', '暂不支持展开'))
+      card.onclick = () => openCollection(source, 'playlist', p)
+      grid.appendChild(card)
+    }
+    container.appendChild(grid)
+  }
+
   const renderPlaza = async () => {
+    const source = ostate.source
+    const st = plazaState.get(source) || { batch: 0, list: [], hint: '' }
+    plazaState.set(source, st)
+    const src = onlineSourcesCache.find(x => x.id === source) || {}
     onlArea.innerHTML = ''
     const head = el('div', 'res-head')
-    head.appendChild(el('span', 'res-info', '推荐歌单 · 直接点开即可播放 / 批量下载'))
-    const bMore = el('button', 'btn ghost mini', '换一批')
-    bMore.onclick = () => { plazaPage += 1; paint() }
-    head.appendChild(bMore)
+    const info = el('span', 'res-info', (src.name || source) + ' · ' + (st.hint || '平台歌单'))
+    head.appendChild(info)
+    const more = el('button', 'btn ghost mini', '换一批')
+    head.appendChild(more)
     onlArea.appendChild(head)
     const result = el('div', 'res')
     onlArea.appendChild(result)
-    const PER = 24
-    let total = 0
-    function paint() {
+    let busy = false
+    const paint = () => {
       result.innerHTML = ''
-      if (!plazaCache) { result.appendChild(skeletonGrid(8)); return }
-      total = plazaCache.length
-      if (!total) { result.appendChild(el('div', 'empty', '暂时拿不到推荐歌单，稍后再试')); return }
-      const grid = el('div', 'grid coll-grid')
-      for (let i = 0; i < Math.min(PER, total); i++) {
-        const rp = plazaCache[(plazaPage * PER + i) % total]
-        const card = el('div', 'card coll-card')
-        const cov = el('div', 'cover')
-        cov.appendChild(picImg(rp.pic, null, rp.name))
-        card.appendChild(cov)
-        card.appendChild(el('div', 't', rp.name))
-        card.appendChild(el('div', 's', (rp.creator ? rp.creator + ' · ' : '') + (rp.trackCount ? rp.trackCount + ' 首' : '歌单')))
-        card.onclick = () => openCollection('wy', 'playlist', rp)
-        grid.appendChild(card)
-      }
-      result.appendChild(grid)
+      if (st.list.length) return paintPlaylistCards(source, st.list, result)
+      if (busy) return result.appendChild(skeletonGrid(8))
+      result.appendChild(el('div', 'empty', canOpenPlaylist(source)
+        ? '这个音源现在拿不到平台歌单，点「换一批」或换个音源再试试'
+        : '这个音源现在拿不到平台歌单（上游没有公开的推荐/分类接口）'))
     }
-    paint()
-    if (!plazaCache) {
-      try {
-        const d = await api('/api/online/rec-playlists?source=wy&limit=60')
-        plazaCache = d.list || []
-      } catch (e) { plazaCache = []; toast(e.message, true) }
+    const load = async (batch) => {
+      if (busy) return
+      busy = true
+      if (batch != null) st.batch = batch
+      more.disabled = true
       paint()
+      try {
+        const d = await api('/api/online/rec-playlists?source=' + encodeURIComponent(source) +
+          '&limit=' + PLAZA_PER + '&batch=' + st.batch)
+        st.list = d.list || []
+        st.hint = d.hint || st.hint
+      } catch (e) {
+        st.list = []
+        toast(e.message, true)
+      }
+      busy = false
+      more.disabled = false
+      // 请求期间用户可能已经切音源/切视图，别往别人的页面上画
+      if (ostate.view === 'plaza' && ostate.source === source) {
+        info.textContent = (src.name || source) + ' · ' + (st.hint || '平台歌单')
+        paint()
+      }
     }
+    more.onclick = () => load(st.batch + 1)
+    if (st.list.length) paint()
+    else await load(null)
   }
 
   const renderSearch = () => {
     onlArea.innerHTML = ''
     const typeBox = el('div', 'chips mini type-chips')
     const src = onlineSourcesCache.find(x => x.id === ostate.source)
-    const canAlbums = src && (src.abilities || []).includes('albums')
-    const canPlaylists = src && (src.abilities || []).includes('playlists')
+    const ab = (src && src.abilities) || []
+    const canAlbums = ab.includes('albums')
+    const canPlaylists = ab.includes('playlists')
+    const canArtists = ab.includes('artists')
     const typeDefs = [['song', '单曲']]
     if (canAlbums) typeDefs.push(['album', '专辑'])
     if (canPlaylists) typeDefs.push(['playlist', '歌单'])
+    if (canArtists) typeDefs.push(['artist', '歌手'])
+    // 当前源不支持的类型（换源后残留）：回落到单曲
+    if (!typeDefs.some(t => t[0] === ostate.type)) ostate.type = 'song'
     for (const [key, label] of typeDefs) {
       const c = el('button', 'chip' + (ostate.type === key ? ' on' : ''), label)
       c.onclick = () => { ostate.type = key; ostate.page = 0; ostate.list = []; ostate.total = 0; renderSearch() }
@@ -2057,7 +2200,8 @@ kuwo.cn/playlist_detail/280301309</pre>
     onlArea.appendChild(typeBox)
     const box = el('div', 'search-box')
     const input = el('input')
-    input.placeholder = ostate.type === 'song' ? '搜索在线歌曲…' : ostate.type === 'album' ? '搜索在线专辑…' : '搜索在线歌单…'
+    const PH = { song: '搜索在线歌曲…', album: '搜索在线专辑…', playlist: '搜索在线歌单…', artist: '搜索在线歌手…' }
+    input.placeholder = PH[ostate.type] || '搜索在线内容…'
     const btn = el('button', 'btn primary', '搜索')
     box.appendChild(input); box.appendChild(btn)
     onlArea.appendChild(box)
@@ -2091,11 +2235,51 @@ kuwo.cn/playlist_detail/280301309</pre>
     btn.onclick = run
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run() })
     if (ostate.q) input.value = ostate.q
-    if (ostate.list.length) {
+    if (ostate.autoRun) {
+      // 点歌手卡片进来：直接按歌手名搜该源的歌曲（不需要用户再按一次搜索）
+      ostate.autoRun = false
+      loadSearch(onlArea)
+    } else if (ostate.list.length) {
       if (ostate.type === 'song') paintSearchTable(onlArea)
+      else if (ostate.type === 'artist') paintArtistGrid(onlArea)
       else paintCollectionGrid(onlArea)
     }
     input.focus()
+  }
+
+  // ---- 歌手卡片（歌手搜索 / 点击进该歌手的在线单曲） ----
+  const paintArtistGrid = (container) => {
+    const info = container.querySelector('.res-info')
+    const allBtn = container.querySelector('.play-all')
+    if (info) info.textContent = ostate.q ? '「' + ostate.q + '」 · ' + srcName(ostate.source) + ' · 共 ' + ostate.total + ' 位歌手' : ''
+    if (allBtn) allBtn.hidden = true
+    const result = container.querySelector('.res')
+    if (!result) return
+    result.innerHTML = ''
+    const grid = el('div', 'grid artist-grid')
+    for (const a of ostate.list) {
+      const card = el('div', 'card artist-card')
+      const cov = el('div', 'cover round')
+      if (a.pic) cov.appendChild(picImg(a.pic, null, a.name))
+      else cov.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.6"/><path d="M4.8 20c0-3.6 3.2-6 7.2-6s7.2 2.4 7.2 6"/></svg>'
+      card.appendChild(cov)
+      card.appendChild(el('div', 't', a.name))
+      card.appendChild(el('div', 's', (a.trackCount ? a.trackCount + ' 首歌' : '歌手') + (a.creator ? ' · ' + a.creator : '')))
+      card.onclick = () => {
+        ostate.type = 'song'
+        ostate.q = a.name
+        ostate.page = 0; ostate.total = 0; ostate.list = []
+        ostate.autoRun = true
+        renderSearch()
+      }
+      grid.appendChild(card)
+    }
+    result.appendChild(grid)
+    const more = el('button', 'load-more')
+    more.hidden = ostate.total <= ostate.list.length
+    more.textContent = '加载更多（' + ostate.list.length + ' / ' + ostate.total + '）'
+    more.onclick = () => loadSearch(container)
+    result.appendChild(more)
   }
   const renderChips = () => {
     onlChips.innerHTML = ''
@@ -2110,26 +2294,35 @@ kuwo.cn/playlist_detail/280301309</pre>
     if (!enabled.some(s => s.id === ostate.source)) { ostate.source = enabled[0].id; ostate.boards = [] }
     for (const s of enabled) {
       const c = el('button', 'chip' + (s.id === ostate.source ? ' on' : ''), s.name)
-      c.onclick = () => { ostate.source = s.id; ostate.boards = []; ostate.view = 'search'; ostate.q = ''; ostate.list = []; ostate.page = 0; ostate.total = 0; onlColl = null; renderChips(); renderTabs(); renderArea() }
+      c.onclick = () => {
+        if (s.id === ostate.source) return
+        ostate.source = s.id
+        ostate.boards = []
+        ostate.bid = ''
+        // 榜单是按源注册的，切源后榜单视图没有意义，退回默认的「歌单广场」
+        if (ostate.view === 'boards' || ostate.view === 'board') ostate.view = 'plaza'
+        if (ostate.view === 'search') { ostate.q = ''; ostate.type = 'song' }
+        ostate.list = []; ostate.page = 0; ostate.total = 0; ostate.autoRun = false
+        onlColl = null
+        renderChips(); renderTabs(); renderArea()
+      }
       onlChips.appendChild(c)
     }
   }
   const renderTabs = () => {
     onlTabs.innerHTML = ''
+    // 默认 tab 是「歌单广场」：进页面先看平台歌单，搜索框只在「搜索」tab 里出现
+    const pt = el('button', 'otab' + (ostate.view === 'plaza' ? ' on' : ''), '歌单广场')
+    pt.onclick = () => { ostate.view = 'plaza'; renderTabs(); renderArea() }
+    onlTabs.appendChild(pt)
     const st = el('button', 'otab' + (ostate.view === 'search' ? ' on' : ''), '搜索')
-    st.onclick = () => { ostate.view = 'search'; renderArea() }
+    st.onclick = () => { ostate.view = 'search'; renderTabs(); renderArea() }
     onlTabs.appendChild(st)
     const src = onlineSourcesCache.find(s => s.id === ostate.source)
     if (src && src.boards) {
       const bt = el('button', 'otab' + (ostate.view === 'boards' || ostate.view === 'board' ? ' on' : ''), '排行榜')
       bt.onclick = () => loadBoards()
       onlTabs.appendChild(bt)
-    }
-    const ab = src && (src.abilities || [])
-    if (ab && ab.includes('playlists') && ab.includes('detail')) {
-      const pt = el('button', 'otab' + (ostate.view === 'plaza' ? ' on' : ''), '歌单广场')
-      pt.onclick = () => { ostate.view = 'plaza'; renderArea() }
-      onlTabs.appendChild(pt)
     }
   }
   // ---- 专辑/歌单集合卡片与详情 ----
@@ -2164,16 +2357,21 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
   const openCollection = async (source, type, c0) => {
     const src = onlineSourcesCache.find(x => x.id === source)
-    if (src && !(src.abilities || []).includes('detail')) {
-      toast('该源暂不支持展开详情，试试网易云音源', true)
+    const ab = (src && src.abilities) || []
+    // 详情能力按类型判定：酷我能开歌单但专辑接口反爬，咪咕两者都开不了
+    const need = type === 'album' ? 'album-detail' : 'playlist-detail'
+    if (!ab.includes(need)) {
+      toast(type === 'album'
+        ? '该源暂不支持展开专辑详情，试试网易云音乐源'
+        : '该源暂不支持展开歌单详情（接口受限），试试酷我或网易云音乐源', true)
       return
     }
     onlColl = null
-    const fromView = ostate.view === 'plaza' ? 'plaza' : 'search'
+    onlFrom = ostate.view === 'search' ? 'search' : 'plaza'
     onlArea.innerHTML = ''
     const hd = el('div', 'board-head')
-    const back = el('button', 'btn ghost mini', fromView === 'plaza' ? '← 返回歌单广场' : '← 返回搜索结果')
-    back.onclick = () => { ostate.view = fromView; renderArea() }
+    const back = el('button', 'btn ghost mini', onlFrom === 'plaza' ? '← 返回歌单广场' : '← 返回搜索结果')
+    back.onclick = () => { ostate.view = onlFrom; renderTabs(); renderArea() }
     hd.appendChild(back)
     const name = el('span', 'bh-name', c0.name)
     hd.appendChild(name)
@@ -2194,6 +2392,14 @@ kuwo.cn/playlist_detail/280301309</pre>
     onlArea.innerHTML = ''
     const info = onlColl.info || {}
     const tracks = onlColl.list || []
+    // 详情页自己带返回按钮：openCollection 的临时头会被这里清掉，
+    // 默认视图改成歌单广场后「点进歌单出不来」会很难受
+    const hd = el('div', 'board-head')
+    const back = el('button', 'btn ghost mini', onlFrom === 'search' ? '← 返回搜索结果' : '← 返回歌单广场')
+    back.onclick = () => { ostate.view = onlFrom; renderTabs(); renderArea() }
+    hd.appendChild(back)
+    hd.appendChild(el('span', 'bh-name', info.name || ''))
+    onlArea.appendChild(hd)
     const hero = el('div', 'coll-hero')
     const cov = el('div', 'cover big')
     if (info.pic) cov.appendChild(picImg(info.pic, null, info.name))
@@ -2316,7 +2522,7 @@ kuwo.cn/playlist_detail/280301309</pre>
     // 顶部信息卡：同时充当页面标题，避免「标题 + 副标题 + tab 栏」三层重复
     const banner = el('div', 'online-banner')
     banner.appendChild(el('div', 'ob-t', '在线音乐'))
-    banner.appendChild(el('div', 'ob-s', '多源搜索 · 排行榜 · 歌单广场 · 一键入库到本机曲库'))
+    banner.appendChild(el('div', 'ob-s', '平台歌单 · 搜单曲 / 专辑 / 歌单 / 歌手 · 一键入库到本机曲库'))
     v.appendChild(banner)
 
     // 一行工具栏：左音源切换，右视图切换

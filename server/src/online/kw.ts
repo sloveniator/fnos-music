@@ -157,6 +157,33 @@ export const kwSearchAlbums = async (keyword: string, page: number, size: number
   return { list, total, page, size }
 }
 
+/** 酷我歌手搜索（r.s ft=artist）—— 复用集合结构承载歌手，trackCount 即该歌手歌曲数 */
+export const kwSearchArtists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const url =
+    'https://search.kuwo.cn/r.s?all=' + encodeURIComponent(keyword) +
+    '&ft=artist&itemset=web_2013&client=kt&pn=' + (page - 1) +
+    '&rn=' + size + '&rformat=json&encoding=utf8&vipver=1'
+  const text = await fetchText(url, { Referer: 'http://www.kuwo.cn/' })
+  const j = kwParseJSON(text)
+  // 头像相对路径形如 240/s4s56/58/291211030.jpg，需拼 BASEPICPATH（img1.kuwo.cn/star/starheads/）
+  const base = String(j.BASEPICPATH || 'http://img1.kuwo.cn/star/starheads/')
+  const arr: any[] = Array.isArray(j.abslist) ? j.abslist : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it && (it.ARTISTID || it.DC_TARGETID))
+    .map((it) => {
+      const p = String(it.PICPATH || '')
+      return {
+        source: 'kw',
+        id: String(it.ARTISTID || it.DC_TARGETID),
+        name: cleanText(it.ARTIST || '未知歌手'),
+        creator: cleanText(it.AARTIST || it.COUNTRY || ''),
+        trackCount: parseInt(String(it.SONGNUM ?? '0'), 10) || 0,
+        pic: /^https?:/.test(p) ? p : (p ? base + p.replace(/^120\//, '240/') : null),
+      }
+    })
+  return { list, total: parseInt(j.TOTAL ?? '0', 10) || 0, page, size }
+}
+
 /** 酷我歌单搜索（r.s ft=playlist） */
 export const kwSearchPlaylists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
   const url =
@@ -177,9 +204,75 @@ export const kwSearchPlaylists = async (keyword: string, page: number, size: num
       trackCount: parseInt(String(it.songnum ?? '0'), 10) || 0,
       pic: (() => {
         const p = String(it.pic || it.hts_pic || '')
-        return p ? p.replace(/_?240/g, '') : null
+        if (!p) return null
+        // 上游给的是 _150/_240 缩略图，广场/搜索结果是大卡片，提到 _500 更清晰
+        // （去掉后缀的 URL 只会 307 跳转，别自作聪明删尺寸）
+        return /_\d+\.(jpg|jpeg|png|webp)$/i.test(p) ? p.replace(/_\d+(\.(?:jpg|jpeg|png|webp))$/i, '_500$1') : p
       })(),
     }))
   return { list, total, page, size }
+}
+
+// ---------------------------------------------------------------------------
+// 酷我歌单曲目（歌单详情）
+//   www.kuwo.cn/api/www 那套接口需要网页下发的 kw_token（实测 cookie + csrf 头组合
+//   仍被拒 "The request is illegal!"），改用 nplserver pl.svc 免鉴权通道：
+//   op=getlistinfo&pid=<歌单 id>&pn=<页>&rn=<每页>，返回 title/pic/uname/total + musiclist。
+//   musiclist 里只有数字 id（= 播放用的 MUSIC_<id>）与 120px 封面，这里统一归一成
+//   内置源的 OnlineItem（封面提到 240px）。
+// ---------------------------------------------------------------------------
+const KW_PL_SVC = 'http://nplserver.kuwo.cn/pl.svc'
+/** 单页条数 / 最多翻几页（300 首上限，够长歌单用，避免一次拉爆上游） */
+const KW_PL_ROWS = 100
+const KW_PL_MAX_PAGES = 3
+
+export const kwPlaylistDetail = async (id: string): Promise<OnlineCollectionDetail> => {
+  if (!/^\d{1,16}$/.test(id)) throw new Error('酷我歌单 id 非法')
+  const items: OnlineItem[] = []
+  let info: OnlineCollection | null = null
+  let total = 0
+  for (let pn = 0; pn < KW_PL_MAX_PAGES; pn++) {
+    const url =
+      KW_PL_SVC + '?op=getlistinfo&pid=' + encodeURIComponent(id) + '&pn=' + pn + '&rn=' + KW_PL_ROWS +
+      '&encode=utf8&keyset=pl2012&identity=kuwo&pcmp4=1&vipver=MUSIC_9.1.1.2&newver=1'
+    const text = await fetchText(url, { Referer: 'http://www.kuwo.cn/' })
+    let j: any
+    try {
+      j = JSON.parse(text)
+    } catch {
+      throw new Error('酷我歌单接口响应异常')
+    }
+    if (!j || j.result !== 'ok') throw new Error('酷我歌单不存在或已下架')
+    total = parseInt(String(j.total ?? '0'), 10) || 0
+    if (!info) {
+      const cov = String(j.pic || '')
+      info = {
+        source: 'kw',
+        id: String(j.id ?? id),
+        name: cleanText(j.title || '未知歌单'),
+        creator: cleanText(j.uname || ''),
+        trackCount: total,
+        pic: /_\d+\.(jpg|jpeg|png|webp)$/i.test(cov) ? cov.replace(/_\d+(\.(?:jpg|jpeg|png|webp))$/i, '_500$1') : (cov || null),
+      }
+    }
+    const arr: any[] = Array.isArray(j.musiclist) ? j.musiclist : []
+    for (const it of arr) {
+      const rid = String(it?.id ?? '').trim()
+      if (!/^\d{1,16}$/.test(rid)) continue
+      const albumpic = String(it.albumpic || '')
+      items.push({
+        source: 'kw',
+        id: 'MUSIC_' + rid,
+        name: cleanText(it.name || '未知歌曲'),
+        singer: cleanText(it.artist || '未知歌手').replace(/&/g, '、'),
+        album: cleanText(it.album || ''),
+        intervalMs: (parseInt(String(it.duration ?? '0'), 10) || 0) * 1000,
+        pic: albumpic ? albumpic.replace(/\/120\//, '/240/') : null,
+      })
+    }
+    if (!arr.length || items.length >= total) break
+  }
+  if (!info) throw new Error('酷我歌单不存在或已下架')
+  return { info: { ...info, trackCount: total || items.length }, list: items }
 }
 

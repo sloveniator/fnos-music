@@ -219,6 +219,28 @@ export const sodaSearchPlaylists = async (keyword: string, page: number, size: n
   return { list, total: estimateTotal(p, n, list.length, g.has_more === true), page: p, size: n }
 }
 
+export const sodaSearchArtists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const p = Math.max(1, page)
+  const n = Math.min(Math.max(size, 1), 30)
+  const g = await searchGroup('artist', keyword, p, n)
+  const raw: any[] = Array.isArray(g.data) ? g.data : []
+  const list: OnlineCollection[] = []
+  for (const d of raw) {
+    const a = d?.entity?.artist
+    const id = String(a?.id ?? '').trim()
+    if (!id) continue
+    list.push({
+      source: 'soda',
+      id,
+      name: String(a?.name ?? '未知歌手'),
+      creator: String(a?.user?.nickname ?? ''),
+      trackCount: parseInt(String(a?.count_tracks ?? '0'), 10) || 0,
+      pic: sodaPic(a?.url_avatar),
+    })
+  }
+  return { list, total: estimateTotal(p, n, list.length, g.has_more === true), page: p, size: n }
+}
+
 // ------------------------------ 详情 ------------------------------
 
 /** 从服务端渲染页里抠出 _ROUTER_DATA 的 JSON（按括号配对，避免正则被字符串内的花括号骗到） */

@@ -6,13 +6,13 @@
 //   详情（曲目展开）能力以 capabilities 位暴露，前端据此渲染操作。
 // ---------------------------------------------------------------------------
 
-import { kwSearch, kwPlayUrl, kwParseJSON, kwSearchAlbums, kwSearchPlaylists } from './kw'
+import { kwSearch, kwPlayUrl, kwParseJSON, kwSearchAlbums, kwSearchPlaylists, kwSearchArtists, kwPlaylistDetail } from './kw'
 import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult, OnlineCollectionDetail } from './kw'
-import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wyAlbumDetail, wyPlaylistDetail } from './wy'
-import { dailyRecPlaylists } from './daily'
-import { mgSearch, mgPlayUrl, mgLyric } from './mg'
+import { wySearch, wyPlayUrl, wyLyric, WY_BOARDS, wyBoardList, wySearchAlbums, wySearchPlaylists, wySearchArtists, wyAlbumDetail, wyPlaylistDetail } from './wy'
+import { platformPlaylists, platformPlaylistsHint } from './plaza'
+import { mgSearch, mgPlayUrl, mgLyric, mgSearchPlaylists, mgSearchArtists } from './mg'
 import {
-  sodaSearch, sodaPlayUrl, sodaLyric, sodaSearchAlbums, sodaSearchPlaylists,
+  sodaSearch, sodaPlayUrl, sodaLyric, sodaSearchAlbums, sodaSearchPlaylists, sodaSearchArtists,
   sodaAlbumDetail, sodaPlaylistDetail, SODA_REFERER, SODA_AUDIO_EXT,
 } from './soda'
 import { getSettings } from '@/library'
@@ -34,6 +34,8 @@ export interface OnlineSourceDef {
   searchAlbums?: (keyword: string, page: number, size: number) => Promise<OnlineCollectionResult>
   /** 可选：歌单搜索 */
   searchPlaylists?: (keyword: string, page: number, size: number) => Promise<OnlineCollectionResult>
+  /** 可选：歌手搜索（结果复用集合结构，trackCount = 歌曲数） */
+  searchArtists?: (keyword: string, page: number, size: number) => Promise<OnlineCollectionResult>
   /** 可选：专辑曲目详情 */
   albumDetail?: (id: string) => Promise<OnlineCollectionDetail>
   /** 可选：歌单曲目详情 */
@@ -48,8 +50,9 @@ export interface OnlineSourceDef {
 const REGISTRY: Record<string, OnlineSourceDef> = {
   kw: {
     id: 'kw', name: '酷我音乐', search: kwSearch, resolvePlayUrl: kwPlayUrl,
-    searchAlbums: kwSearchAlbums, searchPlaylists: kwSearchPlaylists,
-    // 酷我详情接口受反爬限制，不注册 detail/import 能力
+    searchAlbums: kwSearchAlbums, searchPlaylists: kwSearchPlaylists, searchArtists: kwSearchArtists,
+    // 专辑详情接口受反爬限制（不注册）；歌单详情改走 nplserver pl.svc，免鉴权可用
+    playlistDetail: kwPlaylistDetail,
   },
   wy: {
     id: 'wy',
@@ -59,17 +62,21 @@ const REGISTRY: Record<string, OnlineSourceDef> = {
     lyric: wyLyric,
     boards: () => WY_BOARDS.map((b) => ({ id: b.bangid, name: b.name })),
     boardList: (bid, limit) => wyBoardList(bid, limit),
-    searchAlbums: wySearchAlbums, searchPlaylists: wySearchPlaylists,
+    searchAlbums: wySearchAlbums, searchPlaylists: wySearchPlaylists, searchArtists: wySearchArtists,
     albumDetail: wyAlbumDetail, playlistDetail: wyPlaylistDetail,
   },
-  mg: { id: 'mg', name: '咪咕音乐', search: mgSearch, resolvePlayUrl: mgPlayUrl, lyric: mgLyric },
+  mg: {
+    id: 'mg', name: '咪咕音乐', search: mgSearch, resolvePlayUrl: mgPlayUrl, lyric: mgLyric,
+    searchPlaylists: mgSearchPlaylists, searchArtists: mgSearchArtists,
+    // 咪咕歌单曲目接口全线需要客户端签名，公开通道拿不到（searchAll 只回歌单元数据）
+  },
   soda: {
     id: 'soda',
     name: '汽水音乐',
     search: sodaSearch,
     resolvePlayUrl: sodaPlayUrl,
     lyric: sodaLyric,
-    searchAlbums: sodaSearchAlbums, searchPlaylists: sodaSearchPlaylists,
+    searchAlbums: sodaSearchAlbums, searchPlaylists: sodaSearchPlaylists, searchArtists: sodaSearchArtists,
     albumDetail: sodaAlbumDetail, playlistDetail: sodaPlaylistDetail,
     audioExt: SODA_AUDIO_EXT,
     // 免登录无公开榜单接口，故不注册 boards/boardList 能力（见 soda.ts 头注释）
@@ -84,25 +91,34 @@ const enabledIds = (): string[] => {
   return on.filter((id) => !!REGISTRY[id])
 }
 
-/** 源能力位（前端据此显示搜索类型 tabs / 详情 / 导入） */
+/**
+ * 源能力位（前端据此显示搜索类型 tabs / 详情 / 导入）。
+ * 搜索能力按类型细拆；详情能力按「专辑/歌单」细拆，因为同一源可能只有一种能展开
+ * （如酷我：歌单可展开、专辑接口反爬），粗粒度的 detail 已不够用。
+ */
 const sourceAbilities = (def: OnlineSourceDef): string[] => {
   const a: string[] = ['search']
   if (def.boards && def.boardList) a.push('boards')
-  if (def.searchAlbums && def.searchPlaylists) {
-    a.push('albums', 'playlists')
-    if (def.albumDetail && def.playlistDetail) a.push('detail', 'import')
-  }
+  if (def.searchAlbums) a.push('albums')
+  if (def.searchPlaylists) a.push('playlists')
+  if (def.searchArtists) a.push('artists')
+  if (def.albumDetail) a.push('album-detail')
+  if (def.playlistDetail) a.push('playlist-detail')
+  // 兼容位：专辑 + 歌单都能展开才算完整 detail/import（导入链接也要求两种详情都在）
+  if (def.albumDetail && def.playlistDetail) a.push('detail', 'import')
   return a
 }
 
 /**
- * 推荐歌单：优先 wy（推荐接口），其余源不支持时返回空。
- * 走「每日轮换」缓存：同一天固定一批，第二天自动换（见 ./daily）。
+ * 推荐歌单 / 平台歌单（在线音乐页默认视图「歌单广场」）：
+ *   wy 走官方推荐歌单（每日轮换）；kw/mg/soda 无公开推荐端点，改用热门标签拼
+ *   （见 ./plaza）。batch 只在标签拼法里有意义，wy 忽略。
  */
-export const onlineRecPlaylists = async (source: string, limit: number): Promise<{ id: string, name: string, pic: string, trackCount: number, creator: string }[]> => {
-  if (source === 'wy') return dailyRecPlaylists(limit)
-  return []
-}
+export const onlineRecPlaylists = async (source: string, limit: number, batch = 0): Promise<OnlineCollection[]> =>
+  platformPlaylists(source, batch, limit)
+
+/** 平台歌单的来源说明（页头小字） */
+export const onlineRecHint = (source: string): string => platformPlaylistsHint(source)
 
 export const onlineSources = (): { id: string; name: string; enabled: boolean; lyric: boolean; boards: boolean; abilities: string[] }[] =>
   KNOWN_IDS.map((id) => ({
@@ -129,6 +145,11 @@ export const onlineSearchAlbums = async (source: string, keyword: string, page: 
 export const onlineSearchPlaylists = async (source: string, keyword: string, page: number, size: number) => {
   if (!isOnlineSource(source) || !REGISTRY[source].searchPlaylists) throw new Error('该源不支持歌单搜索')
   return REGISTRY[source].searchPlaylists!(keyword, page, size)
+}
+
+export const onlineSearchArtists = async (source: string, keyword: string, page: number, size: number) => {
+  if (!isOnlineSource(source) || !REGISTRY[source].searchArtists) throw new Error('该源不支持歌手搜索')
+  return REGISTRY[source].searchArtists!(keyword, page, size)
 }
 
 export const onlineCollection = async (source: string, type: 'album' | 'playlist', id: string): Promise<OnlineCollectionDetail> => {

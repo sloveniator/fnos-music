@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { createHash } from 'node:crypto'
-import type { OnlineItem, OnlineSearchResult } from './kw'
+import type { OnlineItem, OnlineSearchResult, OnlineCollection, OnlineCollectionResult } from './kw'
 
 const UA =
   'Mozilla/5.0 (Linux; U; Android 11.0.0; zh-cn; MI 11 Build/OPR1.170623.032) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30'
@@ -37,22 +37,14 @@ const fetchJson = async (url: string, headers: Record<string, string>, timeoutMs
 }
 
 const SEARCH_SWITCH = encodeURIComponent('{"song":1,"album":0,"singer":0,"tagSong":1,"mvSong":0,"bestShow":1,"songlist":0,"lyricSong":0}')
+/** 歌手/歌单搜索用的开关表（与 SEARCH_SWITCH 同一套字段，只改开哪一类） */
+const mgSwitchOnly = (key: 'singer' | 'songlist'): string =>
+  encodeURIComponent(JSON.stringify({
+    song: 0, album: 0, singer: 0, tagSong: 0, mvSong: 0, bestShow: 0, songlist: 0, lyricSong: 0, [key]: 1,
+  }))
 
 export const mgSearch = async (keyword: string, page: number, size: number): Promise<OnlineSearchResult> => {
-  const { time, sign } = mgSign(keyword)
-  const url =
-    'https://jadeite.migu.cn/music_search/v3/search/searchAll?isCorrect=0&isCopyright=1&searchSwitch=' + SEARCH_SWITCH +
-    '&pageSize=' + Math.min(size, 50) +
-    '&text=' + encodeURIComponent(keyword) +
-    '&pageNo=' + page + '&sort=0&sid=USS'
-  const j = await fetchJson(url, {
-    uiVersion: 'A_music_3.6.1',
-    deviceId: MG_DEVICE_ID,
-    timestamp: time,
-    sign,
-    channel: MG_CHANNEL,
-  })
-  if (j?.code !== '000000') throw new Error('咪咕搜索失败：' + (j?.info ?? '未知错误'))
+  const j = await mgSearchRaw(keyword, page, size, SEARCH_SWITCH)
   const rawGroups: any[] = Array.isArray(j.songResultData?.resultList) ? j.songResultData.resultList : []
   const seen = new Set<string>()
   const list: OnlineItem[] = []
@@ -76,6 +68,71 @@ export const mgSearch = async (keyword: string, page: number, size: number): Pro
     }
   }
   return { list, total: parseInt(String(j.songResultData?.totalCount ?? '0'), 10) || list.length, page, size }
+}
+
+// ------------------------------ 歌单 / 歌手搜索 ------------------------------
+// 咪咕 searchAll 的 searchSwitch 是一张「要哪几类结果」的开关表；关掉 song/tagSong
+// 只留 songlist（歌单）或 singer（歌手），响应里分别落在 songListResultData /
+// singerResultData。分类字段名与 song 结果完全不同，所以单独映射。
+
+const mgSearchRaw = async (keyword: string, page: number, size: number, sw: string): Promise<any> => {
+  const { time, sign } = mgSign(keyword)
+  const url =
+    'https://jadeite.migu.cn/music_search/v3/search/searchAll?isCorrect=0&isCopyright=1&searchSwitch=' + sw +
+    '&pageSize=' + Math.min(size, 50) +
+    '&text=' + encodeURIComponent(keyword) +
+    '&pageNo=' + page + '&sort=0&sid=USS'
+  const j = await fetchJson(url, {
+    uiVersion: 'A_music_3.6.1',
+    deviceId: MG_DEVICE_ID,
+    timestamp: time,
+    sign,
+    channel: MG_CHANNEL,
+  })
+  if (j?.code !== '000000') throw new Error('咪咕搜索失败：' + (j?.info ?? '未知错误'))
+  return j
+}
+
+/** 咪咕歌单搜索（searchSwitch.songlist） */
+export const mgSearchPlaylists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const j = await mgSearchRaw(keyword, page, size, mgSwitchOnly('songlist'))
+  const arr: any[] = Array.isArray(j?.songListResultData?.result) ? j.songListResultData.result : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it?.id)
+    .map((it) => {
+      const pic = String(it.musicListPicUrl || it.img || '')
+      return {
+        source: 'mg',
+        id: String(it.id),
+        name: String(it.name || '未知歌单'),
+        creator: String(it.userName || ''),
+        trackCount: parseInt(String(it.musicNum ?? '0'), 10) || 0,
+        pic: /^https?:\/\//.test(pic) ? pic : (pic ? 'https://d.musicapp.migu.cn' + pic : null),
+      }
+    })
+  return { list, total: parseInt(String(j?.songListResultData?.totalCount ?? '0'), 10) || list.length, page, size }
+}
+
+/** 咪咕歌手搜索（searchSwitch.singer）；头像取最大尺寸档（imgSizeType 03 > 02 > 01） */
+export const mgSearchArtists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const j = await mgSearchRaw(keyword, page, size, mgSwitchOnly('singer'))
+  const arr: any[] = Array.isArray(j?.singerResultData?.result) ? j.singerResultData.result : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it?.id)
+    .map((it) => {
+      const pics: any[] = Array.isArray(it.singerPicUrl) ? it.singerPicUrl : []
+      const best = pics.find((p) => p?.imgSizeType === '03') || pics.find((p) => p?.imgSizeType === '02') || pics[0]
+      const pic = String(best?.img || '')
+      return {
+        source: 'mg',
+        id: String(it.id),
+        name: String(it.name || '未知歌手'),
+        creator: '',
+        trackCount: parseInt(String(it.songCount ?? '0'), 10) || 0,
+        pic: /^https?:\/\//.test(pic) ? pic : null,
+      }
+    })
+  return { list, total: parseInt(String(j?.singerResultData?.totalCount ?? '0'), 10) || list.length, page, size }
 }
 
 /** 解析咪咕试听直链（listen-url 通道，songId 匿名可查） */

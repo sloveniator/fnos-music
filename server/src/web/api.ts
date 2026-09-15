@@ -23,7 +23,7 @@ import { forYou } from '@/library/for-you'
 import { LIST_IDS } from '@/constants'
 import { lyricWithFallback } from '@/online/lyric-fallback'
 import { fmChannels, fmNext } from '@/online'
-import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists, onlineAudioExt, onlineStreamReferer } from '@/online'
+import { onlineSources, onlineSearch, onlineSearchAlbums, onlineSearchPlaylists, onlineSearchArtists, onlineCollection, importOnlineUrl, onlineResolvePlayUrl, isOnlineSource, onlineLyric, onlineBoards, onlineBoardList, onlineRecPlaylists, onlineRecHint, onlineAudioExt, onlineStreamReferer } from '@/online'
 import { pipeHttpStream } from '@/utils/httpPipe'
 import { accessLog } from '@/utils/log4js'
 import { auditDestructive } from '@/utils/audit'
@@ -445,6 +445,7 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     try {
       if (type === 'album') ok(res, await onlineSearchAlbums(source, keyword, page, size))
       else if (type === 'playlist') ok(res, await onlineSearchPlaylists(source, keyword, page, size))
+      else if (type === 'artist') ok(res, await onlineSearchArtists(source, keyword, page, size))
       else ok(res, await onlineSearch(source, keyword, page, size))
     } catch (e) {
       fail(res, 502, (e as Error).message)
@@ -491,14 +492,15 @@ export const handleWebRequest = async(req: http.IncomingMessage, res: http.Serve
     }
     return true
   }
-  // /web/api/online/rec-playlists?source=wy&limit=12 —— 推荐歌单
+  // /web/api/online/rec-playlists?source=wy&limit=12&batch=0 —— 平台歌单（音源首页默认视图）
   if (method == 'GET' && p == '/web/api/online/rec-playlists') {
     const source = url.searchParams.get('source') ?? 'wy'
     const limit = parseInt(url.searchParams.get('limit') ?? '12', 10) || 12
+    const batch = Math.max(0, parseInt(url.searchParams.get('batch') ?? '0', 10) || 0)
     if (!isOnlineSource(source)) return fail(res, 400, '参数非法'), true
     try {
-      ok(res, { list: await onlineRecPlaylists(source, limit) })
-    } catch (e: any) { fail(res, 500, '获取推荐歌单失败：' + (e?.message || e)) }
+      ok(res, { list: await onlineRecPlaylists(source, limit, batch), hint: onlineRecHint(source) })
+    } catch (e: any) { fail(res, 500, '获取平台歌单失败：' + (e?.message || e)) }
     return true
   }
 

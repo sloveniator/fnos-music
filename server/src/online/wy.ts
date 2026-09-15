@@ -131,6 +131,28 @@ export const wySearchPlaylists = async (keyword: string, page: number, size: num
   return { list, total: parseInt(String(json?.result?.playlistCount ?? '0'), 10) || list.length, page, size }
 }
 
+/** 网易云歌手搜索（公开老 API /api/search/get/web，type=100） */
+export const wySearchArtists = async (keyword: string, page: number, size: number): Promise<OnlineCollectionResult> => {
+  const url =
+    'https://music.163.com/api/search/get/web?s=' + encodeURIComponent(keyword) +
+    '&type=100&limit=' + size + '&offset=' + (size * (page - 1))
+  const resp = await fetch(url, { signal: AbortSignal.timeout(12_000), headers: { 'User-Agent': UA, Referer: 'https://music.163.com/' } })
+  if (!resp.ok) throw new Error('网易接口 HTTP ' + resp.status)
+  const json: any = await resp.json().catch(() => null)
+  const arr: any[] = Array.isArray(json?.result?.artists) ? json.result.artists : []
+  const list: OnlineCollection[] = arr
+    .filter((it) => it?.id)
+    .map((it) => ({
+      source: 'wy',
+      id: String(it.id),
+      name: String(it.name || '未知歌手'),
+      creator: Array.isArray(it.alias) ? String(it.alias[0] || '') : '',
+      trackCount: parseInt(String(it.musicSize ?? '0'), 10) || 0,
+      pic: /^https?:\/\//.test(String(it.picUrl ?? '')) ? String(it.picUrl) : null,
+    }))
+  return { list, total: parseInt(String(json?.result?.artistCount ?? '0'), 10) || list.length, page, size }
+}
+
 /** 批量单曲信息（eapi /api/song/detail；ids 每批最多 100） */
 const wySongDetail = async (ids: number[]): Promise<OnlineItem[]> => {
   if (!ids.length) return []
