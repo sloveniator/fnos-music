@@ -3081,13 +3081,18 @@ kuwo.cn/playlist_detail/280301309</pre>
         if (e.code === 'Escape') t.blur()
         return
       }
-      if (e.code === 'Space' && t && t.closest('button')) return // 保留按钮原生激活
       const seekBy = (s) => {
         const a = player.audio
         if (a && a.duration) a.currentTime = Math.max(0, Math.min(a.duration - 0.1, a.currentTime + s))
       }
       switch (e.code) {
-        case 'Space': e.preventDefault(); player.toggle(); break
+        case 'Space':
+          e.preventDefault()
+          // 空格 = 全局播放/暂停：即使焦点在按钮上也接管，避免误触发按钮原生 click（如焦点在“上一首”时被 prev() 重置回 0 重头播）
+          if (e.repeat) break // 长按只切换一次，避免连续 toggle 抖动
+          if (t && t.closest && t.closest('button')) t.blur()
+          player.toggle()
+          break
         case 'ArrowLeft': e.preventDefault(); seekBy(-5); break
         case 'ArrowRight': e.preventDefault(); seekBy(5); break
         case 'ArrowUp': e.preventDefault(); changeVol(5); break
