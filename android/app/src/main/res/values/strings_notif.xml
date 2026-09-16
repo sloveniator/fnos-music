@@ -4,4 +4,7 @@
     <string name="notif_next">下一首</string>
     <string name="notif_play">播放</string>
     <string name="notif_pause">暂停</string>
+    <!-- 通知栏展形里的 ±30 秒：Android 13 以下没有可拖动的进度条，这两颗按钮就是「跳着听」的入口 -->
+    <string name="notif_forward">快进 30 秒</string>
+    <string name="notif_rewind">后退 30 秒</string>
 </resources>

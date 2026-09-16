@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -51,10 +52,15 @@ class PlaybackService : Service() {
     private var wakeAcquiredAt = 0L
 
     private var playing = false
+    private var buffering = false
     private var title = ""
     private var artist = ""
     private var durationMs = 0L
     private var positionMs = 0L
+
+    /** 最后一次状态上报的时刻（elapsedRealtime 基准）；通知栏算「此刻位置」要用它。 */
+    private var stateAtElapsedMs = SystemClock.elapsedRealtime()
+
     private var coverUrl = ""
     private var art: Bitmap? = null
     private var lastNotified = 0L
@@ -94,6 +100,10 @@ class PlaybackService : Service() {
                 override fun onSeekTo(pos: Long) {
                     BridgeHolder.send("seek", (pos / 1000.0).toString())
                 }
+
+                override fun onFastForward() = seekBy(Transport.SEEK_STEP_MS)
+
+                override fun onRewind() = seekBy(-Transport.SEEK_STEP_MS)
 
                 override fun onStop() {
                     BridgeHolder.send("pause")
@@ -144,11 +154,22 @@ class PlaybackService : Service() {
 
         val wasPlaying = playing
         val wasTitle = title
+        val wasBuffering = buffering
         playing = o.optBoolean("playing", false)
+        buffering = o.optBoolean("buffering", false)
         title = o.optString("title", "")
         artist = o.optString("artist", "")
         durationMs = o.optLong("duration", 0L)
         positionMs = o.optLong("position", 0L)
+        // 「这个位置是什么时候的」：Web 端给的是墙钟毫秒，换算到 elapsedRealtime 基准，
+        // 再交给系统去外推。没有这行，通知栏进度条永远比实际慢一拍。
+        val atWall = o.optLong("at", 0L)
+        stateAtElapsedMs = if (atWall > 0) {
+            val age = (System.currentTimeMillis() - atWall).coerceIn(0L, Transport.MAX_SKEW_MS)
+            SystemClock.elapsedRealtime() - age
+        } else {
+            SystemClock.elapsedRealtime()
+        }
         val newCover = o.optString("cover", "")
 
         // 没有任何曲目、也没在播 —— 收掉通知，别挂一个空壳
@@ -164,7 +185,8 @@ class PlaybackService : Service() {
         }
 
         pushSessionState()
-        maybeReNotify(force = wasPlaying != playing || wasTitle != title)
+        // 曲目/播放态/缓冲态变了立刻重画通知，其余情况节流
+        maybeReNotify(force = wasPlaying != playing || wasTitle != title || wasBuffering != buffering)
 
         // 播放中拖住系统（前台服务 + WakeLock）；暂停后给用户留一段时间能回来接着听
         handler.removeCallbacks(stopRunnable)
@@ -185,21 +207,55 @@ class PlaybackService : Service() {
         art?.let { meta.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) }
         s.setMetadata(meta.build())
 
-        val state = if (playing) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
+        // 缓冲中要单独报：系统会把进度条停下并画个转圈，而不是让条子继续往前跑
+        val state = when {
+            playing && buffering -> PlaybackStateCompat.STATE_BUFFERING
+            playing -> PlaybackStateCompat.STATE_PLAYING
+            else -> PlaybackStateCompat.STATE_PAUSED
+        }
+        val speed = if (playing && !buffering) 1f else 0f
         s.setPlaybackState(
             PlaybackStateCompat.Builder()
-                .setActions(
-                    PlaybackStateCompat.ACTION_PLAY or
-                        PlaybackStateCompat.ACTION_PAUSE or
-                        PlaybackStateCompat.ACTION_PLAY_PAUSE or
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackStateCompat.ACTION_SEEK_TO or
-                        PlaybackStateCompat.ACTION_STOP
-                )
-                .setState(state, positionMs, if (playing) 1f else 0f)
+                .setActions(actions())
+                // updateTime 用「上报时刻」而不是 now：位置和时刻必须是同一瞬间的两个值
+                .setState(state, positionMs, speed, stateAtElapsedMs)
                 .build()
         )
+    }
+
+    /**
+     * 会话能力位。
+     *
+     * Android 13+ 的通知栏（系统自带媒体控件）就是读这里决定「要不要画可拖动的进度条」：
+     * 需要 duration（元数据里）+ ACTION_SEEK_TO + STATE_PLAYING/PAUSED 同时成立。
+     * ±30 秒则只在有时长时才给（直播流跳 30 秒没有意义）。
+     */
+    private fun actions(): Long {
+        var a = PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_PLAY_PAUSE or
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackStateCompat.ACTION_SEEK_TO or
+            PlaybackStateCompat.ACTION_STOP
+        if (durationMs > 0) {
+            a = a or PlaybackStateCompat.ACTION_FAST_FORWARD or PlaybackStateCompat.ACTION_REWIND
+        }
+        return a
+    }
+
+    /** 通知栏/锁屏要「从现在起 ±30 秒」时，基准必须是此刻位置，而不是上次上报的位置。 */
+    private fun currentPositionMs(): Long = Transport.positionNow(
+        positionMs = positionMs,
+        playing = playing,
+        atElapsedMs = stateAtElapsedMs,
+        nowElapsedMs = SystemClock.elapsedRealtime(),
+        durationMs = durationMs
+    )
+
+    private fun seekBy(deltaMs: Long) {
+        val target = Transport.seekTarget(currentPositionMs(), deltaMs, durationMs)
+        BridgeHolder.send("seek", (target / 1000.0).toString())
     }
 
     /** 通知栏不需要每秒重画：曲目/播放态变了立刻重画，否则最多 5 秒一次（进度用 setProgress 体现）。 */
@@ -237,6 +293,8 @@ class PlaybackService : Service() {
             if (playing) PlaybackStateCompat.ACTION_PAUSE else PlaybackStateCompat.ACTION_PLAY
         )
         val next = MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_SKIP_TO_NEXT)
+        val rewind = MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_REWIND)
+        val forward = MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_FAST_FORWARD)
 
         val style = MediaStyle()
             .setMediaSession(session?.sessionToken)
@@ -263,8 +321,17 @@ class PlaybackService : Service() {
             )
             .addAction(R.drawable.ic_notif_next, getString(R.string.notif_next), next)
 
+        // 展开后的第 4、5 颗（compact view 仍是 0/1/2 = 上一首/播放暂停/下一首）。
+        // 只在有时长时给：Android 13 以下系统不给媒体通知画进度条，这两颗按钮就是「跳着听」的唯一入口。
         if (durationMs > 0) {
-            b.setProgress(1000, ((positionMs * 1000) / durationMs).toInt().coerceIn(0, 1000), false)
+            b.addAction(R.drawable.ic_notif_rew, getString(R.string.notif_rewind), rewind)
+            b.addAction(R.drawable.ic_notif_ff, getString(R.string.notif_forward), forward)
+        }
+
+        if (durationMs > 0) {
+            // 老式媒体通知的进度条：位置按「此刻」算，和交给系统的 updateTime 同一口径
+            val pos = currentPositionMs()
+            b.setProgress(1000, ((pos * 1000) / durationMs).toInt().coerceIn(0, 1000), false)
         }
         art?.let { b.setLargeIcon(it) }
         return b.build()

@@ -70,6 +70,12 @@ object BridgeScript {
     var img = document.getElementById('np-cover');
     return {
       playing: !a.paused && !a.ended,
+      // readyState 不到 HAVE_FUTURE_DATA(3) = 手上没数据可放了：加载中 / 卡住 / seek 后重新缓冲。
+      // 通知栏据此显示「缓冲中」，也让进度条停下，而不是继续假装在往前走。
+      buffering: !a.paused && !a.ended && a.readyState < 3,
+      // 推送时刻（毫秒时间戳）：系统画进度条要的是「这个位置是什么时候的」，
+      // 少了它系统会把过期位置当成现在，进度条整体落后一到两秒（seek 之后尤其明显）
+      at: Date.now(),
       title: txt('np-name'),
       artist: txt('np-singer'),
       cover: (img && img.src) ? img.src : '',
@@ -156,7 +162,8 @@ object BridgeScript {
     if (!p || !p.audio) return false;
     if (!p.__gusiBound) {
       p.__gusiBound = true;
-      var evs = ['play', 'playing', 'pause', 'ended', 'loadedmetadata', 'durationchange', 'seeked', 'error'];
+      var evs = ['play', 'playing', 'pause', 'ended', 'loadedmetadata', 'durationchange',
+                 'seeked', 'error', 'waiting', 'stalled', 'canplay'];
       for (var i = 0; i < evs.length; i++) {
         p.audio.addEventListener(evs[i], function () { setTimeout(function () { push(true); }, 60); });
       }
