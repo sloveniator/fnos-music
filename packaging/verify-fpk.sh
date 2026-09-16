@@ -160,6 +160,14 @@ check "网关 socket：/app/gusi-music/admin/api/status 不是 404" "$(curl -s -
 check "分享页 HTML 资源路径带网关前缀" "$(curl -s --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/s/nonexistent" | grep -c 'href="/app/gusi-music/s/assets/share.css"')" "1"
 # 静态检查：后台前端不得再出现不带前缀的绝对 /admin 请求
 check "admin.js 无裸 /admin 请求" "$(grep -c "fetch('/admin" "${APPDEST}/ui/dist/assets/admin.js")" "0"
+# 在线源开关清单必须来自服务端 registry：前端硬编码曾经漏掉汽水音乐 —— FM 电台提示
+# 「汽水音乐源未启用，请先在管理后台开启」，而后台根本没有汽水这个开关，用户找不到入口（0029 回归项）
+check "admin.js 从服务端取在线源清单" "$(grep -c "api('/admin/api/library/online-sources'" "${APPDEST}/ui/dist/assets/admin.js")" "1"
+check "服务端提供在线源清单接口" "$(grep -c 'admin/api/library/online-sources' "${APPDEST}/server/server/admin/library.js")" "1"
+check "admin.js 兜底清单含汽水音乐" "$(grep -c "ONLINE_ALL = \['kw', 'wy', 'mg', 'soda'\]" "${APPDEST}/ui/dist/assets/admin.js")" "1"
+check "后台在线源卡片文案提到汽水" "$(grep -c '汽水音乐' "${APPDEST}/ui/dist/index.html")" "1"
+check "消费者端 FM 提示条带后台深链" "$(grep -c "BASE + '/admin/#sources'" "${APPDEST}/ui/app/assets/app.js")" "1"
+check "在线源清单接口经网关不是 404" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/admin/api/library/online-sources")" "401"
 check "share.js 的 API 基址带前缀变量" "$(grep -c "var API = PREFIX + '/s/' + CODE" "${APPDEST}/ui/share/share.js")" "1"
 check "使用的是捆绑 Node 运行时" "$(grep -c 'Bundled node runtime is ready' "${PKGVAR}/info.log")" "1"
 if "${PKGVAR}/runtime/node/node" -v >/dev/null 2>&1; then ok "捆绑运行时可直接执行（$("${PKGVAR}/runtime/node/node" -v)）"; else bad "捆绑运行时无法执行"; fi

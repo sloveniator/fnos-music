@@ -21,7 +21,13 @@ const withBase = (p) => (p && p.charAt(0) === '/' ? BASE + p : p)
 // ---------------- 状态 ----------------
 let TOKEN = localStorage.getItem('gusi-admin-token') || ''
 let STREAM_TOKEN = ''
-let CURRENT_TAB = 'overview'
+// Tab 深链：/admin/#sources 直接落到「音源与代理」（消费者端 FM 的「去管理后台开启」就指这里）
+const TAB_IDS = ['overview', 'users', 'library', 'tenants', 'downloads', 'sources', 'shares']
+const tabFromHash = () => {
+  const h = (location.hash || '').replace(/^#/, '')
+  return TAB_IDS.indexOf(h) >= 0 ? h : 'overview'
+}
+let CURRENT_TAB = tabFromHash()
 
 // 曲库页状态
 let lib = { q: '', page: 1, size: 50, total: 0, tracks: [], sel: new Set(), settings: null, dirs: [] }
@@ -32,9 +38,12 @@ let dlTasks = []
 let userList = []
 let tenantData = []
 
-const SOURCE_NAMES = { kw: '酷我', wy: '网易云', mg: '咪咕', kg: '酷狗', tx: 'QQ音乐' }
+const SOURCE_NAMES = { kw: '酷我', wy: '网易云', mg: '咪咕', kg: '酷狗', tx: 'QQ音乐', soda: '汽水音乐' }
 const PROXY_ALL = ['wy', 'kw', 'tx', 'kg', 'mg']
-const ONLINE_ALL = ['kw', 'wy', 'mg']
+// 在线源勾选清单：正常由 /admin/api/library/online-sources（服务端 registry）下发，
+// 这里的数组只是接口不可用时的兜底。硬编码曾经漏掉汽水音乐 → FM 提示「源未启用」
+// 而后台没有开关可点（0029 修复）；新增内置源请改 server/src/online/index.ts 的 REGISTRY。
+const ONLINE_ALL = ['kw', 'wy', 'mg', 'soda']
 
 // ---------------- 工具 ----------------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
@@ -127,7 +136,7 @@ const doLogin = async (password) => {
   $('#shell').hidden = false
   $('#login-err').textContent = ''
   $('#who').textContent = r.data.serverName || '管理后台'
-  switchTab('overview')
+  switchTab(tabFromHash())
   initAll()
 }
 
@@ -160,6 +169,9 @@ $('#logout').addEventListener('click', () => doLogout(true))
 // ---------------- Tab ----------------
 const switchTab = (name) => {
   CURRENT_TAB = name
+  // 地址栏同步（replaceState 不留历史，不影响后退）；深链进来切 tab 后刷新仍停在当前页
+  const want = '#' + name
+  if (location.hash !== want) history.replaceState(null, '', location.pathname + location.search + want)
   $$('.nav .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name))
   $$('.tab-page').forEach(p => { p.hidden = p.id !== 'tab-' + name })
   if (name === 'overview') loadOverview()
@@ -1050,7 +1062,19 @@ const loadSources = async () => {
     sourceState.proxySources = s.proxySources || []
     sourceState.onlineSources = s.onlineSources || []
     sourceState.scriptSources = [...sourceState.proxySources]
-    renderChips($('#online-sources'), ONLINE_ALL, sourceState.onlineSources)
+    // 在线源勾选项来自服务端 registry（名称一并发下），避免前端清单与服务端漂移
+    let onlineAll = ONLINE_ALL
+    try {
+      const o = await api('/admin/api/library/online-sources', { method: 'GET' })
+      const list = Array.isArray(o.data) ? o.data : []
+      if (list.length) {
+        list.forEach((x) => { if (x && x.id) SOURCE_NAMES[x.id] = x.name || SOURCE_NAMES[x.id] || x.id })
+        onlineAll = list.map((x) => x.id)
+      }
+    } catch (err) {
+      console.warn('在线源清单接口不可用，改用内置兜底清单：' + err.message)
+    }
+    renderChips($('#online-sources'), onlineAll, sourceState.onlineSources)
     renderChips($('#script-sources'), PROXY_ALL, sourceState.scriptSources, (sel) => {
       sourceState.proxySources = [...sel]
       sourceState.scriptSources = [...sel]

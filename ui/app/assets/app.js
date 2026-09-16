@@ -3451,10 +3451,40 @@ kuwo.cn/playlist_detail/280301309</pre>
     return !s || s.enabled
   }
 
+  /** 重拉在线源清单：主人在后台刚打开汽水开关时，不必整页刷新就能开台 */
+  async function refreshOnlineSources() {
+    try {
+      const d = await api('/api/online/sources')
+      if (d.sources && d.sources.length) onlineSourcesCache = d.sources
+    } catch {}
+  }
+
+  /**
+   * 汽水源被关掉时的可操作提示条。
+   * FM 全部频道都来自汽水，「源未启用」光提示一句用户找不到开关在哪儿
+   * （后台「音源与代理 → 在线音乐源」），所以这里直接给一条能点走的深链。
+   */
+  function fmWarnBar() {
+    const w = el('div', 'fm-warn')
+    w.appendChild(el('span', 'fm-warn-tx', '⚠ 汽水音乐源未启用，FM 电台无法开台。'))
+    const a = el('a', 'btn', '去管理后台开启 →')
+    a.href = BASE + '/admin/#sources'
+    a.target = '_blank'
+    a.rel = 'noopener'
+    w.appendChild(a)
+    return w
+  }
+
   /** 开台：拉首批曲目交给播放器（FM 语义：顺序播放、队列见底自动续、按频道变速） */
   async function startFm(key, opts) {
     const o = opts || {}
-    if (!fmSourceEnabled()) { toast('汽水音乐源未启用，请先在管理后台开启', true); return }
+    if (!fmSourceEnabled()) {
+      // 可能只是本地缓存旧（后台刚开启）：重拉一次再判，真没开才拦 + 撤掉提示条
+      await refreshOnlineSources()
+      if (!fmSourceEnabled()) { toast('汽水音乐源未启用，请到管理后台「音源与代理」开启', true); return }
+      const w = document.querySelector('.fm-warn')
+      if (w) w.remove()
+    }
     try {
       if (!o.silent) toast('正在接入频道…')
       const d = await api('/api/fm/next?key=' + encodeURIComponent(key) + '&limit=20')
@@ -3532,6 +3562,10 @@ kuwo.cn/playlist_detail/280301309</pre>
     setActiveNav('fm')
     const v = $('#view')
     // 顶部介绍横幅已删除（同上）：进来直接是「自动播放开关 + 频道网格」
+    // 汽水源没开时先摆提示条（否则用户只会看到一排开不了台的频道卡）；
+    // 进页面重拉一次源清单，后台刚改完开关不必整页刷新
+    await refreshOnlineSources()
+    if (!fmSourceEnabled()) v.appendChild(fmWarnBar())
 
     const row = el('div', 'fm-autorow')
     const lbl = el('label', 'set-toggle')

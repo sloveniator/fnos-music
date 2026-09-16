@@ -17,6 +17,7 @@ import { resolveFromUserSources, listUserSources, saveUserSource, deleteUserSour
 import { listRemoteSources, applyRemoteSources, loadRegistries, addRegistry, removeRegistry } from '@/online/source-registry'
 import { getTenantSettings, saveTenantSettings, startTenantScan, getTenantScanState, tenantLibraryStats, listTenants } from '@/library/tenant'
 import { findRegisteredUser, listRegisteredUsers } from '@/user/register'
+import { onlineSources } from '@/online'
 
 // ---------------------------------------------------------------------------
 // 曲库 HTTP 层
@@ -222,6 +223,15 @@ export const handleLibraryAdmin = async(req: http.IncomingMessage, res: http.Ser
 
   if (method == 'GET' && p == '/admin/api/library/settings') {
     ok(res, getSettings())
+    return true
+  }
+
+  // 内置在线源清单（管理后台「在线音乐源」勾选项的唯一数据源）
+  //   为什么走服务端 registry 而不是前端硬编码数组：0027 上线汽水音乐时前端清单忘了加 soda，
+  //   于是 FM 电台提示「汽水音乐源未启用，请先在管理后台开启」，而后台里根本没有汽水这个开关，
+  //   用户找不到设置入口（0029 修复）。以后新增内置源只改 online/index.ts 的 REGISTRY 即可。
+  if (method == 'GET' && p == '/admin/api/library/online-sources') {
+    ok(res, onlineSources())
     return true
   }
 
