@@ -90,16 +90,31 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   box-shadow: inset 0 0 0 1px rgba(79,140,255,.18); font-weight: 600; }
 .nav a.on::before { content: ""; position: absolute; left: -14px; top: 8px; bottom: 8px; width: 3px;
   border-radius: 0 4px 4px 0; background: linear-gradient(180deg, var(--accent), var(--accent2)); }
-.side-foot { display: flex; justify-content: space-between; align-items: center; margin-top: auto;  /* 歌单区已并入「专辑/歌单」页，这里靠 auto 顶到底部 */
-  border-top: 1px solid var(--line-soft); padding: 12px 8px 2px; font-size: 13px; color: var(--muted); }
+.side-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: auto;  /* 歌单区已并入「专辑/歌单」页，这里靠 auto 顶到底部 */
+  border-top: 1px solid var(--line-soft); padding: 12px 13px 4px; font-size: 13px; color: var(--muted); }
 /* 播放器出现后给侧栏底部让位，避免遮挡账号 / 管理入口 */
 body.has-player .sidebar { padding-bottom: calc(var(--player-h) + 8px); }
 body.has-player .side-foot { background: linear-gradient(0deg, rgba(13,16,24,.55), transparent); }
-.side-links { display: flex; gap: 6px; align-items: center; }
-.side-links a, .side-foot button { width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); transition: all .15s; }
+/* 服务器名是这一块的小标题：提亮到前景色（原来和图标同为 muted，整块糊成一片灰）；
+   超长时省略，而不是换行把底栏撑高、或把右侧图标挤扁。 */
+.side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+/* flex-shrink:0 + 右移 13px（= .side-foot 右内边距）：名字再长也不会挤压图标，
+   方框外边与上方分隔线、导航药丸右端落在同一条线（外侧 14..244）。 */
+.side-links { display: flex; gap: 6px; align-items: center; flex-shrink: 0; margin-right: -13px; }
+/* 方框：1px 描边 + 极浅底，默认就「看得出可点」；尺寸仍 34×34（≤900px 由 min-width 抬到 38px）。
+   transition 只列会变的属性；点按动画沿用全局 :active 缩放那条规则，这里不重复实现。 */
+.side-links a, .side-foot button { width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted);
+  border: 1px solid var(--line); background: rgba(255,255,255,.03);
+  transition: color .15s, background .15s, border-color .15s, box-shadow .15s; }
 .side-links a svg, .side-foot button svg { width: 18px; height: 18px; }
-.side-links a:hover { color: #9fc0ff; background: rgba(79,140,255,.14); }
-.side-foot button:hover { color: var(--danger); background: rgba(255,95,109,.12); }
+/* hover 只给颜色/边框/内描边：本文件约定 hover 不留位移与阴影（点过之后会像「点击留下的影子」） */
+.side-links a:hover { color: #9fc0ff; background: rgba(79,140,255,.14); border-color: rgba(79,140,255,.45);
+  box-shadow: inset 0 0 0 1px rgba(79,140,255,.18); }
+.side-foot button:hover { color: var(--danger); background: rgba(255,95,109,.12); border-color: rgba(255,95,109,.45);
+  box-shadow: inset 0 0 0 1px rgba(255,95,109,.18); }
+/* 键盘可达性：这两个入口原来没有任何聚焦指示，Tab 走到也看不出来 */
+.side-links a:focus-visible, .side-foot button:focus-visible { color: var(--text); border-color: var(--accent);
+  outline: none; box-shadow: 0 0 0 3px rgba(79,140,255,.22); }
 
 .main { flex: 1; overflow-y: auto; padding: 30px 34px calc(var(--player-h) + 30px); scroll-behavior: smooth; }
 .view { max-width: 1240px; margin: 0 auto; }
@@ -1081,8 +1096,8 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .menu button:hover { color: #cdd3e4; background: none; }
   .queue-head button:hover, .lf-head button:hover { color: var(--muted); background: none; }
   .dlg-btns button:hover:not(.primary) { background: none; }
-  .side-links a:hover { color: var(--muted); background: none; }
-  .side-foot button:hover { color: var(--muted); background: none; }
+  .side-links a:hover, .side-foot button:hover { color: var(--muted); background: rgba(255,255,255,.03);
+    border-color: var(--line); box-shadow: none; }
   /* 卡片 / 列表行：hover 的位移与阴影就是「点过之后留下的影子」 */
   .card:hover { transform: none; border-color: var(--line-soft); border-top-color: rgba(255,255,255,.045); box-shadow: none; }
   .card:hover .play-fab { opacity: 0; transform: translateY(8px) scale(.85); }

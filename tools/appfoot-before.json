@@ -1,0 +1,632 @@
+{
+ "1440x900@1.333": {
+  "sidebar": {
+   "left": 0,
+   "right": 258,
+   "w": 258,
+   "pad": "14px/14px",
+   "padBottom": "12px"
+  },
+  "foot": {
+   "borderBox": [
+    14,
+    243
+   ],
+   "w": 229,
+   "pad": "8px/8px/12px/2px",
+   "borderTop": "1px rgb(28, 34, 48)",
+   "bg": "none",
+   "h": 49
+  },
+  "who": {
+   "left": 22,
+   "right": 73.7,
+   "bottom": 876.5,
+   "fontSize": "13px",
+   "color": "rgb(142, 151, 173)",
+   "ellipsis": "clip",
+   "overflow": "visible",
+   "minWidth": "auto",
+   "text": "Slceleto",
+   "clipped": false
+  },
+  "sideLinks": {
+   "box": {
+    "left": 161,
+    "right": 235,
+    "top": 852,
+    "bottom": 886,
+    "w": 74,
+    "h": 34,
+    "radius": "0px",
+    "border": "rgb(142, 151, 173)",
+    "borderW": "0px",
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(142, 151, 173)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "gap": "6px",
+   "shrink": "1"
+  },
+  "admin": {
+   "left": 161,
+   "right": 195,
+   "top": 852,
+   "bottom": 886,
+   "w": 34,
+   "h": 34,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "logout": {
+   "left": 201,
+   "right": 235,
+   "top": 852,
+   "bottom": 886,
+   "w": 34,
+   "h": 34,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "svg": "18px",
+  "gapBetween": 6,
+  "gapWhoToLinks": 87.3,
+  "overlapWhoLinks": false,
+  "footBottomGap": 0,
+  "overflow": {
+   "foot": 0,
+   "side": 0
+  },
+  "_states": {
+   "longName": {
+    "adminW": 34,
+    "clipped": false,
+    "footOverflow": 0
+   },
+   "hoverAdmin": {
+    "left": 161,
+    "right": 195,
+    "top": 852,
+    "bottom": 886,
+    "w": 34,
+    "h": 34,
+    "radius": "10px",
+    "border": "rgb(159, 192, 255)",
+    "borderW": "0px",
+    "bg": "rgba(79, 140, 255, 0.14)",
+    "color": "rgb(159, 192, 255)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "hoverLogout": {
+    "left": 201,
+    "right": 235,
+    "top": 852,
+    "bottom": 886,
+    "w": 34,
+    "h": 34,
+    "radius": "10px",
+    "border": "rgb(255, 95, 109)",
+    "borderW": "0px",
+    "bg": "rgba(255, 95, 109, 0.12)",
+    "color": "rgb(255, 95, 109)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "activeLogout": {
+    "left": 202,
+    "right": 234,
+    "top": 853,
+    "bottom": 885,
+    "w": 32,
+    "h": 32,
+    "radius": "10px",
+    "border": "rgb(255, 95, 109)",
+    "borderW": "0px",
+    "bg": "rgba(255, 95, 109, 0.12)",
+    "color": "rgb(255, 95, 109)",
+    "transform": "matrix(0.94, 0, 0, 0.94, 0, 0)",
+    "shadow": "none",
+    "transition": "transform, filter",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "stillLoggedIn": true,
+   "tabReached": "A:管理后台",
+   "focus": {
+    "el": "A",
+    "matches": true,
+    "box": {
+     "left": 161,
+     "right": 195,
+     "top": 852,
+     "bottom": 886,
+     "w": 34,
+     "h": 34,
+     "radius": "10px",
+     "border": "rgb(142, 151, 173)",
+     "borderW": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "color": "rgb(142, 151, 173)",
+     "transform": "none",
+     "shadow": "none",
+     "transition": "all",
+     "outline": "auto",
+     "fontSize": "13px"
+    }
+   },
+   "withPlayer": {
+    "footTop": 757.8,
+    "footBottom": 806.8,
+    "sideBottom": 900,
+    "gapToSideBottom": 93.2,
+    "sidePadBottom": "93.2px",
+    "footBg": true
+   }
+  }
+ },
+ "1280x800@1": {
+  "sidebar": {
+   "left": 0,
+   "right": 251.8,
+   "w": 251.8,
+   "pad": "14px/14px",
+   "padBottom": "12px"
+  },
+  "foot": {
+   "borderBox": [
+    14,
+    236.8
+   ],
+   "w": 222.8,
+   "pad": "8px/8px/12px/2px",
+   "borderTop": "1px rgb(28, 34, 48)",
+   "bg": "none",
+   "h": 49
+  },
+  "who": {
+   "left": 22,
+   "right": 73.7,
+   "bottom": 776.5,
+   "fontSize": "13px",
+   "color": "rgb(142, 151, 173)",
+   "ellipsis": "clip",
+   "overflow": "visible",
+   "minWidth": "auto",
+   "text": "Slceleto",
+   "clipped": false
+  },
+  "sideLinks": {
+   "box": {
+    "left": 154.8,
+    "right": 228.8,
+    "top": 752,
+    "bottom": 786,
+    "w": 74,
+    "h": 34,
+    "radius": "0px",
+    "border": "rgb(142, 151, 173)",
+    "borderW": "0px",
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(142, 151, 173)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "gap": "6px",
+   "shrink": "1"
+  },
+  "admin": {
+   "left": 154.8,
+   "right": 188.8,
+   "top": 752,
+   "bottom": 786,
+   "w": 34,
+   "h": 34,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "logout": {
+   "left": 194.8,
+   "right": 228.8,
+   "top": 752,
+   "bottom": 786,
+   "w": 34,
+   "h": 34,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "svg": "18px",
+  "gapBetween": 6,
+  "gapWhoToLinks": 81.1,
+  "overlapWhoLinks": false,
+  "footBottomGap": 0,
+  "overflow": {
+   "foot": 0,
+   "side": 0
+  },
+  "_states": {
+   "longName": {
+    "adminW": 34,
+    "clipped": false,
+    "footOverflow": 0
+   },
+   "hoverAdmin": {
+    "left": 154.8,
+    "right": 188.8,
+    "top": 752,
+    "bottom": 786,
+    "w": 34,
+    "h": 34,
+    "radius": "10px",
+    "border": "rgb(159, 192, 255)",
+    "borderW": "0px",
+    "bg": "rgba(79, 140, 255, 0.14)",
+    "color": "rgb(159, 192, 255)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "hoverLogout": {
+    "left": 194.8,
+    "right": 228.8,
+    "top": 752,
+    "bottom": 786,
+    "w": 34,
+    "h": 34,
+    "radius": "10px",
+    "border": "rgb(255, 95, 109)",
+    "borderW": "0px",
+    "bg": "rgba(255, 95, 109, 0.12)",
+    "color": "rgb(255, 95, 109)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "activeLogout": {
+    "left": 195.8,
+    "right": 227.8,
+    "top": 753,
+    "bottom": 785,
+    "w": 32,
+    "h": 32,
+    "radius": "10px",
+    "border": "rgb(255, 95, 109)",
+    "borderW": "0px",
+    "bg": "rgba(255, 95, 109, 0.12)",
+    "color": "rgb(255, 95, 109)",
+    "transform": "matrix(0.94, 0, 0, 0.94, 0, 0)",
+    "shadow": "none",
+    "transition": "transform, filter",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "stillLoggedIn": true,
+   "tabReached": "A:管理后台",
+   "focus": {
+    "el": "A",
+    "matches": true,
+    "box": {
+     "left": 154.8,
+     "right": 188.8,
+     "top": 752,
+     "bottom": 786,
+     "w": 34,
+     "h": 34,
+     "radius": "10px",
+     "border": "rgb(142, 151, 173)",
+     "borderW": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "color": "rgb(142, 151, 173)",
+     "transform": "none",
+     "shadow": "none",
+     "transition": "all",
+     "outline": "auto",
+     "fontSize": "13px"
+    }
+   },
+   "withPlayer": {
+    "footTop": 662.6,
+    "footBottom": 711.6,
+    "sideBottom": 800,
+    "gapToSideBottom": 88.4,
+    "sidePadBottom": "88.4px",
+    "footBg": true
+   }
+  }
+ },
+ "1024x768@1": {
+  "sidebar": {
+   "left": 0,
+   "right": 236.4,
+   "w": 236.4,
+   "pad": "14px/14px",
+   "padBottom": "12px"
+  },
+  "foot": {
+   "borderBox": [
+    14,
+    221.4
+   ],
+   "w": 207.4,
+   "pad": "8px/8px/12px/2px",
+   "borderTop": "1px rgb(28, 34, 48)",
+   "bg": "none",
+   "h": 49
+  },
+  "who": {
+   "left": 22,
+   "right": 73.7,
+   "bottom": 744.5,
+   "fontSize": "13px",
+   "color": "rgb(142, 151, 173)",
+   "ellipsis": "clip",
+   "overflow": "visible",
+   "minWidth": "auto",
+   "text": "Slceleto",
+   "clipped": false
+  },
+  "sideLinks": {
+   "box": {
+    "left": 139.4,
+    "right": 213.4,
+    "top": 720,
+    "bottom": 754,
+    "w": 74,
+    "h": 34,
+    "radius": "0px",
+    "border": "rgb(142, 151, 173)",
+    "borderW": "0px",
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(142, 151, 173)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "gap": "6px",
+   "shrink": "1"
+  },
+  "admin": {
+   "left": 139.4,
+   "right": 173.4,
+   "top": 720,
+   "bottom": 754,
+   "w": 34,
+   "h": 34,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "logout": {
+   "left": 179.4,
+   "right": 213.4,
+   "top": 720,
+   "bottom": 754,
+   "w": 34,
+   "h": 34,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "svg": "18px",
+  "gapBetween": 6,
+  "gapWhoToLinks": 65.8,
+  "overlapWhoLinks": false,
+  "footBottomGap": 0,
+  "overflow": {
+   "foot": 0,
+   "side": 0
+  },
+  "_states": {
+   "longName": {
+    "adminW": 34,
+    "clipped": false,
+    "footOverflow": 0
+   },
+   "withPlayer": {
+    "footTop": 632.1,
+    "footBottom": 681.1,
+    "sideBottom": 768,
+    "gapToSideBottom": 86.9,
+    "sidePadBottom": "86.864px",
+    "footBg": true
+   }
+  }
+ },
+ "390x844@1": {
+  "sidebar": {
+   "left": 0,
+   "right": 300,
+   "w": 300,
+   "pad": "14px/14px",
+   "padBottom": "12px"
+  },
+  "foot": {
+   "borderBox": [
+    14,
+    285
+   ],
+   "w": 271,
+   "pad": "8px/8px/12px/2px",
+   "borderTop": "1px rgb(28, 34, 48)",
+   "bg": "none",
+   "h": 53
+  },
+  "who": {
+   "left": 22,
+   "right": 73.7,
+   "bottom": 818.5,
+   "fontSize": "13px",
+   "color": "rgb(142, 151, 173)",
+   "ellipsis": "clip",
+   "overflow": "visible",
+   "minWidth": "auto",
+   "text": "Slceleto",
+   "clipped": false
+  },
+  "sideLinks": {
+   "box": {
+    "left": 195,
+    "right": 277,
+    "top": 792,
+    "bottom": 830,
+    "w": 82,
+    "h": 38,
+    "radius": "0px",
+    "border": "rgb(142, 151, 173)",
+    "borderW": "0px",
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(142, 151, 173)",
+    "transform": "none",
+    "shadow": "none",
+    "transition": "all",
+    "outline": "none",
+    "fontSize": "13px"
+   },
+   "gap": "6px",
+   "shrink": "1"
+  },
+  "admin": {
+   "left": 195,
+   "right": 233,
+   "top": 792,
+   "bottom": 830,
+   "w": 38,
+   "h": 38,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "logout": {
+   "left": 239,
+   "right": 277,
+   "top": 792,
+   "bottom": 830,
+   "w": 38,
+   "h": 38,
+   "radius": "10px",
+   "border": "rgb(142, 151, 173)",
+   "borderW": "0px",
+   "bg": "rgba(0, 0, 0, 0)",
+   "color": "rgb(142, 151, 173)",
+   "transform": "none",
+   "shadow": "none",
+   "transition": "all",
+   "outline": "none",
+   "fontSize": "13px"
+  },
+  "svg": "18px",
+  "gapBetween": 6,
+  "gapWhoToLinks": 121.3,
+  "overlapWhoLinks": false,
+  "footBottomGap": 0,
+  "overflow": {
+   "foot": 0,
+   "side": 0
+  },
+  "_states": {
+   "longName": {
+    "adminW": 38,
+    "clipped": false,
+    "footOverflow": 0
+   },
+   "withPlayer": {
+    "footTop": 679,
+    "footBottom": 732,
+    "sideBottom": 844,
+    "gapToSideBottom": 112,
+    "sidePadBottom": "112px",
+    "footBg": true
+   }
+  }
+ },
+ "reducedMotionHover": {
+  "left": 201,
+  "right": 235,
+  "top": 852,
+  "bottom": 886,
+  "w": 34,
+  "h": 34,
+  "radius": "10px",
+  "border": "rgb(255, 95, 109)",
+  "borderW": "0px",
+  "bg": "rgba(255, 95, 109, 0.12)",
+  "color": "rgb(255, 95, 109)",
+  "transform": "none",
+  "shadow": "none",
+  "transition": "all",
+  "outline": "none",
+  "fontSize": "13px"
+ }
+}
