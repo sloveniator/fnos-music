@@ -16,8 +16,23 @@ object Transport {
     /** 时间戳最多往回认这么多（时钟跳变/推送积压时的保险丝）。 */
     const val MAX_SKEW_MS = 10_000L
 
-    /** 相对跳转的目标位置：不越左边界，duration 已知时不越右边界。 */
-    fun seekTarget(positionMs: Long, deltaMs: Long, durationMs: Long): Long {
+    /**
+     * 毫秒 → `m:ss` / `h:mm:ss`（续播提示、通知文案用）。
+     * 固定 Locale.US：某些语言环境会把数字换成别的字符集，时间戳要保持 ASCII 可比对。
+     */
+    fun clock(ms: Long): String {
+        val total = ms.coerceAtLeast(0L) / 1000
+        val s = total % 60
+        val m = (total / 60) % 60
+        val h = total / 3600
+        return if (h > 0) {
+            String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, s)
+        } else {
+            String.format(java.util.Locale.US, "%d:%02d", m, s)
+        }
+    }
+
+    /** 相对跳转的目标位置：不越左边界，duration 已知时不越右边界。 */    fun seekTarget(positionMs: Long, deltaMs: Long, durationMs: Long): Long {
         val raw = (positionMs + deltaMs).coerceAtLeast(0L)
         return if (durationMs > 0) raw.coerceAtMost(durationMs) else raw
     }

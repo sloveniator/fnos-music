@@ -51,4 +51,14 @@ class TransportTest {
         val p = Transport.positionNow(3_000, playing = true, atElapsedMs = 0, nowElapsedMs = 999_999_999, durationMs = 100_000)
         assertEquals(3_000L, p)
     }
+
+    @Test
+    fun `时间文案`() {
+        assertEquals("0:00", Transport.clock(0))
+        assertEquals("0:07", Transport.clock(7_400))
+        assertEquals("1:23", Transport.clock(83_000))
+        assertEquals("59:59", Transport.clock(3_599_000))
+        assertEquals("1:00:00", Transport.clock(3_600_000))
+        assertEquals("0:00", Transport.clock(-5))       // 负数不出现 "-0:00"
+    }
 }

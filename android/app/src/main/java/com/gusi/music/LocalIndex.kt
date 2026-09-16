@@ -90,10 +90,10 @@ class LocalIndex(
 
     fun serialize(): String = buildString {
         for (e in byKey.values) {
-            append(esc(e.id)).append('\t')
-            append(esc(e.key)).append('\t')
-            append(esc(e.path)).append('\t')
-            append(esc(e.name)).append('\t')
+            append(Tsv.esc(e.id)).append('\t')
+            append(Tsv.esc(e.key)).append('\t')
+            append(Tsv.esc(e.path)).append('\t')
+            append(Tsv.esc(e.name)).append('\t')
             append(e.size).append('\t')
             append(e.savedAt).append('\n')
         }
@@ -107,32 +107,10 @@ class LocalIndex(
             if (f.size < 6) continue
             val size = f[4].toLongOrNull() ?: continue
             val savedAt = f[5].toLongOrNull() ?: 0L
-            val e = Entry(unesc(f[0]), unesc(f[1]), unesc(f[2]), unesc(f[3]), size, savedAt)
+            val e = Entry(Tsv.unesc(f[0]), Tsv.unesc(f[1]), Tsv.unesc(f[2]), Tsv.unesc(f[3]), size, savedAt)
             if (e.id.isEmpty() || e.key.isEmpty() || e.path.isEmpty()) continue
             byKey[e.key] = e
         }
-    }
-
-    private fun esc(s: String): String =
-        s.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
-
-    private fun unesc(s: String): String {
-        val out = StringBuilder(s.length)
-        var i = 0
-        while (i < s.length) {
-            val c = s[i]
-            if (c == '\\' && i + 1 < s.length) {
-                when (s[i + 1]) {
-                    't' -> { out.append('\t'); i += 2; continue }
-                    'n' -> { out.append('\n'); i += 2; continue }
-                    'r' -> { out.append('\r'); i += 2; continue }
-                    '\\' -> { out.append('\\'); i += 2; continue }
-                }
-            }
-            out.append(c)
-            i++
-        }
-        return out.toString()
     }
 
     companion object {

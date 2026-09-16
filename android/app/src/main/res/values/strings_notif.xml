@@ -7,4 +7,6 @@
     <!-- 通知栏展形里的 ±30 秒：Android 13 以下没有可拖动的进度条，这两颗按钮就是「跳着听」的入口 -->
     <string name="notif_forward">快进 30 秒</string>
     <string name="notif_rewind">后退 30 秒</string>
+    <!-- 续播提示：%1$s 是时间（如 1:23）。只在真的跳了位置时弹一次 -->
+    <string name="resume_toast">已续播 · 从 %1$s 继续</string>
 </resources>

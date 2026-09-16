@@ -21,6 +21,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import android.util.LruCache
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -31,6 +32,7 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import kotlin.math.abs
 
 /**
  * 后台播放保活 + 通知栏/锁屏播放控制。
@@ -60,6 +62,17 @@ class PlaybackService : Service() {
 
     /** 最后一次状态上报的时刻（elapsedRealtime 基准）；通知栏算「此刻位置」要用它。 */
     private var stateAtElapsedMs = SystemClock.elapsedRealtime()
+
+    // ---- 续播位置记忆（C3）----
+    private var memory: PlaybackMemory? = null
+
+    /** 当前曲目的记忆键（曲名 + 歌手）；空串 = 没有曲目 */
+    private var trackKey = ""
+    private var lastSavedAt = 0L
+    private var lastSavedPos = -1L
+
+    /** 本次进程里已经处理过续播的曲目，避免每次状态上报都 seek 一次 */
+    private var resumedKey = ""
 
     private var coverUrl = ""
     private var art: Bitmap? = null
@@ -152,13 +165,26 @@ class PlaybackService : Service() {
             return
         }
 
+        val newTitle = o.optString("title", "")
+        val newArtist = o.optString("artist", "")
+        val newKey = PlaybackMemory.keyOf(newTitle, newArtist)
+
+        // 换曲了：先把**上一首**的最后位置落盘 —— 此刻各字段里还都是上一首的值，
+        // 晚一行就变成拿新曲目的 position 覆盖旧曲目的记录了
+        if (newKey != trackKey) {
+            saveProgress(force = true)
+            trackKey = newKey
+            lastSavedAt = 0L
+            lastSavedPos = -1L
+        }
+
         val wasPlaying = playing
         val wasTitle = title
         val wasBuffering = buffering
         playing = o.optBoolean("playing", false)
         buffering = o.optBoolean("buffering", false)
-        title = o.optString("title", "")
-        artist = o.optString("artist", "")
+        title = newTitle
+        artist = newArtist
         durationMs = o.optLong("duration", 0L)
         positionMs = o.optLong("position", 0L)
         // 「这个位置是什么时候的」：Web 端给的是墙钟毫秒，换算到 elapsedRealtime 基准，
@@ -187,6 +213,10 @@ class PlaybackService : Service() {
         pushSessionState()
         // 曲目/播放态/缓冲态变了立刻重画通知，其余情况节流
         maybeReNotify(force = wasPlaying != playing || wasTitle != title || wasBuffering != buffering)
+
+        // 续播记忆：暂停的那一刻立刻落盘（用户多半就是从这儿离开的），播放中按间隔落盘
+        saveProgress(force = wasPlaying && !playing)
+        maybeResume()
 
         // 播放中拖住系统（前台服务 + WakeLock）；暂停后给用户留一段时间能回来接着听
         handler.removeCallbacks(stopRunnable)
@@ -224,8 +254,7 @@ class PlaybackService : Service() {
     }
 
     /**
-     * 会话能力位。
-     *
+     * 会话能力位。     *
      * Android 13+ 的通知栏（系统自带媒体控件）就是读这里决定「要不要画可拖动的进度条」：
      * 需要 duration（元数据里）+ ACTION_SEEK_TO + STATE_PLAYING/PAUSED 同时成立。
      * ±30 秒则只在有时长时才给（直播流跳 30 秒没有意义）。
@@ -256,6 +285,54 @@ class PlaybackService : Service() {
     private fun seekBy(deltaMs: Long) {
         val target = Transport.seekTarget(currentPositionMs(), deltaMs, durationMs)
         BridgeHolder.send("seek", (target / 1000.0).toString())
+    }
+
+    // ---------------------------------------------------------------- 续播位置记忆（C3）
+
+    private fun memoryStore(): PlaybackMemory {
+        memory?.let { return it }
+        val sp = getSharedPreferences(PREFS_RESUME, MODE_PRIVATE)
+        val m = PlaybackMemory(
+            read = { sp.getString(KEY_RESUME, null) },
+            write = { t -> sp.edit().putString(KEY_RESUME, t).apply() }
+        )
+        memory = m
+        return m
+    }
+
+    /**
+     * 落盘当前进度（默认节流）。
+     *
+     * 只在时长已知时才记：电台直播流的「听到第 62 秒」没有意义，下次接上也是另一段内容。
+     */
+    private fun saveProgress(force: Boolean) {
+        if (trackKey.isEmpty() || durationMs <= 0) return
+        val pos = positionMs
+        if (pos < PlaybackMemory.MIN_SAVE_MS) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSavedAt < SAVE_INTERVAL_MS && abs(pos - lastSavedPos) < SAVE_MIN_DELTA_MS) return
+        lastSavedAt = now
+        lastSavedPos = pos
+        val m = memoryStore()
+        if (PlaybackMemory.finished(pos, durationMs)) {
+            m.remove(trackKey)      // 已经听到结尾：下次从头放，而不是卡在最后两秒
+        } else {
+            m.put(trackKey, pos, durationMs, now)
+        }
+    }
+
+    /** 曲目第一次带着时长上报时，问一句「上次听到哪了」。 */
+    private fun maybeResume() {
+        if (trackKey.isEmpty() || trackKey == resumedKey) return
+        // 还没拿到时长：等下一次上报。这里不钉 resumedKey —— 元数据到达前的状态上报不该
+        // 把「续播」这个机会用掉
+        if (durationMs <= 0) return
+        val point = PlaybackMemory.resumePoint(memoryStore().get(trackKey), durationMs)
+        resumedKey = trackKey
+        if (point <= 0) return
+        if (BridgeHolder.send("seek", (point / 1000.0).toString())) {
+            Toast.makeText(this, getString(R.string.resume_toast, Transport.clock(point)), Toast.LENGTH_SHORT).show()
+        }
     }
 
     /** 通知栏不需要每秒重画：曲目/播放态变了立刻重画，否则最多 5 秒一次（进度用 setProgress 体现）。 */
@@ -388,6 +465,8 @@ class PlaybackService : Service() {
 
     private fun shutdown() {
         handler.removeCallbacks(stopRunnable)
+        // 收摊前把进度落盘：这是「暂停久了被自动关掉」和「用户滑掉应用」两条路的最后机会
+        saveProgress(force = true)
         releaseWakeLock()
         session?.isActive = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -438,6 +517,16 @@ class PlaybackService : Service() {
         private const val CHANNEL_ID = "gusi-playback"
         private const val NOTIF_ID = 1001
         private const val NOTIFY_MIN_INTERVAL_MS = 5000L
+
+        // ---- 续播位置记忆（C3）----
+        private const val PREFS_RESUME = "gusi-android-resume"
+        private const val KEY_RESUME = "resume_v1"
+
+        /** 播放中落盘间隔 */
+        private const val SAVE_INTERVAL_MS = 5000L
+
+        /** 位置变化不足该值时不必重复落盘 */
+        private const val SAVE_MIN_DELTA_MS = 5000L
 
         /** 暂停后通知保留多久（便于回来继续听），超时自动收摊 */
         private const val PAUSE_KEEP_MS = 5 * 60 * 1000L
