@@ -23,11 +23,11 @@ const pkg = {
   appname: 'gusi.music',
   display_name: '古四音乐',
   desc: '基于洛雪音乐的私有云音乐中心：NAS 曲库在线播放、Web 在线音乐搜索（内置源，NAS 中转）、多端歌单同步、Web 消费者应用与管理后台，配合洛雪音乐移动版使用。',
-  changelog: '配置与路径适配（0026→0027）：(1) 打包清单同步 server/config.json，修复自定义服务配置（服务名/用户等）在安装包里不生效。(2) 安装/卸载改为按 fnOS 下发的路径动态解析存储空间与共享目录，不再假定 /vol2；卸载删除改为白名单校验。(3) 跨「卸载并删除数据」保留端口偏好（安装档案回读）。(4) 管理后台与音乐应用侧栏底部视觉统一。(5) 打包合规修复：包内权限规整为目录 0755/文件 0644（不再有世界可写条目），剔除指向打包机的绝对路径软链接，并新增交付前合规审计。',
+  changelog: '网关前缀适配（0027→0028）：(1) 修复经飞牛网关（/app/gusi-music）打开管理后台时登录与全部接口报 HTTP 404 —— 后台前端用绝对路径 /admin/…，丢掉了网关前缀打到网关根路径；现按页面路径自适应前缀（与消费者端 BASE 同一套做法）。(2) 修复分享页构件 ui/share（share.js/share.css）漏打包导致 /s/assets/* 404、分享页丢样式且播放器不可用。(3) 分享页静态资源与接口同样适配网关前缀。',
   arch: 'x86_64',
   os_min_version: '1.1.31',
-  version: '1.0.27',
-  build: '0027',
+  version: '1.0.28',
+  build: '0028',
   service_port: '43000',
   maintainer: '古四',
   maintainer_url: 'https://github.com/lyswhut/lx-music-mobile',
@@ -247,6 +247,11 @@ function buildAppTgz(dir) {
   const uiApp = path.join(ROOT, 'ui', 'app')
   if (!fs.existsSync(uiApp)) throw new Error(`缺少消费者端构件: ${uiApp}`)
   fs.cpSync(uiApp, path.join(appDir, 'ui', 'app'), { recursive: true })
+  // 分享页构件（ui/share/share.js|css）：shareStaticDir() 解析到 ui/app 的同级 share/，
+  // 漏拷会让 /s/assets/* 在安装后全部 404（页面能开、样式与播放器全废）
+  const uiShare = path.join(ROOT, 'ui', 'share')
+  if (!fs.existsSync(uiShare)) throw new Error(`缺少分享页构件: ${uiShare}`)
+  fs.cpSync(uiShare, path.join(appDir, 'ui', 'share'), { recursive: true })
   fs.writeFileSync(path.join(appDir, 'ui', 'README.txt'), 'Place frontend build output here (from frontend/dist).\n')
 
   // 桌面入口图标资源（ui/config 的 icon 字段引用 images/icon_{0}.png，对齐道理鱼命名）

@@ -8,6 +8,11 @@ export const esc = (s: unknown): string => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 
+// 网关前缀（GS_PUBLIC_BASE_PATH）：经 fnOS 网关 /app/gusi-music 访问时，页面里的静态资源
+// 必须带上前缀，否则浏览器会把 /s/assets/* 打到网关根路径（网关无此路由）→ 404，
+// 分享页会变成无样式、播放器不可用。直连端口时前缀为空，行为不变。
+const BASE_PATH = (process.env.GS_PUBLIC_BASE_PATH ?? '').replace(/\/+$/, '')
+
 // 图标统一用内联 SVG（与主 App 同一套 path）：emoji 字形在缺 emoji 字体的系统上会渲染成豆腐块，
 // 分享页是「没有账号的人看到的门面」，不能靠访问者的系统字体赌运气
 const ICON: Record<string, string> = {
@@ -22,7 +27,7 @@ const ICON: Record<string, string> = {
   note: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>',
 }
 
-const BASE_CSS = `<link rel="stylesheet" href="/s/assets/share.css">`
+const BASE_CSS = `<link rel="stylesheet" href="${BASE_PATH}/s/assets/share.css">`
 
 export interface SharePageInfo {
   code: string
@@ -59,7 +64,7 @@ export const sharePageHtml = (info: SharePageInfo): string => {
 <meta property="og:description" content="${esc(desc)}">
 <meta property="og:type" content="music.playlist">
 ${ogImage}
-<link rel="icon" href="/favicon.ico">
+<link rel="icon" href="${BASE_PATH}/favicon.ico">
 ${BASE_CSS}
 </head>
 <body>
@@ -126,7 +131,7 @@ ${BASE_CSS}
   <div id="s-lyric" class="s-lyric" hidden></div>
   <div id="s-toast" class="s-toast" hidden></div>
 </div>
-<script src="/s/assets/share.js" defer></script>
+<script src="${BASE_PATH}/s/assets/share.js" defer></script>
 </body>
 </html>
 `

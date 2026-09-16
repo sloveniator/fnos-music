@@ -10,6 +10,14 @@
 const $ = (s) => document.querySelector(s)
 const $$ = (s) => Array.from(document.querySelectorAll(s))
 
+// 网关前缀自适应：后台可能部署在 <base>/admin/ 下
+//   直连端口  '/admin/'                 → BASE = ''
+//   fnOS 网关 '/app/gusi-music/admin/'  → BASE = '/app/gusi-music'
+// 所有请求 URL 都必须经 withBase 拼接：否则经网关访问会打到网关根路径（如 /admin/login）、
+// 网关没有该路由 → HTTP 404（消费者端 ui/app/assets/app.js 的 BASE 同理）
+const BASE = location.pathname.replace(/\/admin(\/.*)?$/, '')
+const withBase = (p) => (p && p.charAt(0) === '/' ? BASE + p : p)
+
 // ---------------- 状态 ----------------
 let TOKEN = localStorage.getItem('gusi-admin-token') || ''
 let STREAM_TOKEN = ''
@@ -86,7 +94,7 @@ const api = async (path, opts = {}) => {
     options.body = JSON.stringify(opts.body)
     headers['Content-Type'] = 'application/json'
   }
-  const res = await fetch(path, options)
+  const res = await fetch(withBase(path), options)
   if (res.status === 401) {
     // token 过期/失效 → 退出到登录
     if (!path.endsWith('/admin/login')) {
@@ -192,7 +200,7 @@ const loadShares = async () => {
     <td><button class="btn mini danger sh-del" data-code="${esc(s.code)}">撤销</button></td>
   </tr>`).join('')
   tb.querySelectorAll('.sh-copy').forEach(b => b.addEventListener('click', async () => {
-    const url = location.origin + b.dataset.url
+    const url = location.origin + withBase(b.dataset.url)
     try { await navigator.clipboard.writeText(url); toast('链接已复制') } catch { toast(url) }
   }))
   tb.querySelectorAll('.sh-del').forEach(b => b.addEventListener('click', async () => {
@@ -582,9 +590,9 @@ const renderTracks = () => {
 
 // 媒体类端点（封面/试听/下载）由标签直接发起，带不了 X-Admin-Token 头，
 // 所以走 ?k= 传 token（服务端只对这三个只读端点放行 query token）
-const apiCover = (id) => '/admin/api/library/cover/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN)
-const apiPreview = (id) => '/admin/api/library/preview/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN)
-const apiDownload = (id) => '/admin/api/library/download/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN)
+const apiCover = (id) => withBase('/admin/api/library/cover/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN))
+const apiPreview = (id) => withBase('/admin/api/library/preview/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN))
+const apiDownload = (id) => withBase('/admin/api/library/download/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(TOKEN))
 
 $('#track-tbody').addEventListener('click', (e) => {
   const row = e.target.closest('tr')
@@ -1102,7 +1110,7 @@ $('#btn-script-copy').addEventListener('click', async () => {
 })
 $('#btn-script-download').addEventListener('click', () => {
   const a = document.createElement('a')
-  a.href = buildScript(true)
+  a.href = withBase(buildScript(true))
   a.download = 'gusi-user-source.js'
   document.body.appendChild(a); a.click(); a.remove()
 })
@@ -1451,7 +1459,7 @@ $('#btn-upload').addEventListener('click', () => {
       const resEl = body.querySelector('#up-res')
       resEl.textContent = '上传中…'
       try {
-        const resp = await fetch('/admin/api/library/upload?' + qs.toString(), {
+        const resp = await fetch(withBase('/admin/api/library/upload?' + qs.toString()), {
           method: 'PUT',
           headers: { 'X-Admin-Token': TOKEN },
           body: file,

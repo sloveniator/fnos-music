@@ -50,7 +50,7 @@ sudo bash packaging/verify-fpk.sh          # 结构+校验和+完整生命周期
 sudo bash packaging/verify-fpk.sh --keep   # 保留现场排查
 ```
 
-它在临时存储空间里真实跑一遍：安装 → 启动（确认用的是**捆绑** Node）→ HTTP 自检 → 状态/停止 → 升级（数据与运行时复用）→ 卸载保留 → 重装沿用端口 → 卸载彻底删除 → 路径动态解析与删除白名单单测，共 67 项断言。`--vol-root` 指向的路径已存在时会自动换号，绝不动真实存储空间。
+它在临时存储空间里真实跑一遍：安装 → 启动（确认用的是**捆绑** Node）→ HTTP 自检 → 状态/停止 → 升级（数据与运行时复用）→ 卸载保留 → 重装沿用端口 → 卸载彻底删除 → 路径动态解析与删除白名单单测，共 84 项断言。`--vol-root` 指向的路径已存在时会自动换号，绝不动真实存储空间。
 
 ## 生命周期与运行时（cmd/）
 
@@ -61,6 +61,7 @@ sudo bash packaging/verify-fpk.sh --keep   # 保留现场排查
 - 向导字段：`wizard_app_port`（端口，占用即失败）、`wizard_admin_password`（留空自动生成，存 `app-config.env` chmod 600）
 - 应用中心「授权目录」经 `config_callback` 写入 `accessible-paths.env` 快照，服务端 `system-dirs` 接口**读文件热生效**（无需重启）
 - 关键环境变量（cmd/main → server）：`GS_HTTP_UNIX_SOCKET`（网关 socket）、`GS_HTTP_UNIX_SOCKET_ACL_USERS`（默认 www-data，setfacl 授权）、`GS_PUBLIC_BASE_PATH`（网关前缀剥离）、`GS_ACCESSIBLE_PATHS_FILE`、`GS_ADMIN_PASSWORD`、`GS_WEB_STATIC_DIR`、`GS_APP_STATIC_DIR`
+- **网关前缀（易踩坑）**：桌面入口是 iframe 到 `/app/gusi-music`，所以页面里出现的**每一个绝对 URL 都必须带前缀**——消费者端 `location.pathname` 推导的 `BASE`（`ui/app/assets/app.js`）、管理后台 `withBase()`（`ui/dist/assets/admin.js`）、分享页 `PREFIX`（`ui/share/share.js`）与服务端渲染的 `BASE_PATH`（`server/src/share/page.ts`）。漏一个前缀，浏览器就把请求打到网关根路径（如 `/admin/login`、`/s/assets/share.css`）→ 网关无此路由 → **HTTP 404**（后台现象即登录框直接报「HTTP 404」）。新增前端请求/静态引用后请沿用同一套拼装；`packaging/verify-fpk.sh` 已含「经 unix socket + 前缀」与分享页构件入包的回归断言
 
 ## 测试
 

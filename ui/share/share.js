@@ -5,6 +5,9 @@
   var root = document.getElementById('s-root');
   if (!root) return;
   var CODE = root.dataset.code || '';
+  // 网关前缀自适应：分享页可能部署在 <base>/s/<code>（fnOS 网关如 /app/gusi-music/s/<code>）。
+  // 不带前缀的绝对路径会打到网关根路径（网关没有该路由）→ 404，整页脚本与接口全废。
+  var PREFIX = location.pathname.replace(/\/s\/[^/]*\/?$/, '').replace(/\/$/, '');
   // 图标：内联 SVG（同 page.ts / 主 App 的 path）。emoji 字形在缺 emoji 字体的系统上是豆腐块，
   // 分享页面向没有账号的访客，不能赌对方的系统字体
   var I = {
@@ -13,7 +16,7 @@
     dl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v10"/><path d="m7.5 10 4.5 4 4.5-4"/><path d="M4.5 16.5v2.8c0 .6.5 1.2 1.2 1.2h12.6c.7 0 1.2-.6 1.2-1.2v-2.8"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M9 18.5V5.5L21 3.2v13"/><circle cx="6.5" cy="18.5" r="2.8"/><circle cx="18.5" cy="16.2" r="2.8"/></svg>',
   }
-  var API = '/s/' + CODE;
+  var API = PREFIX + '/s/' + CODE;
   var state = { items: [], allowDownload: false, order: [], pos: -1, title: '', subtitle: '' };
   var audio = new Audio();
   audio.preload = 'metadata';

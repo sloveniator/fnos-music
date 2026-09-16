@@ -142,7 +142,25 @@ lifecycle main start; check "main start 退出码" "$?" "0"
 sleep 3
 check "HTTP /（消费者应用）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/")" "200"
 check "HTTP /admin/（管理后台）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/admin/")" "200"
+check "HTTP /admin（无尾斜杠 → 302 补斜杠）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/admin")" "302"
+check "HTTP /admin 302 目标可跟随" "$(curl -sL -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/admin")" "200"
+# 分享页构件必须进包：漏拷时 /s/assets/* 全 404（页面能开、样式与播放器全废）
+check "HTTP /s/assets/share.css（分享页样式）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/s/assets/share.css")" "200"
+check "HTTP /s/assets/share.js（分享页脚本）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/s/assets/share.js")" "200"
 check "网关 socket 已建立" "$([ -S "${APPDEST}/app.sock" ] && echo yes || echo no)" "yes"
+# 经 fnOS 网关（unix socket + /app/gusi-music 前缀）：前缀必须被服务端剥掉，且页面里的
+# 资源路径必须带前缀回填，否则浏览器会打到网关根路径 404
+SOCK="http://localhost"
+check "网关 socket：/app/gusi-music/（消费者应用）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/")" "200"
+check "网关 socket：/app/gusi-music（无尾斜杠 → 302）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music")" "302"
+check "网关 socket：/app/gusi-music/admin/（管理后台）" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/admin/")" "200"
+check "网关 socket：/app/gusi-music/admin/assets/admin.js" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/admin/assets/admin.js")" "200"
+# 后台接口经网关必须是 401（未授权）而不是 404（前缀走丢）
+check "网关 socket：/app/gusi-music/admin/api/status 不是 404" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/admin/api/status")" "401"
+check "分享页 HTML 资源路径带网关前缀" "$(curl -s --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/s/nonexistent" | grep -c 'href="/app/gusi-music/s/assets/share.css"')" "1"
+# 静态检查：后台前端不得再出现不带前缀的绝对 /admin 请求
+check "admin.js 无裸 /admin 请求" "$(grep -c "fetch('/admin" "${APPDEST}/ui/dist/assets/admin.js")" "0"
+check "share.js 的 API 基址带前缀变量" "$(grep -c "var API = PREFIX + '/s/' + CODE" "${APPDEST}/ui/share/share.js")" "1"
 check "使用的是捆绑 Node 运行时" "$(grep -c 'Bundled node runtime is ready' "${PKGVAR}/info.log")" "1"
 if "${PKGVAR}/runtime/node/node" -v >/dev/null 2>&1; then ok "捆绑运行时可直接执行（$("${PKGVAR}/runtime/node/node" -v)）"; else bad "捆绑运行时无法执行"; fi
 check "授权目录被识别为可读写" "$([ "$(grep -c 'AUTH_PATH_OK' "${PKGVAR}/info.log")" -ge 1 ] && echo yes || echo no)" "yes"
