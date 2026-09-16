@@ -79,7 +79,18 @@ sh tools/build-android.sh debug      # 只出 debug 包（可直接装手机，d
 
 ## 4. 签名（发布前必读）
 
-密钥目前**尚未生成**，所以仓库里只有未签名的 release 包。生成一次、永久复用：
+密钥**已生成**（2026-09-16，本地 `android/keystore/`，**不入 git**）：
+
+| 项 | 值 |
+|---|---|
+| 库文件 | `android/keystore/gusi-music.jks`（PKCS12，RSA 2048，0600） |
+| 别名 | `gusi` |
+| 主题 | `CN=Gusi Music, OU=fnos-music, O=gusi-music, L=Beijing, C=CN` |
+| 有效期 | 2026-09-16 → 2054-02-01（10000 天） |
+| 证书 SHA-256 | `38:16:0F:48:A7:45:DC:71:10:32:BB:A1:78:9C:47:AF:79:42:20:CF:84:C5:8D:39:E4:ED:A0:94:63:38:56:C7` |
+| 口令 | 在 `android/keystore/keystore.properties`（0600），由主人单独备份 |
+
+复现命令（同参数重签可校验指纹；**别覆盖已生效的库文件**）：
 
 ```sh
 mkdir -p android/keystore && cd android/keystore
@@ -99,8 +110,9 @@ EOF
 密钥或口令丢了，已装机的版本就再也装不上新版本（只能卸载重装，用户数据与登录态一起没）。
 所以：`gusi-music.jks` 与 `keystore.properties` 要单独备份（NAS 之外再存一份，例如密码管理器 + 加密压缩包）。
 
-版本号规则：每次要发新包，把 `app/build.gradle.kts` 里的 `versionCode` +1
-（否则系统认为「没变化」，同包名装不上去），`versionName` 同步改。
+版本号规则：**已与服务端/安装包版本对齐 —— `versionCode 27` / `versionName 1.0.27`**。
+每次要发新包，把 `app/build.gradle.kts` 里的 `versionCode` +1（否则系统认为「没变化」，
+同包名装不上去），`versionName` 同步改。debug 变体自动带 `-debug` 后缀、包名 `.debug`，可与正式版共存。
 
 ## 5. 真机自测清单
 
