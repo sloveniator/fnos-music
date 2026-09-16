@@ -75,6 +75,7 @@ node packaging\verify-download.mjs                                              
 
 - `packaging/out/gusi-music-<version>-fnos-cn-x86_64.fpk`（约 47 MB，含 Node 运行时）
 - manifest `checksum` = app.tgz 的 MD5；包结构与道理鱼原包逐条目对齐（28 entries，多一条 `cmd/runtime_paths.sh`）
+- 打包前规整权限与软链接（本仓库工作区创建文件时强制 0777，与官方 `fnpack` 产物不符）：输出目录 0755 / 文件 0644 / `cmd/*` 保留可执行位，并剔除指向打包机的绝对路径软链接；`build-fpk.js` 末尾的合规审计会校验「无世界可写条目、无绝对软链接、条目名合法、checksum 一致」，任一不通过即中断打包
 
 ## 已知边界
 

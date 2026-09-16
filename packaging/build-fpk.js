@@ -23,7 +23,7 @@ const pkg = {
   appname: 'gusi.music',
   display_name: '古四音乐',
   desc: '基于洛雪音乐的私有云音乐中心：NAS 曲库在线播放、Web 在线音乐搜索（内置源，NAS 中转）、多端歌单同步、Web 消费者应用与管理后台，配合洛雪音乐移动版使用。',
-  changelog: '配置与路径适配（0026→0027）：(1) 打包清单同步 server/config.json，修复自定义服务配置（服务名/用户等）在安装包里不生效。(2) 安装/卸载改为按 fnOS 下发的路径动态解析存储空间与共享目录，不再假定 /vol2；卸载删除改为白名单校验。(3) 跨「卸载并删除数据」保留端口偏好（安装档案回读）。(4) 管理后台与音乐应用侧栏底部视觉统一。',
+  changelog: '配置与路径适配（0026→0027）：(1) 打包清单同步 server/config.json，修复自定义服务配置（服务名/用户等）在安装包里不生效。(2) 安装/卸载改为按 fnOS 下发的路径动态解析存储空间与共享目录，不再假定 /vol2；卸载删除改为白名单校验。(3) 跨「卸载并删除数据」保留端口偏好（安装档案回读）。(4) 管理后台与音乐应用侧栏底部视觉统一。(5) 打包合规修复：包内权限规整为目录 0755/文件 0644（不再有世界可写条目），剔除指向打包机的绝对路径软链接，并新增交付前合规审计。',
   arch: 'x86_64',
   os_min_version: '1.1.31',
   version: '1.0.27',
@@ -68,6 +68,55 @@ const countFiles = (dir) => {
 
 /** Unix 文件内容（统一 \n） */
 const unix = (s) => s.replace(/\r\n/g, '\n')
+
+/**
+ * 权限与软链接规整。
+ *
+ * 为什么必须做：本仓库工作区（共享卷）创建文件时强制 rwxrwxrwx，chmod 显式调用才生效，
+ * 于是打包出的 fpk 曾出现「28 条目全 0777 / app.tgz 内 125 个目录全 0777」，
+ * 而飞牛官方打包器（fnpack 1.2.3）产物从无世界可写条目（目录 0755、文件 0644、
+ * config/resource 600）—— 这是与官方产物的唯一实质差异，也是安装时报
+ * 「解压tgz失败」时第一个要排除的项。
+ *
+ * 同时剔除指向打包机绝对路径的软链接（npm 在本工作区生成的 node_modules/.bin
+ * 指向 /app/working/... 构建目录，装到 NAS 上是悬空链接，且泄漏构建路径）。
+ */
+function normalizeTree(dir, opts = {}) {
+  const dirMode = opts.dirMode ?? 0o755
+  const fileMode = opts.fileMode ?? 0o644
+  const execPrefixes = opts.execPrefixes ?? [] // 需要保留可执行位的相对路径前缀
+  const stats = { dirs: 0, files: 0, execs: 0, droppedLinks: [] }
+
+  const walkAndFix = (d) => {
+    for (const de of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, de.name)
+      if (de.isSymbolicLink()) {
+        const target = fs.readlinkSync(p)
+        if (path.isAbsolute(target)) {
+          fs.unlinkSync(p)
+          stats.droppedLinks.push({ path: path.relative(dir, p), target })
+        }
+        continue
+      }
+      if (de.isDirectory()) {
+        fs.chmodSync(p, dirMode)
+        stats.dirs++
+        walkAndFix(p)
+        continue
+      }
+      if (de.isFile()) {
+        const rel = path.relative(dir, p)
+        const keepExec = execPrefixes.some(pre => rel === pre || rel.startsWith(pre + '/'))
+        fs.chmodSync(p, keepExec ? 0o755 : fileMode)
+        keepExec ? stats.execs++ : stats.files++
+      }
+    }
+    fs.chmodSync(d, dirMode)
+  }
+
+  walkAndFix(dir)
+  return stats
+}
 
 // ---------------------------------------------------------------------------
 
@@ -227,14 +276,62 @@ function buildAppTgz(dir) {
   // config 副本（道理鱼在 app.tgz 内同样冗余一份 privilege/resource）
   fs.cpSync(path.join(dir, 'config'), path.join(appDir, 'config'), { recursive: true })
 
+  // 权限/软链接规整（原因见 normalizeTree 注释）：载荷内无文件需要可执行位
+  // （服务端 start = node ./index.js，不 spawn 包内可执行文件；捆绑 Node 由 runtime_bootstrap.sh 自行 chmod +x）
+  const fixed = normalizeTree(appDir, { dirMode: 0o755, fileMode: 0o644 })
+  if (fixed.droppedLinks.length > 0) {
+    console.log(`  剔除 ${fixed.droppedLinks.length} 个指向打包机的绝对软链接：${fixed.droppedLinks.map(x => x.path).join(', ')}`)
+  }
+
   const cwd = dir
-  execSync('tar -czf app.tgz server ui config', { cwd: appDir })
+  // --mode 兜底：即便某些环境 chmod 不生效，也不让世界可写位进包
+  execSync("tar --mode='a-st,go-w' -czf app.tgz server ui config", { cwd: appDir })
   fs.cpSync(path.join(appDir, 'app.tgz'), path.join(cwd, 'app.tgz'))
   rmrf(appDir)
   return path.join(cwd, 'app.tgz')
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * 交付前合规审计：世界可写位、指向打包机的绝对软链接、绝对/穿越条目名、manifest 校验和。
+ * 任一不通过就中断打包（宁可不交付，也不交付装不上的包）。
+ */
+function auditFpk(fpkPath, appTgzMd5) {
+  const name = path.basename(fpkPath)
+  const sh = (cmd) => execSync(cmd, { cwd: OUT_DIR, encoding: 'utf8' })
+  const rows = (s) => s.trim().split('\n').filter(Boolean)
+
+  const outer = rows(sh(`tar -tvzf "${name}"`))
+  const inner = rows(sh(`tar -xzOf "${name}" app.tgz | tar -tvzf -`))
+  const outerNames = rows(sh(`tar -tzf "${name}"`))
+  const innerNames = rows(sh(`tar -xzOf "${name}" app.tgz | tar -tzf -`))
+
+  const worldWritable = (rs) => rs.filter(r => !r.startsWith('l') && r.length > 9 && (r[5] === 'w' || r[8] === 'w'))
+  const absLinks = (rs) => rs.filter(r => / -> \//.test(r))
+  const illegalName = (ns) => ns.filter(n => n.startsWith('/') || n.split('/').includes('..'))
+
+  const problems = []
+  const outerWW = worldWritable(outer)
+  const innerWW = worldWritable(inner)
+  const links = absLinks(inner)
+  const badOuter = illegalName(outerNames)
+  const badInner = illegalName(innerNames)
+  const declared = (sh(`tar -xzOf "${name}" manifest`).match(/^checksum\s*=\s*(\w+)/m) || [])[1]
+
+  if (outerWW.length) problems.push(`外壳存在世界可写条目 ${outerWW.length} 个，如 ${outerWW[0]}`)
+  if (innerWW.length) problems.push(`app.tgz 内存在世界可写条目 ${innerWW.length} 个，如 ${innerWW[0]}`)
+  if (links.length) problems.push(`app.tgz 内含指向打包机的绝对软链接 ${links.length} 个，如 ${links[0]}`)
+  if (badOuter.length) problems.push(`外壳条目名非法（绝对/穿越）：${badOuter[0]}`)
+  if (badInner.length) problems.push(`app.tgz 条目名非法（绝对/穿越）：${badInner[0]}`)
+  if (!outerNames.includes('app.tgz') || !outerNames.includes('manifest')) problems.push('外壳缺少 app.tgz 或 manifest')
+  if (declared !== appTgzMd5) problems.push(`manifest checksum 与 app.tgz 实测 md5 不一致：${declared} ≠ ${appTgzMd5}`)
+
+  console.log(`  合规审计：外壳 ${outer.length} 条目 / app.tgz ${inner.length} 条目；` +
+    `世界可写 ${outerWW.length + innerWW.length}；绝对软链接 ${links.length}；` +
+    `校验和${declared === appTgzMd5 ? '一致' : '不一致'}`)
+  if (problems.length) throw new Error('包体合规审计未通过：\n  - ' + problems.join('\n  - '))
+}
 
 function main() {
   // 不清整个 OUT_DIR（历史交付包可能被系统句柄锁定），只重建 stage，产物文件名含版本号天然不冲突
@@ -262,7 +359,9 @@ function main() {
   const fpkName = `gusi-music-${pkg.version}-fnos-cn-${pkg.arch}.fpk`
   const fpkPath = path.join(OUT_DIR, fpkName)
   // 条目顺序对齐道理鱼：app.tgz LICENSE cmd config ICON* manifest wizard
-  execSync('tar -czf ../out.fpk app.tgz LICENSE cmd config ICON.PNG ICON_256.PNG manifest wizard', { cwd: STAGE })
+  // 外壳同样规整权限（官方产物：目录 0755 / 文件 0644，cmd 脚本保留可执行位）
+  normalizeTree(STAGE, { dirMode: 0o755, fileMode: 0o644, execPrefixes: ['cmd'] })
+  execSync("tar --mode='a-st,go-w' -czf ../out.fpk app.tgz LICENSE cmd config ICON.PNG ICON_256.PNG manifest wizard", { cwd: STAGE })
   fs.renameSync(path.join(OUT_DIR, 'out.fpk'), fpkPath)
 
   console.log('[5/5] 校验...')
@@ -272,6 +371,7 @@ function main() {
   console.log(`  ${fpkName}`)
   console.log(`  ${(size / 1024 / 1024).toFixed(1)} MB, ${verify.length} entries`)
   console.log(`  checksum(md5 of app.tgz) = ${md5}`)
+  auditFpk(fpkPath, md5)
   console.log('DONE → ' + fpkPath)
 }
 

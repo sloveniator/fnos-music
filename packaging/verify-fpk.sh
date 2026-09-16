@@ -77,6 +77,18 @@ for required in manifest app.tgz LICENSE cmd/main cmd/install_init cmd/install_c
   if printf '%s\n' "${ENTRIES}" | grep -qx "${required}"; then ok "条目存在 ${required}"; else bad "缺少条目 ${required}"; fi
 done
 if tar -tvzf "${FPK}" | grep -E "^-rwx.*cmd/main$" >/dev/null; then ok "cmd/main 可执行位"; else bad "cmd/main 缺少可执行位"; fi
+
+# 包体合规：与飞牛官方打包器（fnpack 1.2.3）产物对齐 —— 无世界可写条目、无指向打包机的绝对软链接
+WW_OUTER="$(tar -tvzf "${FPK}" | grep -cE '^[-d].{4}w|^[-d].{7}w' || true)"
+check "外壳无世界可写条目（组/他人写位）" "${WW_OUTER}" "0"
+WW_INNER="$(tar -xzOf "${FPK}" app.tgz | tar -tvzf - | grep -cE '^[-d].{4}w|^[-d].{7}w' || true)"
+check "app.tgz 内无世界可写条目" "${WW_INNER}" "0"
+ABS_LINK="$(tar -xzOf "${FPK}" app.tgz | tar -tvzf - | grep -c ' -> /' || true)"
+check "app.tgz 内无指向打包机的绝对软链接" "${ABS_LINK}" "0"
+BAD_NAME="$(tar -tzf "${FPK}" | grep -cE '^/|(^|/)\.\.(/|$)' || true)"
+check "外壳无绝对/穿越条目名" "${BAD_NAME}" "0"
+DIR_MODE="$(tar -tvzf "${FPK}" | awk '$1 ~ /^d/ {print $1}' | sort -u | tr '\n' ',')"
+check "外壳目录权限规整" "${DIR_MODE}" "drwxr-xr-x,"
 MANIFEST_CHECKSUM="$(tar -xzOf "${FPK}" manifest | awk -F' *= *' '/^checksum/{print $2}')"
 APP_MD5="$(tar -xzOf "${FPK}" app.tgz | md5sum | awk '{print $1}')"
 check "manifest checksum = app.tgz md5" "${MANIFEST_CHECKSUM}" "${APP_MD5}"
