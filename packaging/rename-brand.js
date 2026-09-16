@@ -13,6 +13,7 @@ const ROOT = path.resolve(__dirname, '..')
 // 有序规则：长串在前，避免子串误替换
 const RULES = [
   ['洛雪云音乐', '古四音乐'],
+  ['洛雪雲音樂', '古四音樂'], // 繁体（zh-TW 诊断文案，简体规则吃不到）
   ['lxm.cloud.music', 'gusi.music'],
   ['lxm-cloud-music', 'gusi-music'],
   ['lxm-cloud-mobile', 'gusi-music-mobile'],
@@ -24,6 +25,8 @@ const RULES = [
   ['lxm-smoke', 'gusi-smoke'],
   ['lxm-dl-', 'gusi-dl-'],
   ['lxm-web-token', 'gusi-web-token'],
+  ['lxm-write-test', 'gusi-write-test'], // 授权目录写入探针临时文件名
+  ['lxm-access-test', 'gusi-access-test'],
   ['lxm-admin-token', 'gusi-admin-token'],
   ['lxm-server-name', 'gusi-server-name'],
   ['lxm-mode', 'gusi-mode'],
@@ -70,6 +73,7 @@ for (const n of ['app.json', 'package.json']) targets.push(path.join(ROOT, 'mobi
 
 let changed = 0
 for (const f of targets) {
+  if (!fs.existsSync(f)) { console.log('skip (not in tree):', path.relative(ROOT, f)); continue }
   let c = fs.readFileSync(f, 'utf8')
   const before = c
   const isMobile = f.includes(path.join('mobile', '')) && !f.includes('rebrand')

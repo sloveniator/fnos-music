@@ -63,7 +63,7 @@ managed_directory_is_package_writable() {
   local probe=""
 
   [ -d "${target}" ] && [ ! -L "${target}" ] && [ -r "${target}" ] && [ -w "${target}" ] && [ -x "${target}" ] || return 1
-  probe="${target}/.lxm-access-test.$$.$RANDOM"
+  probe="${target}/.gusi-access-test.$$.$RANDOM"
   if : > "${probe}" 2>/dev/null; then
     rm -f "${probe}" >/dev/null 2>&1 || true
     return 0

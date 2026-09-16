@@ -28,8 +28,8 @@ access_diagnostic_message() {
     zh-CN:parent-denied) printf '路径尚未能检查到本身，因为应用专用账号无法进入某个上级目录。请在 fnOS 重新保存授权，并检查提示的上级目录 ACL。' ;;
     zh-CN:denied) printf 'fnOS 下发了这个目录，但应用专用账号没有实际的读取或进入权限。请在 fnOS 中重新保存目录授权并检查上级目录 ACL；扫描器不能绕过系统权限。' ;;
     zh-CN:guide) printf '判断方法：路径没出现表示 fnOS 未下发；UNAVAILABLE 多为目录移动或存储离线；PARENT_DENIED/DENIED 需修复授权链 ACL；READ_ONLY 可扫描但不能保证写入。古四音乐不会使用 root 绕过这些权限。' ;;
-    zh-TW:header) printf '以下目錄由 fnOS 授權系統原樣下發；洛雪雲音樂不會改寫 /vol1、/vol2、/vol3 等儲存空間編號。' ;;
-    zh-TW:none) printf 'fnOS 沒有向應用下發任何外部目錄。請到「應用中心 > 洛雪雲音樂 > 設定 > 授權目錄」選擇目錄並儲存。' ;;
+    zh-TW:header) printf '以下目錄由 fnOS 授權系統原樣下發；古四音樂不會改寫 /vol1、/vol2、/vol3 等儲存空間編號。' ;;
+    zh-TW:none) printf 'fnOS 沒有向應用下發任何外部目錄。請到「應用中心 > 古四音樂 > 設定 > 授權目錄」選擇目錄並儲存。' ;;
     zh-TW:ok) printf '應用專用帳號可以進入、讀取和寫入此目錄；掃描與線上播放具備基礎權限。' ;;
     zh-TW:read-only) printf '此目錄可進入和讀取，可以掃描與播放；但目前不可寫，下載到 NAS 或元資料回寫可能失敗。' ;;
     zh-TW:unavailable) printf 'fnOS 下發了此路徑，但應用專用帳號看不到它。請檢查儲存空間是否上線、目錄是否移動，以及授權路徑是否與真實路徑一致。' ;;
@@ -37,9 +37,9 @@ access_diagnostic_message() {
     zh-TW:broken-link) printf 'fnOS 下發的路徑是已失效的符號連結，目標可能已移動或儲存空間未掛載；請重新選擇授權目錄。' ;;
     zh-TW:parent-denied) printf '路徑尚未能檢查到本身，因為應用專用帳號無法進入某個上級目錄。請在 fnOS 重新儲存授權，並檢查提示的上級目錄 ACL。' ;;
     zh-TW:denied) printf 'fnOS 下發了此目錄，但應用專用帳號沒有實際的讀取或進入權限。請在 fnOS 中重新儲存目錄授權並檢查上級目錄 ACL；掃描器不能繞過系統權限。' ;;
-    zh-TW:guide) printf '判斷方法：路徑未出現表示 fnOS 未下發；UNAVAILABLE 多為目錄移動或儲存離線；PARENT_DENIED/DENIED 需修復授權鏈 ACL；READ_ONLY 可掃描但無法保證寫入。洛雪雲音樂不會使用 root 繞過這些權限。' ;;
+    zh-TW:guide) printf '判斷方法：路徑未出現表示 fnOS 未下發；UNAVAILABLE 多為目錄移動或儲存離線；PARENT_DENIED/DENIED 需修復授權鏈 ACL；READ_ONLY 可掃描但無法保證寫入。古四音樂不會使用 root 繞過這些權限。' ;;
     en:header) printf 'These paths are supplied unchanged by fnOS authorization; GuSi Music does not rewrite storage identifiers such as /vol1, /vol2, or /vol3.' ;;
-    en:none) printf 'fnOS supplied no external directory. Select and save a folder under App Center > GuSi Music Music > Settings > Authorized folders.' ;;
+    en:none) printf 'fnOS supplied no external directory. Select and save a folder under App Center > GuSi Music > Settings > Authorized folders.' ;;
     en:ok) printf 'The package user can enter, read and write this directory; scanning and streaming have the required base permissions.' ;;
     en:read-only) printf 'This directory can be entered and read, so scanning and playback can work; it is not writable, so downloads to NAS or metadata write-back may fail.' ;;
     en:unavailable) printf 'fnOS supplied this path, but the package user cannot see it. Check that the storage is online, the folder was not moved, and the authorized path matches the real path.' ;;

@@ -15,7 +15,7 @@ runtime_dir_writable() {
   [ -n "${target_dir}" ] || return 1
   mkdir -p "${target_dir}" >/dev/null 2>&1 || return 1
   [ -d "${target_dir}" ] && [ ! -L "${target_dir}" ] && [ -r "${target_dir}" ] && [ -w "${target_dir}" ] && [ -x "${target_dir}" ] || return 1
-  probe_file="${target_dir}/.lxm-write-test.$$.$RANDOM"
+  probe_file="${target_dir}/.gusi-write-test.$$.$RANDOM"
   if : > "${probe_file}" 2>/dev/null; then
     rm -f "${probe_file}" >/dev/null 2>&1 || true
     return 0
