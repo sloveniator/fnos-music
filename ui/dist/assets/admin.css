@@ -88,14 +88,35 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
    超长时省略，而不是换行撑高整块。 */
 .side-foot #who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   padding: 0 0 4px; font-size: 13px; color: var(--text); }
-/* 「← 应用」「退出」左右分列，铺满这一行的内宽（此前两个词挤在左边、右半行空着）。
-   链接药丸左右各 6px 内边距，用负 margin 把两端字面拉回块内边缘：
-   左端字面 = 名字左基线 25px，右端字面 = 分隔线右端 185px。 */
-.side-foot .side-links { display: flex; gap: 4px; align-items: center; justify-content: space-between;
-  margin-left: -6px; margin-right: -6px; }
-.side-foot a, .side-foot button { color: var(--muted); font-size: 12px; padding: 4px 6px; border-radius: 8px; white-space: nowrap; }
-.side-foot a:hover, .side-foot button:hover { color: var(--text); background: rgba(255,255,255,.05); }
-.side-foot button { font: inherit; }
+/* 「← 应用」「退出」左右分列 + 方框：两个方框的外边正好与上方分隔线两端对齐（12..197），
+   框内 13px 左右内边距让框内文字仍落在 25..184 这条文字列上（与导航/服务器名同基线）。
+   负 margin 13px = .side-foot 的左右内边距：把方框从文字列顶到分隔线两端。 */
+.side-foot .side-links { display: flex; gap: 8px; align-items: center; justify-content: space-between;
+  margin: 0 -13px; }
+/* 方框：默认是安静的描边块（一眼能认出「可点」），悬停才亮起并抬 1px，按下回弹。
+   transition 只列实际会变的属性，避免 transform 上的模糊过渡。 */
+.side-foot a, .side-foot button { display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 13px; line-height: 1; white-space: nowrap;
+  padding: 6px 13px; border: 1px solid var(--line); border-radius: 10px;
+  background: rgba(255,255,255,.03);
+  transition: color .16s, background .16s, border-color .16s, box-shadow .16s, transform .12s ease; }
+.side-foot a:hover, .side-foot button:hover { color: var(--text); background: rgba(79,140,255,.13);
+  border-color: rgba(79,140,255,.5); transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px rgba(79,140,255,.25), 0 4px 12px rgba(79,140,255,.2); }
+/* 「退出」是破坏性动作，悬停换成告警色 */
+.side-foot button:hover { color: var(--danger); background: rgba(255,95,109,.12);
+  border-color: rgba(255,95,109,.5);
+  box-shadow: inset 0 0 0 1px rgba(255,95,109,.25), 0 4px 12px rgba(255,95,109,.2); }
+/* 按下：先回到原位再缩一点，给出「按键到底」的反馈 */
+.side-foot a:active, .side-foot button:active { transform: translateY(0) scale(.97); }
+.side-foot a:focus-visible, .side-foot button:focus-visible { color: var(--text); background: rgba(79,140,255,.13);
+  border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(79,140,255,.22); }
+/* 按钮默认字体来自 UA，这里只继承字族；字号交给上面的 13px（font: inherit 会把它压回 12px） */
+.side-foot button { font-family: inherit; }
+@media (prefers-reduced-motion: reduce) {
+  .side-foot a, .side-foot button { transition: color .16s, background .16s, border-color .16s, box-shadow .16s; }
+  .side-foot a:hover, .side-foot a:active, .side-foot button:hover, .side-foot button:active { transform: none; }
+}
 
 .main { flex: 1; overflow-y: auto; padding: 26px 30px 60px; }
 .tab-page { max-width: 1100px; margin: 0 auto; }
@@ -137,8 +158,9 @@ code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 6px; 
   /* 窄侧栏里链接竖排，否则「← 应用 + 退出」横向溢出被裁；76px 容不下 13px 缩进，这里归零。
      竖排后「左右分列」失去意义，负 margin 也必须撤掉（否则右边多出 6px 溢出）。 */
   .side-foot { margin: auto 0 0; align-items: center; padding: 10px 0 2px; }
-  .side-foot .side-links { flex-direction: column; justify-content: flex-start; gap: 2px; margin-left: 0; margin-right: 0; }
-  .side-foot a, .side-foot button { padding: 3px 5px; font-size: 11px; }
+  .side-foot .side-links { flex-direction: column; justify-content: flex-start; gap: 4px; margin: 0; }
+  /* 76px 轨里方框要收窄：13px 内边距 + 13px 字号在窄轨会顶到边 */
+  .side-foot a, .side-foot button { padding: 4px 8px; font-size: 11px; border-radius: 8px; }
 }
 
 .in-row { display: flex; gap: 8px; align-items: center; }
