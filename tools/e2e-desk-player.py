@@ -14,6 +14,11 @@
 移动端（≤900px）回归：底栏两行布局与按钮尺寸不变，全屏控制条照旧是主控台。
 """
 import json, os, random, shutil, string, sys, time, urllib.request, urllib.error
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_ADMIN_PASS = _os_secret.environ.get('GS_ADMIN_PASSWORD', '')
+if not _ADMIN_PASS:
+    raise SystemExit('缺少环境变量 GS_ADMIN_PASSWORD（仓库不保存口令）')
 
 BASE = 'http://localhost:20059'
 ROOT = '/app/working/workspaces/fnos-music/project/fnos-music'
@@ -326,7 +331,7 @@ finally:
     try:
         r = urllib.request.Request(BASE + '/admin/login', method='POST')
         r.add_header('Content-Type', 'application/json')
-        with op.open(r, json.dumps({'password': 'REDACTED'}).encode(), timeout=30) as x:
+        with op.open(r, json.dumps({'password': _ADMIN_PASS}).encode(), timeout=30) as x:
             at = json.loads(x.read().decode())['token']
         r = urllib.request.Request(BASE + '/admin/api/users/' + USER + '?purge=1', method='DELETE')
         r.add_header('X-Admin-Token', at)

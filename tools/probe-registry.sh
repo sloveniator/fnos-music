@@ -1,7 +1,7 @@
 #!/bin/sh
 # 快速探活公开源仓库端点（admin token 现取现用）
 set -e
-PASS="${1:-REDACTED}"
+PASS="${1:-${GS_ADMIN_PASSWORD:?缺少环境变量 GS_ADMIN_PASSWORD}}"
 TOK=$(curl -sS --noproxy '*' -m 20 -X POST http://localhost:20059/admin/login \
   -H 'Content-Type: application/json' -d "{\"password\":\"$PASS\"}" \
   | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")

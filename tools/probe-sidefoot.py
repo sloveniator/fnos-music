@@ -5,8 +5,13 @@
 """
 import asyncio, json, sys
 from playwright.async_api import async_playwright
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_ADMIN_PASS = _os_secret.environ.get('GS_ADMIN_PASSWORD', '')
+if not _ADMIN_PASS:
+    raise SystemExit('缺少环境变量 GS_ADMIN_PASSWORD（仓库不保存口令）')
 BASE = "http://127.0.0.1:20059"
-PW = "REDACTED"
+PW = _ADMIN_PASS
 TAG = sys.argv[1] if len(sys.argv) > 1 else "probe"
 JS = """() => {
   const box = e => { const r = e.getBoundingClientRect(); return {x:+r.x.toFixed(1), y:+r.y.toFixed(1), w:+r.width.toFixed(1), h:+r.height.toFixed(1), right:+r.right.toFixed(1), bottom:+r.bottom.toFixed(1)}; };

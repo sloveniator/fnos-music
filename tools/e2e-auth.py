@@ -31,10 +31,18 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from playwright.sync_api import sync_playwright
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_ADMIN_PASS = _os_secret.environ.get('GS_ADMIN_PASSWORD', '')
+_APP_PASS = _os_secret.environ.get('GS_APP_PASS', '')
+if not _ADMIN_PASS:
+    raise SystemExit('缺少环境变量 GS_ADMIN_PASSWORD（仓库不保存口令）')
+if not _APP_PASS:
+    raise SystemExit('缺少环境变量 GS_APP_PASS（仓库不保存口令）')
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
-ADMIN_PASS = 'REDACTED'
+USER, PASSWORD = 'Slceleto', _APP_PASS
+ADMIN_PASS = _ADMIN_PASS
 PASS = FAIL = 0
 
 # 每次跑用独立账号，避免与上一轮的残留冲突

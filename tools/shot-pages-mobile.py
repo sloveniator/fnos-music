@@ -6,9 +6,14 @@
 """
 import sys
 from playwright.sync_api import sync_playwright
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_APP_PASS = _os_secret.environ.get('GS_APP_PASS', '')
+if not _APP_PASS:
+    raise SystemExit('缺少环境变量 GS_APP_PASS（仓库不保存口令）')
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
+USER, PASSWORD = 'Slceleto', _APP_PASS
 TAG = sys.argv[1] if len(sys.argv) > 1 else 'm'
 W = int(sys.argv[2]) if len(sys.argv) > 2 else 390
 H = int(sys.argv[3]) if len(sys.argv) > 3 else 844

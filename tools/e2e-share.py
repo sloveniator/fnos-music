@@ -31,9 +31,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_ADMIN_PASS = _os_secret.environ.get('GS_ADMIN_PASSWORD', '')
+if not _ADMIN_PASS:
+    raise SystemExit('缺少环境变量 GS_ADMIN_PASSWORD（仓库不保存口令）')
 
 BASE = 'http://localhost:20059'
-ADMIN_PASS = 'REDACTED'
+ADMIN_PASS = _ADMIN_PASS
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DATA = os.path.join(ROOT, 'server', 'data')
 FIXTURE_SRC = '/tmp/gusi-test-music/周杰伦/范特西/01 可爱女人.mp3'

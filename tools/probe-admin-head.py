@@ -5,10 +5,15 @@ import json
 import os
 import sys
 import urllib.request
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_ADMIN_PASS = _os_secret.environ.get('GS_ADMIN_PASSWORD', '')
+if not _ADMIN_PASS:
+    raise SystemExit('缺少环境变量 GS_ADMIN_PASSWORD（仓库不保存口令）')
 
 BASE = 'http://localhost:20059'
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-PWD = os.environ.get('GS_ADMIN_PASSWORD', 'REDACTED')
+PWD = _ADMIN_PASS
 
 data = json.dumps({'password': PWD}).encode()
 req = urllib.request.Request(BASE + '/admin/login', data=data, method='POST')

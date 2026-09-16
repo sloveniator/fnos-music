@@ -9,10 +9,13 @@
 // 注意：脚本结束后夹具被彻底删除，想重跑得重新放文件 + 扫描。
 import fs from 'node:fs'
 import path from 'node:path'
+// 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+const _APP_PASS = process.env.GS_APP_PASS || ''
+if (!_APP_PASS) throw new Error('缺少环境变量 GS_APP_PASS（仓库不保存口令）')
 
 const BASE = 'http://localhost:20059'
 const LIB = '/app/working/workspaces/fnos-music/project/fnos-music/server/data/libraries/Slceleto'
-const USER = 'Slceleto', PASS = 'REDACTED'
+const USER = 'Slceleto', PASS = _APP_PASS
 
 const argv = process.argv.slice(2)
 const guardOnly = argv.includes('--guard-only')

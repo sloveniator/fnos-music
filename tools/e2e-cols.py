@@ -13,13 +13,18 @@ import json
 import os
 import sys
 import urllib.request
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_APP_PASS = _os_secret.environ.get('GS_APP_PASS', '')
+if not _APP_PASS:
+    raise SystemExit('缺少环境变量 GS_APP_PASS（仓库不保存口令）')
 
 BASE = 'http://localhost:20059'
 # 本机 Python urllib 会被 HTTP_PROXY 带着走（代理 192.168.2.71:10808），POST 会被代理打回 400
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USER = os.environ.get('GS_APP_USER', 'Slceleto')
-PASSWORD = os.environ.get('GS_APP_PASS', 'REDACTED')
+PASSWORD = _APP_PASS
 VIEWS = os.environ.get('GS_COLS_VIEWS', '1440x950,1280x900,1024x800,900x800,390x844,360x740,320x680')
 PL_ID = os.environ.get('GS_COLS_PL', '221603627')
 

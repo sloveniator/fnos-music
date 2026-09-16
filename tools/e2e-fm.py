@@ -23,9 +23,14 @@ import os
 import subprocess
 import sys
 from playwright.sync_api import sync_playwright
+# 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+import os as _os_secret
+_APP_PASS = _os_secret.environ.get('GS_APP_PASS', '')
+if not _APP_PASS:
+    raise SystemExit('缺少环境变量 GS_APP_PASS（仓库不保存口令）')
 
 BASE = 'http://localhost:20059'
-USER, PASSWORD = 'Slceleto', 'REDACTED'
+USER, PASSWORD = 'Slceleto', _APP_PASS
 SHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 
 PASS = FAIL = SKIP = 0

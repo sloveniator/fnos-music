@@ -12,6 +12,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+// 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+const _APP_PASS = process.env.GS_APP_PASS || ''
+if (!_APP_PASS) throw new Error('缺少环境变量 GS_APP_PASS（仓库不保存口令）')
 
 const require = createRequire(import.meta.url)
 const ROOT = process.cwd()
@@ -22,7 +25,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'gusi-e2e-tags-'))
 const DATA = path.join(TMP, 'data')
 const ADMIN_PW = 'e2e-admin'
 const WEB_USER = 'Slceleto'
-const WEB_PASS = 'REDACTED'
+const WEB_PASS = _APP_PASS
 const LIB = path.join(DATA, 'libraries', WEB_USER)
 
 const freePort = async () => new Promise((resolve, reject) => {

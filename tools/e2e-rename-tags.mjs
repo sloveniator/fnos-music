@@ -8,6 +8,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+// 口令一律从环境变量读取，仓库不保存任何真实口令（2026-09-16 安全清理）
+const _APP_PASS = process.env.GS_APP_PASS || ''
+if (!_APP_PASS) throw new Error('缺少环境变量 GS_APP_PASS（仓库不保存口令）')
 
 const require = createRequire(import.meta.url)
 const { chromium } = require('/app/working/workspaces/mingbu-backend/node_modules/playwright-core')
@@ -18,7 +21,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'gusi-e2e-ren-'))
 const DATA = path.join(TMP, 'data')
 const ADMIN_PW = 'e2e-admin'
 const WEB_USER = 'Slceleto'
-const WEB_PASS = 'REDACTED'
+const WEB_PASS = _APP_PASS
 
 /** 动态挑空闲端口：固定端口被僵尸实例占着时，测试会静默连到别人身上 */
 const freePort = async () => new Promise((resolve, reject) => {
