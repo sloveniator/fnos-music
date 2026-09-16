@@ -45,6 +45,8 @@ ACCESS_SNAPSHOT_FILE="${TRIM_PKGVAR}/accessible-paths.env"
 . "${SCRIPT_DIR}/runtime_access.sh"
 # shellcheck source=/dev/null
 . "${SCRIPT_DIR}/runtime_upgrade.sh"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/runtime_paths.sh"
 
 APP_DEST="${TRIM_APPDEST}"
 
@@ -82,16 +84,6 @@ resolve_port() {
     candidate="43000"
   fi
   printf "%s" "${candidate}"
-}
-
-infer_share_base_dir() {
-  local raw_paths="${TRIM_DATA_SHARE_PATHS:-}"
-  local first_path="${raw_paths%%:*}"
-  if [ -n "${first_path}" ]; then
-    printf "%s" "${first_path}"
-    return 0
-  fi
-  printf "%s/data-share/gusi.music" "${TRIM_PKGVAR}"
 }
 
 log_runtime_identity() {
@@ -158,7 +150,7 @@ start_process() {
 
   local share_base_dir
   local data_dir
-  share_base_dir="$(infer_share_base_dir)"
+  share_base_dir="$(resolve_app_share_dir)"
   prepare_package_runtime "${share_base_dir}" || {
     log_msg "ERROR: package runtime preparation failed."
     return 1

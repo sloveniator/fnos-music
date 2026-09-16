@@ -23,17 +23,17 @@ const pkg = {
   appname: 'gusi.music',
   display_name: '古四音乐',
   desc: '基于洛雪音乐的私有云音乐中心：NAS 曲库在线播放、Web 在线音乐搜索（内置源，NAS 中转）、多端歌单同步、Web 消费者应用与管理后台，配合洛雪音乐移动版使用。',
-  changelog: '压力测试修复与安全加固（0025→0026）：(1) 修复 Web 用户歌单操作时 getUserConfig 抛出 unhandledRejection（Web 注册用户不在移动端配置中，现返回安全默认值）。(2) 压力测试覆盖 72 项用例，通过率 97.2%（2 项网络依赖跳过）。(3) 测试脚本 stress_test.py 已提交。',
+  changelog: '配置与路径适配（0026→0027）：(1) 打包清单同步 server/config.json，修复自定义服务配置（服务名/用户等）在安装包里不生效。(2) 安装/卸载改为按 fnOS 下发的路径动态解析存储空间与共享目录，不再假定 /vol2；卸载删除改为白名单校验。(3) 跨「卸载并删除数据」保留端口偏好（安装档案回读）。(4) 管理后台与音乐应用侧栏底部视觉统一。',
   arch: 'x86_64',
   os_min_version: '1.1.31',
-  version: '1.0.26',
-  build: '0026',
+  version: '1.0.27',
+  build: '0027',
   service_port: '43000',
   maintainer: '古四',
   maintainer_url: 'https://github.com/lyswhut/lx-music-mobile',
   server_dist: path.join(ROOT, 'server', 'server'),
   // offline/ = 捆绑的 Node linux-x64 运行时（cmd/main 按 md5 stamp 增量解压）
-  server_files: ['index.js', 'package.json', 'node_modules', 'config.js', 'server', 'offline'],
+  server_files: ['index.js', 'package.json', 'node_modules', 'config.json', 'server', 'offline'],
   ui_dist: path.join(ROOT, 'ui', 'dist'),
 }
 

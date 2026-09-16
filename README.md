@@ -35,9 +35,28 @@ node packaging/rebrand-mobile.js    # 安卓品牌化（幂等，可重复执行
 node packaging/build-fpk.js         # 组装 fpk
 ```
 
+打包前置：`server/offline/node-linux-x64.tar.gz` 必须存在（fpk 捆绑的 Node 运行时，不入库）。首次或升级运行时：
+
+```bash
+mkdir -p server/offline && curl -fL -o server/offline/node-linux-x64.tar.gz \
+  https://npmmirror.com/mirrors/node/v20.19.4/node-v20.19.4-linux-x64.tar.gz
+# 校验和比对 https://nodejs.org/dist/v20.19.4/SHASUMS256.txt
+```
+
+### 交付前验证（Linux，需 root）
+
+```bash
+sudo bash packaging/verify-fpk.sh          # 结构+校验和+完整生命周期（自动挑一个不存在的 /volN）
+sudo bash packaging/verify-fpk.sh --keep   # 保留现场排查
+```
+
+它在临时存储空间里真实跑一遍：安装 → 启动（确认用的是**捆绑** Node）→ HTTP 自检 → 状态/停止 → 升级（数据与运行时复用）→ 卸载保留 → 重装沿用端口 → 卸载彻底删除 → 路径动态解析与删除白名单单测，共 67 项断言。`--vol-root` 指向的路径已存在时会自动换号，绝不动真实存储空间。
+
 ## 生命周期与运行时（cmd/）
 
 - fpk 捆绑 Node v20.19.4 linux-x64（`server/offline/`），`cmd/main` 启动时按 md5 stamp 增量解压到 `PKGVAR/runtime/node/`，无捆绑包回退系统 node——目标机无需预装 Node
+- **路径全动态适配**：安装目录用 `TRIM_APPDEST`、数据目录用 `TRIM_PKGVAR`、挂载/媒体目录用 fnOS 下发的授权路径（`TRIM_DATA_ACCESSIBLE_PATHS`，写快照热生效）。存储空间编号一律不假定——`cmd/runtime_paths.sh` 从 fnOS 变量或脚本自身位置推导，**推导不出就什么都不做**（不猜 `/volN` 去写或删），因此装在 `/vol1`…`/volN` 行为完全一致
+- 服务端配置读包内 `server/config.json`（`CONFIG_PATH` 可覆盖）；安装/卸载脚本各自以包专属用户运行，root 调用时自动降权重入
 - `cmd/runtime_*.sh`（对齐道理鱼工程层）：日志轮转（10MB×4）、包身份校验（拒 root）、授权目录逐路径权限诊断（中/繁/英）、数据目录可写探测、升级就绪标记
 - 向导字段：`wizard_app_port`（端口，占用即失败）、`wizard_admin_password`（留空自动生成，存 `app-config.env` chmod 600）
 - 应用中心「授权目录」经 `config_callback` 写入 `accessible-paths.env` 快照，服务端 `system-dirs` 接口**读文件热生效**（无需重启）
@@ -54,8 +73,8 @@ node packaging\verify-download.mjs                                              
 
 ## 产物
 
-- `packaging/out/gusi-music-<version>-fnos-cn-x86_64.fpk`（约 57 MB，含 Node 运行时）
-- manifest `checksum` = app.tgz 的 MD5；包结构与道理鱼原包逐条目对齐（27 entries）
+- `packaging/out/gusi-music-<version>-fnos-cn-x86_64.fpk`（约 47 MB，含 Node 运行时）
+- manifest `checksum` = app.tgz 的 MD5；包结构与道理鱼原包逐条目对齐（28 entries，多一条 `cmd/runtime_paths.sh`）
 
 ## 已知边界
 
