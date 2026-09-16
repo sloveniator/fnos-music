@@ -7,13 +7,15 @@
     python3 tools/e2e-auth.py
 
 覆盖：
-  1. 接口层：/web/login-state 的 registerOpen / firstRun；注册校验（缺邮箱 / 邮箱格式 / 弱密码 /
+  1. 接口层：/web/login-state 的 registerOpen / firstRun；注册校验（缺邮箱 / 邮箱格式 / 密码不足 6 位 /
      邮箱重复 / 用户名重复）；注册成功即发 token；密码错误文案为「用户名或密码错误」（不再是「连接码」）
+     密码规范只要求 6 位以上，不强制大小写 / 数字 / 符号组合
   2. 登录页：字段标签为「用户名 / 密码」、页面不再出现「连接码」、「立即注册」入口可见
   3. 注册表单：邮箱为必填 email 输入（原生校验拦非法格式，JS 前置校验拦「缺 TLD」这类漏网格式）
   4. 注册成功自动登录：#shell 出现、#who 为新账号、刷新后仍登录（token 落 localStorage）
   5. 退出登录 → 错密码报错文案（必须透出服务端文案，不能被「登录已过期」吃掉）→ 正确密码可登录
-  6. 管理后台：用户列表能看到网页注册用户（邮箱 + 「网页注册」标记），操作为「重置密码」
+  6. 管理后台：用户列表能看到网页注册用户（邮箱 + 「网页注册」标记），操作为「重置密码」，
+     重置密码弹窗与接口都只要求 6 位以上（不足 6 位被拒、6 位简单密码可用）
   7. 清理：删除本次所有测试账号并确认删后无法登录
 
 关于限流：注册失败是「每 IP 3 次 / 15 分钟」的内存桶，成功注册会清零。
@@ -41,6 +43,8 @@ NEW_USER = 'e2e' + RND            # 接口层注册的账号
 NEW_PASS = 'E2e' + RND + '!9'
 NEW_EMAIL = NEW_USER + '@example.com'
 RESET_USER = NEW_USER + 'r'       # 用来把「注册失败计数」清零的中转账号
+SIMPLE_USER = NEW_USER + 's'      # 只用「6 位小写字母+数字」注册：新规范不要求大小写/符号
+SIMPLE_PASS = 'abc123'
 UI_USER = NEW_USER + 'ui'         # 界面注册的账号
 UI_EMAIL = UI_USER + '@example.com'
 
@@ -104,6 +108,18 @@ def admin_token():
         return json.loads(r.read().decode())['token']
 
 
+def admin_err(path, body, method='POST'):
+    """后台接口预期失败时取错误文案（成功返回空串）"""
+    try:
+        admin_api(path, AT, method=method, body=body)
+        return ''
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode()).get('message', '')
+        except ValueError:
+            return 'HTTP %d' % e.code
+
+
 def cleanup():
     """删除本次创建的测试账号（幂等，崩溃路径也会被 finally 调到）。返回残留名单。"""
     if not AT:
@@ -127,9 +143,9 @@ def reg_body(name, email, pw=None):
     return {'name': name, 'email': email, 'password': pw, 'confirm': pw}
 
 
-def reg_ok(name, email):
+def reg_ok(name, email, pw=None):
     """注册成功（同时清零失败计数），登记到清理名单"""
-    r = api('/register', method='POST', body=reg_body(name, email))['data']
+    r = api('/register', method='POST', body=reg_body(name, email, pw))['data']
     CREATED.append(name)
     return r
 
@@ -163,11 +179,15 @@ def run_all():
     check('文案里没有「连接码」', '连接码' not in m)
 
     # 失败 3-4，随后插一次成功注册清零
-    m = err_of(api, '/register', method='POST', body=reg_body(NEW_USER + 'w', NEW_USER + 'w@example.com', 'abcdef'))
-    check('弱密码被拒（需大小写 / 数字 / 符号）', '密码' in m, m)
+    m = err_of(api, '/register', method='POST', body=reg_body(NEW_USER + 'w', NEW_USER + 'w@example.com', '12345'))
+    check('不足 6 位的密码被拒', m == '密码需 6-128 位', m)
     m = err_of(api, '/register', method='POST', body=reg_body(NEW_USER + '2', NEW_EMAIL))
     check('同邮箱不可重复注册', m == '该邮箱已被注册', m)
     reg_ok(RESET_USER, RESET_USER + '@example.com')
+    # 密码规范：只要 6 位以上 —— 6 位纯小写字母+数字必须能注册（不再强制大小写/数字/符号组合）
+    check('6 位简单密码可注册（不要求大小写/符号）', bool(reg_ok(SIMPLE_USER, SIMPLE_USER + '@example.com', SIMPLE_PASS).get('token')))
+    check('简单密码可登录', bool(api('/login', method='POST',
+                               body={'name': SIMPLE_USER, 'password': SIMPLE_PASS})['data']['token']))
 
     # 失败 5（后面界面注册成功会把桶清零）
     m = err_of(api, '/register', method='POST', body=reg_body(NEW_USER, 'dup-' + NEW_EMAIL))
@@ -213,7 +233,7 @@ def run_all():
               page.eval_on_selector_all('#register-form label',
                                         "els => els.map(e => e.textContent.trim())")
               == ['用户名（1-32 位字母/数字/_）', '邮箱',
-                  '密码（6-128 位，含大小写字母、数字与符号）', '确认密码'])
+                  '密码（至少 6 位）', '确认密码'])
 
         page.fill('#reg-name', UI_USER)
         page.fill('#reg-email', 'bad@@mail')
@@ -290,6 +310,21 @@ def run_all():
               bool(row) and '重置密码' in row[0] and '连接码' not in row[0])
         check('后台页面文案不再出现「连接码」',
               '连接码' not in ap.evaluate("() => document.body.innerText"))
+        # 密码规范（要求只有「6 位以上」）：后台重置密码弹窗要写明规则
+        ap.click('#user-tbody tr:has-text("%s") button.act-pwd' % UI_USER)
+        ap.wait_for_selector('#modal:not([hidden])', timeout=10000)
+        modal = ap.inner_text('#modal')
+        check('重置密码弹窗写明「至少 6 位」', '至少 6 位' in modal, modal.replace('\n', ' / ')[:120])
+        ap.click('#modal-close')
+        ap.wait_for_timeout(300)
+
+        # 接口层同一套规范：不足 6 位被拒、6 位简单密码可重置并可登录
+        m = admin_err('/api/users/' + urllib.parse.quote(UI_USER) + '/password', {'password': '12345'})
+        check('后台重置密码：不足 6 位被拒', m == '密码至少 6 位', m)
+        admin_api('/api/users/' + urllib.parse.quote(UI_USER) + '/password', AT,
+                  method='POST', body={'password': SIMPLE_PASS})
+        check('后台重置密码：6 位简单密码可用', bool(api('/login', method='POST',
+                                                body={'name': UI_USER, 'password': SIMPLE_PASS})['data']['token']))
 
         leftover = [x for x in bad if not (x.startswith('401 ') and x.endswith('/web/login'))]
         check('无未捕获的 JS 异常 / console.error', not errs, ' | '.join(errs[:4]))

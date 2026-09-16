@@ -275,7 +275,6 @@
       // 与后端同规则的前置校验：早提示，别等服务端绕一圈
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('邮箱格式不正确')
       if (pw.length < 6) throw new Error('密码至少 6 位')
-      if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s])/.test(pw)) throw new Error('密码需包含大小写字母、数字和符号')
       const d = await api('/register', { method: 'POST', body: { name, password: pw, confirm: cf, email }, skipAuth: true })
       token = d.token
       localStorage.setItem('gusi-web-token', token)

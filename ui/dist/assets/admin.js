@@ -341,12 +341,12 @@ $('#user-tbody').addEventListener('click', async (e) => {
     } catch (err) { toast(err.message) }
   } else if (btn.classList.contains('act-pwd')) {
     openModal('重置密码：' + name, `
-      <label>新密码<input type="text" id="m-new-pwd" autocomplete="off"></label>
+      <label>新密码（至少 6 位）<input type="text" id="m-new-pwd" autocomplete="off"></label>
       <div class="btns"><button class="btn" data-close>取消</button><button class="btn primary" id="m-pwd-ok">保存</button></div>
     `, (body) => {
       body.querySelector('#m-pwd-ok').addEventListener('click', async () => {
         const pwd = body.querySelector('#m-new-pwd').value.trim()
-        if (!pwd) return toast('请输入新密码')
+        if (pwd.length < 6) return toast('密码至少 6 位')
         try {
           await api('/admin/api/users/' + encodeURIComponent(name) + '/password', { method: 'POST', body: { password: pwd } })
           toast('密码已更新')
@@ -407,13 +407,14 @@ $('#user-tbody').addEventListener('click', async (e) => {
 $('#btn-user-add').addEventListener('click', () => {
   openModal('新建用户', `
     <label>用户名（登录名 = 手机端连接账号）<input type="text" id="m-user-name" autocomplete="off"></label>
-    <label>密码（手机端同步登录用）<input type="text" id="m-user-pwd" autocomplete="off"></label>
+    <label>密码（至少 6 位，手机端同步登录用）<input type="text" id="m-user-pwd" autocomplete="off"></label>
     <div class="btns"><button class="btn" data-close>取消</button><button class="btn primary" id="m-user-ok">创建</button></div>
   `, (body) => {
     body.querySelector('#m-user-ok').addEventListener('click', async () => {
       const name = body.querySelector('#m-user-name').value.trim()
       const pwd = body.querySelector('#m-user-pwd').value.trim()
       if (!name || !pwd) return toast('用户名与密码不能为空')
+      if (pwd.length < 6) return toast('密码至少 6 位')
       try {
         await api('/admin/api/users', { method: 'POST', body: { name, password: pwd } })
         toast('用户 ' + name + ' 已创建')

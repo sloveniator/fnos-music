@@ -90,7 +90,6 @@ export const isRegisterOpen = (): boolean => {
 }
 
 const NAME_RE = /^[A-Za-z0-9_]{1,32}$/
-const PASSWORD_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{6,128}$/
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/
 
 // 注册速率限制：每 IP 3 次失败封禁 15 分钟
@@ -134,8 +133,8 @@ export const registerUser = async (
   if (!isRegisterOpen()) return { ok: false, reason: '注册模式已关闭' }
   // 校验
   if (!NAME_RE.test(name)) return { ok: false, reason: '用户名需为 1-32 位字母、数字或下划线' }
+  // 密码规范：只要求 6 位以上（上限 128 位仅为哈希/传输的工程边界），不强制大小写/数字/符号组合
   if (password.length < 6 || password.length > 128) return { ok: false, reason: '密码需 6-128 位' }
-  if (!PASSWORD_RE.test(password)) return { ok: false, reason: '密码需包含大小写字母、数字和特殊字符' }
   email = email.trim()
   if (!email) return { ok: false, reason: '请填写邮箱' }
   if (email.length > 128 || !EMAIL_RE.test(email)) return { ok: false, reason: '邮箱格式不正确' }

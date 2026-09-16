@@ -168,6 +168,10 @@ check "admin.js 兜底清单含汽水音乐" "$(grep -c "ONLINE_ALL = \['kw', 'w
 check "后台在线源卡片文案提到汽水" "$(grep -c '汽水音乐' "${APPDEST}/ui/dist/index.html")" "1"
 check "消费者端 FM 提示条带后台深链" "$(grep -c "BASE + '/admin/#sources'" "${APPDEST}/ui/app/assets/app.js")" "1"
 check "在线源清单接口经网关不是 404" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "${APPDEST}/app.sock" "${SOCK}/app/gusi-music/admin/api/library/online-sources")" "401"
+# 密码规范：只要求 6 位以上，不得再出现大小写/数字/符号组合校验（0030 回归项）
+check "服务端无密码组合复杂度校验" "$(grep -c 'PASSWORD_RE' "${APPDEST}/server/server/user/register.js")" "0"
+check "注册页密码文案为「至少 6 位」" "$(grep -c '密码（至少 6 位）' "${APPDEST}/ui/app/index.html")" "1"
+check "后台重置密码弹窗写明「至少 6 位」" "$(grep -c '新密码（至少 6 位）' "${APPDEST}/ui/dist/assets/admin.js")" "1"
 check "share.js 的 API 基址带前缀变量" "$(grep -c "var API = PREFIX + '/s/' + CODE" "${APPDEST}/ui/share/share.js")" "1"
 check "使用的是捆绑 Node 运行时" "$(grep -c 'Bundled node runtime is ready' "${PKGVAR}/info.log")" "1"
 if "${PKGVAR}/runtime/node/node" -v >/dev/null 2>&1; then ok "捆绑运行时可直接执行（$("${PKGVAR}/runtime/node/node" -v)）"; else bad "捆绑运行时无法执行"; fi
