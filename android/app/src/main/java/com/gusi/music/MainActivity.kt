@@ -91,6 +91,8 @@ class MainActivity : AppCompatActivity() {
 
         buildWebView()
         askNotificationPermission()
+        // 离线播放：索引本地已下载曲目并起回环服务（没索引到东西就不起服务）
+        LocalPlayback.start(this)
 
         if (prefs.configured) {
             loadPage()
@@ -109,7 +111,7 @@ class MainActivity : AppCompatActivity() {
             FrameLayout.LayoutParams.MATCH_PARENT
         )
         view.setBackgroundColor(ContextCompat.getColor(this, R.color.bg))
-        view.settings.applyWebDefaults()
+        view.settings.applyWebDefaults(allowMixedContent = prefs.baseUrl.startsWith("https://"))
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
         view.webViewClient = appClient
@@ -118,10 +120,13 @@ class MainActivity : AppCompatActivity() {
             DownloadHelper.enqueue(this, url, userAgent, contentDisposition, mimeType)
         }
         view.addJavascriptInterface(
-            JsBridge { json ->
-                // 注意：回调在 WebView 的 JS 线程上
-                runOnUiThread { onPlaybackState(json) }
-            },
+            JsBridge(
+                onState = { json ->
+                    // 注意：回调在 WebView 的 JS 线程上
+                    runOnUiThread { onPlaybackState(json) }
+                },
+                resolveLocal = { url -> LocalPlayback.localUrlFor(url) }
+            ),
             BRIDGE_NAME
         )
         web = view
@@ -305,6 +310,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         BridgeHolder.attach(null)
+        LocalPlayback.stop(this)
         fileChooserCallback?.onReceiveValue(null)
         fileChooserCallback = null
         container.removeAllViews()
@@ -324,7 +330,7 @@ class MainActivity : AppCompatActivity() {
 
 /** WebView 的统一设置（两处创建点共用：首次创建、渲染进程崩溃后重建）。 */
 @SuppressLint("SetJavaScriptEnabled")
-private fun WebSettings.applyWebDefaults() {
+private fun WebSettings.applyWebDefaults(allowMixedContent: Boolean) {
     javaScriptEnabled = true
     domStorageEnabled = true          // Web 端登录态存在 localStorage
     databaseEnabled = true
@@ -336,7 +342,13 @@ private fun WebSettings.applyWebDefaults() {
     displayZoomControls = false
     allowFileAccess = false
     allowContentAccess = false
-    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+    // 离线播放要用 http://127.0.0.1 喂音频；页面若是 https，Chromium 会把这段明文媒体当混合内容。
+    // 只在「页面本身是 https」时放宽（那时才可能被拦），且服务端只绑回环地址、只能取已下载文件。
+    mixedContentMode = if (allowMixedContent) {
+        WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+    } else {
+        WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+    }
     cacheMode = WebSettings.LOAD_DEFAULT
     // 让服务端有机会识别「这是安卓客户端」（Web 端目前不依赖它，留着做埋点/分流）
     userAgentString = userAgentString + " GusiMusicApp/${BuildConfig.VERSION_NAME}"

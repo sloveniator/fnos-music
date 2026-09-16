@@ -23,6 +23,41 @@ object BridgeScript {
 
   var lastPush = 0;
 
+  // ---- 离线播放：本地已下载的那份优先 ----
+  // 为什么拦 src setter 而不是改 Web 端代码：Web 端只管拼 URL，它不需要知道「手机上有缓存」；
+  // 壳在这一层做替换，Web 端换播放器实现也不会把这条路弄断。
+  function localFirst(url) {
+    try {
+      if (url && window.GusiBridge && window.GusiBridge.localFor) {
+        var hit = window.GusiBridge.localFor(String(url));
+        if (hit) return hit;
+      }
+    } catch (e) {}
+    return url;
+  }
+
+  (function patchMediaSrc() {
+    try {
+      var proto = window.HTMLMediaElement && HTMLMediaElement.prototype;
+      if (!proto || proto.__gusiSrcPatched) return;
+      var d = Object.getOwnPropertyDescriptor(proto, 'src');
+      if (!d || !d.set) return;
+      proto.__gusiSrcPatched = true;
+      Object.defineProperty(proto, 'src', {
+        configurable: true,
+        enumerable: d.enumerable,
+        get: d.get,
+        set: function (v) { d.set.call(this, localFirst(v)); }
+      });
+      // 兼容 setAttribute('src', …) 这条路径（虽然当前 Web 端用的是属性赋值）
+      var sa = proto.setAttribute;
+      proto.setAttribute = function (name, value) {
+        if (String(name).toLowerCase() === 'src') return sa.call(this, name, localFirst(value));
+        return sa.call(this, name, value);
+      };
+    } catch (e) {}
+  })();
+
   function txt(id) {
     var e = document.getElementById(id);
     return e ? (e.textContent || '') : '';

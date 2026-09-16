@@ -6,7 +6,10 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 
 /** Web → 原生：把播放状态推过来。方法运行在 WebView 的 JS 线程，不是主线程。 */
-class JsBridge(private val onState: (String) -> Unit) {
+class JsBridge(
+    private val onState: (String) -> Unit,
+    private val resolveLocal: (String) -> String? = { null }
+) {
 
     @JavascriptInterface
     fun setState(json: String) {
@@ -15,6 +18,21 @@ class JsBridge(private val onState: (String) -> Unit) {
         } catch (t: Throwable) {
             Log.w(TAG, "setState 处理失败", t)
         }
+    }
+
+    /**
+     * Web 端给 `<audio>` 设 src 时**同步**问一句：这首歌手机上是不是已经有一份？
+     * 有就返回本地回环地址（离线播放），没有返回 null（照旧走网络）。
+     *
+     * 必须是同步的：`src` 的 setter 没有异步的余地 —— 一旦这里变成 Promise，
+     * 用户按下播放到出声之间会多一个空档，跳过/暂停的竞态也会跟着冒出来。
+     */
+    @JavascriptInterface
+    fun localFor(url: String): String? = try {
+        resolveLocal(url)
+    } catch (t: Throwable) {
+        Log.w(TAG, "localFor 处理失败", t)
+        null
     }
 
     @JavascriptInterface
