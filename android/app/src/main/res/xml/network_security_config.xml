@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文 HTTP 是刻意允许的：这是自建 NAS 的局域网应用，用户的服务器通常是
+  http://192.168.x.x:20059，不可能有公网证书。
+  trust-anchors 里额外信任「用户安装的证书」，是为了支持自签 HTTPS 的 NAS
+  （系统 CA 列表仍受信任，校验不会被关掉；真要关掉的路径见 MainActivity 的
+  onReceivedSslError —— 那里会弹窗让用户自己决定，不会静默放行）。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

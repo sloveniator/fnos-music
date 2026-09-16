@@ -1,0 +1,13 @@
+# Gradle / Android 构建产物
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+captures/
+
+# 签名密钥**绝不入 git**（本仓库是公开仓库）：
+# keystore/ 下有 .jks 和密码明文，丢了就没法再给同一台手机升级同一个 App，
+# 所以它单独保存、单独备份，见 android/README.md 的「签名」一节。
+keystore/

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 调试变体与正式版可共存（applicationId 也不同），名字带后缀便于一眼区分 -->
+    <string name="app_name">古四音乐 (调试)</string>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 取自 Web 端 ui/app/assets/app.css 的变量，保证壳与页面同色 -->
+    <color name="bg">#0A0C12</color>
+    <color name="panel">#151A23</color>
+    <color name="fg">#E7EAF3</color>
+    <color name="fg_dim">#97A0B5</color>
+    <color name="accent">#4F8CFF</color>
+    <color name="accent2">#7C5CFF</color>
+    <color name="danger">#FF6B6B</color>
+    <color name="border">#232A36</color>
+    <!-- 自适应图标底色，取自 packaging/assets/icon-512.png 的四角 -->
+    <color name="icon_bg">#050910</color>
+</resources>

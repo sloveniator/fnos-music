@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_prev">上一首</string>
+    <string name="notif_next">下一首</string>
+    <string name="notif_play">播放</string>
+    <string name="notif_pause">暂停</string>
+</resources>

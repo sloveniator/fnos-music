@@ -1,0 +1,84 @@
+import java.util.Properties
+
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+// 发布签名：android/keystore/keystore.properties 存在时才启用（该文件不入 git）
+val keystorePropsFile = rootProject.file("keystore/keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+
+android {
+    namespace = "com.gusi.music"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.gusi.music"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0.0"
+        resourceConfigurations += listOf("zh", "en")
+    }
+
+    signingConfigs {
+        if (keystoreProps.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+        release {
+            isMinifyEnabled = false          // WebView 壳没有反射逻辑，混淆收益低、排错成本高
+            isShrinkResources = false
+            if (keystoreProps.isNotEmpty()) signingConfig = signingConfigs.getByName("release")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    packaging {
+        resources.excludes += setOf("META-INF/*.kotlin_module", "DebugProbesKt.bin")
+    }
+
+    lint {
+        abortOnError = false                 // 先能出包；lint 报告单独看（见 android/README.md）
+        checkReleaseBuilds = false
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    // androidx.webkit：WebView 兼容层（暗色强制、渲染进程回收策略、版本查询）
+    implementation("androidx.webkit:webkit:1.11.0")
+    // androidx.media：MediaSessionCompat + MediaStyle 通知（锁屏/通知栏播放控制）
+    implementation("androidx.media:media:1.7.0")
+
+    testImplementation("junit:junit:4.13.2")
+}

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">古四音乐</string>
+    <string name="setup_title">服务器地址</string>
+
+    <string name="setup_head">连接你的 NAS</string>
+    <string name="setup_desc">填写古四音乐服务的地址。局域网内通常是「NAS 的 IP 或主机名」，端口默认 20059；如果已在 fnOS 应用中心配过网关前缀，可写成 192.168.1.10:20059/app/gusi-music。</string>
+    <string name="setup_hint">192.168.1.100:20059</string>
+    <string name="setup_save">保存并进入</string>
+    <string name="setup_test">测试连接</string>
+    <string name="setup_testing">正在测试…</string>
+    <string name="setup_test_ok">连接成功：HTTP %1$d</string>
+    <string name="setup_test_fail">连不上：%1$s</string>
+    <string name="setup_invalid">地址格式不对，示例：192.168.1.100:20059</string>
+    <string name="setup_saved">已保存：%1$s</string>
+    <string name="setup_no_server">还没有配置服务器地址</string>
+
+    <string name="loading">正在连接…</string>
+    <string name="err_title">连接不上服务器</string>
+    <string name="err_desc">检查手机和 NAS 是否在同一网络，以及服务器地址是否正确。</string>
+    <string name="err_retry">重试</string>
+    <string name="err_change">更换地址</string>
+    <string name="err_detail">原因：%1$s</string>
+    <string name="err_renderer">网页渲染进程被系统回收了，已重建</string>
+
+    <string name="exit_hint">再按一次返回键退出</string>
+
+    <string name="dl_desc">古四音乐下载</string>
+    <string name="dl_started">已开始下载：%1$s</string>
+    <string name="dl_failed">下载失败：%1$s</string>
+    <string name="dl_no_manager">系统下载器不可用</string>
+    <string name="dl_bad_url">这个下载地址无效</string>
+
+    <string name="ssl_title">证书不受信任</string>
+    <string name="ssl_msg">服务器的 HTTPS 证书无法验证（自签名或域名不匹配）。\n\n继续访问会把这次连接置于风险中：内容可能被中间人查看或篡改。只有在你确认这台服务器就是你自己的 NAS 时才继续。\n\n%1$s</string>
+    <string name="ssl_continue">仍然继续</string>
+    <string name="ssl_cancel">取消</string>
+
+    <string name="notif_channel_playback">播放控制</string>
+    <string name="notif_channel_desc">播放时的常驻控制条（上一首 / 播放暂停 / 下一首）</string>
+    <string name="notif_unknown_track">古四音乐</string>
+    <string name="notif_no_permission">通知权限被关闭：后台播放仍在，但通知栏/锁屏看不到控制条。可在系统设置里给「古四音乐」打开通知。</string>
+</resources>
