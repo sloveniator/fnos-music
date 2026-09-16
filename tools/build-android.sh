@@ -3,7 +3,7 @@
 #
 # 用法：
 #   sh tools/build-android.sh            # 单测 + debug 包 + release 包
-#   sh tools/build-android.sh test       # 只跑单测（8 个纯逻辑用例）
+#   sh tools/build-android.sh test       # 只跑单测（纯逻辑用例，秒级）
 #   sh tools/build-android.sh debug      # 只出 debug 包（可直接装手机）
 #   sh tools/build-android.sh release    # 只出 release 包（有签名密钥则已签名）
 #   sh tools/build-android.sh lint       # lint（报告落 app/build/reports/lint-results-debug.html）

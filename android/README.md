@@ -23,9 +23,13 @@
 2. `#np-name` / `#np-singer` / `#np-cover` —— 底栏正在播放的曲目信息（壳读 `textContent` 与 `src`）。
 3. `window.__gusiCmd(cmd, arg)` 与 `window.__gusiEscape()` —— 壳注入的入口；
    前者接受 `toggle|play|pause|next|prev|seek`，后者返回是否有浮层被关掉。
+4. `--safe-top` / `--safe-bottom` / `--safe-left` / `--safe-right` —— 壳内联写到
+   `<html>` 上的安全区（CSS px）。Web 端 `app.css` 的 `:root` 里默认取
+   `env(safe-area-inset-*)`，**被壳覆写后以壳为准**，所以新写的布局请用
+   `var(--safe-*)` 而不是直接写 `env()`。
 
-> 这三样一旦改名/删掉，App 不会崩，只会「通知栏不动了 / 返回键行为不对了」——
-> 属于静默失效，改 Web 端底栏时请留心。
+> 这四样一旦改名/删掉，App 不会崩，只会「通知栏不动了 / 返回键行为不对了 / 顶栏被时钟压住」——
+> 属于静默失效，改 Web 端底栏和安全区时请留心。
 
 ### 数据流
 
@@ -42,16 +46,28 @@ WebView(ui/app)  --window.GusiBridge.setState(json)-->  JsBridge  -->  PlaybackS
 ```
 android/
 ├── app/src/main/java/com/gusi/music/
-│   ├── MainActivity.kt      # WebView 宿主：加载页面、返回键语义、SSL 询问、下载拦截、桥注册
+│   ├── MainActivity.kt      # WebView 宿主：加载页面、返回键语义、SSL 询问、下载拦截、桥注册、系统栏/安全区
+│   ├── GusiApp.kt           # 进程启动：夜间模式恒为深色（必须在 Application 里设，见文件注释）
+│   ├── Insets.kt            # WindowInsets → CSS px，生成注入 --safe-* 的脚本（纯 JDK，可单测）
 │   ├── SetupActivity.kt     # 首次配置：填服务器地址 + 连通性探测
 │   ├── ServerAddress.kt     # 地址规范化/相对地址解析（纯 JDK，可单测）
 │   ├── Prefs.kt             # 只存服务器地址；登录态归 WebView 的 localStorage
 │   ├── BridgeScript.kt      # 注入到页面的 JS（状态采集 + 指令入口 + 浮层关闭）
 │   ├── JsBridge.kt          # Web → 原生（含 BridgeHolder：原生 → Web 的指令通道）
 │   ├── PlaybackService.kt   # 前台服务 + MediaSession + 通知栏 + WakeLock + 封面拉取
+│   ├── Transport.kt         # 播放状态 → MediaSession（进度条/±30 秒），纯逻辑可单测
+│   ├── PlaybackMemory.kt    # 续播位置记忆（每设备每曲一条）
+│   ├── Tsv.kt               # PlaybackMemory 的落盘格式（可单测）
+│   ├── MediaKey.kt          # 「哪首歌算同一首」的归一化（本地文件 ↔ 远端 id 对齐）
+│   ├── MediaSource.kt       # 播放来源抽象（远端 URL / 本地回环）
+│   ├── UriMediaSource.kt    # 走 content:// 的本地文件源
+│   ├── LocalIndex.kt        # 扫描已下载曲目，建「曲目 → 本地文件」索引
+│   ├── LocalMediaServer.kt  # 本地回环 HTTP 服务（WebView 不能直接吃 content://）
+│   ├── LocalPlayback.kt     # 把命中本地文件的曲目接进播放链路
+│   ├── AudioSniff.kt        # 音频嗅探（识别 Web 端给的曲目、避开广告/提示音）
 │   ├── DownloadHelper.kt    # DownloadManager 接管下载，解析 filename*=UTF-8'' 中文名
 │   └── CookieStore.kt       # 拉封面时复用 WebView 的 cookie
-├── app/src/test/java/com/gusi/music/ServerAddressTest.kt   # 8 个纯逻辑单测
+├── app/src/test/java/com/gusi/music/*.kt   # 75 个纯逻辑单测（见第 3 节）
 └── tools/make-icons.py      # 从 packaging/assets 生成各密度启动图（幂等）
 ```
 
@@ -62,10 +78,16 @@ android/
 
 ```sh
 sh tools/build-android.sh            # 等价于：单测 + debug + release（release 无密钥时出未签名包）
-sh tools/build-android.sh test       # 只跑单测（8 个）
+sh tools/build-android.sh test       # 只跑单测（75 个纯逻辑用例，秒级）
 sh tools/build-android.sh lint       # lint 报告 → app/build/reports/lint-results-debug.html
 sh tools/build-android.sh debug      # 只出 debug 包（可直接装手机，debug 密钥签名）
+python3 tools/e2e-safe-area.py       # 安全区注入 → Web 布局让开（真实 Chromium，18 项断言）
 ```
+
+`tools/e2e-safe-area.py` 补的是「壳注入安全区」这一层：容器里装不了真机，但把与
+`Insets.js` 逐字符相同的脚本注入真实 Chromium，就能量出顶栏是否让开状态栏、底栏是否
+抬离手势条、横屏刘海左右是否留白，以及**注入 0 时与不注入完全一致**（防止与 `env()` 双算）。
+它需要实例在 20059 跑着，并且要 `GS_ADMIN_PASSWORD`（清临时账号用）。
 
 产物：
 
@@ -131,6 +153,11 @@ EOF
 - [ ] 自签 HTTPS 的 NAS：出现证书询问框，「取消」不加载、「仍然继续」才加载
 - [ ] 旋转屏幕不重载页面；输入法弹出时底栏不被遮住
 - [ ] 申请通知权限被拒绝时：提示语正确、后台播放仍在
+- [ ] 沉浸式：顶栏按钮**不被状态栏时钟压住**（刘海/挖孔机尤其明显）
+- [ ] 沉浸式：底栏胶囊**不贴进手势条**（全面屏手势导航下应离底约 10px）
+- [ ] 横屏：顶栏/底栏左右不被刘海或挖孔压住
+- [ ] 深色：状态栏/导航栏图标是浅色；把系统切到浅色模式后**页面不变浅**、底栏不闪白
+- [ ] 键盘：点搜索框输入时，输入框与底栏整体抬起，不被键盘盖住
 
 ## 6. 已知 lint 警告（有意保留，不是漏改）
 
@@ -151,6 +178,12 @@ EOF
 ## 7. 与 Web 端一起改的注意事项
 
 - 壳依赖的 DOM/JS 契约见第 1 节，改底栏结构或播放器方法名时同步这三样。
+- **安全区一律写 `var(--safe-*)`，不要在 Web 端新写 `env(safe-area-inset-*)`。**
+  安卓 WebView 到 Chromium M144 才在非全屏场景上报 `env()`，更老的恒为 0；壳会注入
+  `--safe-*` 覆盖它，`env()` 只作为浏览器/PWA 的兜底默认值留在 `:root` 里。
+- 沉浸式（内容画到状态栏/导航栏底下）是**壳单方面开的**：`MainActivity` 里
+  `setDecorFitsSystemWindows(false)` + 透明系统栏 + 注入安全区。Web 端不需要（也不该）
+  自己去猜状态栏高度。
 - Web 端新增「页内跳转」不用改壳（`http/https` 一律留在 WebView 内）。
 - Web 端要用系统相册/文件选择器（`<input type="file">`）已支持（`onShowFileChooser`）。
 - 别在 Web 端用 `target="_blank"` 指望新窗口 —— 非 http(s) 协议才会走系统浏览器。

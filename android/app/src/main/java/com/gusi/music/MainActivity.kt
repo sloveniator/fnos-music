@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Build
@@ -30,6 +31,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 
@@ -51,6 +56,12 @@ class MainActivity : AppCompatActivity() {
 
     private var lastBackAt = 0L
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+
+    /** 最近一次拿到的安全区（CSS px）；页面加载完/安全区变化时推给页面。 */
+    private var safeInsets: Insets.Box = Insets.ZERO
+
+    /** `document.documentElement` 是否已经存在（能受得住 evaluateJavascript）。 */
+    private var pageReady = false
 
     private val setupLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -74,7 +85,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 沉浸式：让页面自己画到状态栏/导航栏底下。
+        // Web 端整篇布局早就按安全区排好了版（顶栏、底栏胶囊、歌词全屏都留了位置），
+        // 但壳一直没开 edge-to-edge —— 那些安全区恒为 0，等于白设计。这里把它接上。
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        applyEdgeToEdgeBars()
+
         setContentView(R.layout.activity_main)
+        attachInsetsListener(findViewById(R.id.root))
 
         prefs = Prefs(this)
         container = findViewById(R.id.web_container)
@@ -148,6 +167,10 @@ class MainActivity : AppCompatActivity() {
             super.onPageFinished(view, url)
             hideLoading()
             view.evaluateJavascript(BridgeScript.JS, null)
+            // 安全区在 onCreate 之后就回调过一次了（那时页面还不存在），这里补推；
+            // 渲染进程重建后同样靠这一句接上。
+            pageReady = true
+            pushInsets()
         }
 
         override fun onReceivedError(
@@ -176,6 +199,7 @@ class MainActivity : AppCompatActivity() {
             // 返回 true = 我们自己处理；此时这个 WebView 已不可用，必须销毁重建
             Log.w(TAG, "渲染进程没了，重建 WebView")
             showError(getString(R.string.err_renderer))
+            pageReady = false          // 新页面加载完之前，安全区注入没有落点
             container.removeAllViews()
             try {
                 view.destroy()
@@ -306,6 +330,68 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+    }
+
+    /**
+     * 系统栏透明 + 图标保持浅色（深色跟随系统的壳侧一半）。
+     *
+     * 页面是深色的（Web 端只有深色一套主题，`GusiApp` 也把夜间模式钉死在深色），
+     * 所以状态栏/导航栏图标必须浅色；再关掉系统给透明导航栏垫的那层对比底
+     * （API 29+ 默认开），否则底栏胶囊下面会多一条灰边。
+     */
+    @Suppress("DEPRECATION")
+    private fun applyEdgeToEdgeBars() {
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
+        val c = WindowInsetsControllerCompat(window, window.decorView)
+        c.isAppearanceLightStatusBars = false
+        c.isAppearanceLightNavigationBars = false
+    }
+
+    /**
+     * 安全区与键盘。
+     *
+     * 两件事分开处理，别混：
+     *  - **安全区（状态栏/刘海/手势条）**：换算成 CSS px 注入页面（[Insets]），由 Web 端
+     *    的 `--safe-*` 变量消费。为什么不指望 WebView 自己的 `env(safe-area-inset-*)`：
+     *    Chromium 到 M144 才在所有 WebView 里上报，更老的恒为 0（页面就顶到时钟底下了）。
+     *  - **键盘**：把根容器底边垫高。edge-to-edge 之后 `adjustResize` 不再自动改窗口高度，
+     *    不自己垫的话输入框和底栏会被 IME 盖住。
+     *
+     * 最后返回 `CONSUMED`：inset 由壳统一分发，不再往 WebView 里传第二份。
+     * 这一条有实际后果 —— M139+ 的 WebView 会自己按 ime inset 缩视觉视口，
+     * 若我们同时垫高容器，键盘弹起时底栏会被顶高**两倍**键盘高度。
+     */
+    private fun attachInsetsListener(root: View) {
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            val density = v.resources.displayMetrics.density
+            val box = Insets.of(bars.top, bars.bottom, bars.left, bars.right, density)
+            if (!box.sameAs(safeInsets)) {
+                safeInsets = box
+                pushInsets()
+            }
+            v.setPadding(0, 0, 0, insets.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+            WindowInsetsCompat.CONSUMED
+        }
+        // 光挂监听还不够：如果 insets 在本行之前就已经分发过一次，监听器会错过那一趟，
+        // 页面就一直拿不到 safe-top（表现为顶栏被状态栏压住）。手动再要一次分发。
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    /**
+     * 把安全区写进页面。页面还没到（首帧、渲染进程重建后）就只记着，
+     * 等 `onPageFinished` 再推一次 —— 顺序反过来就丢值了。
+     */
+    private fun pushInsets() {
+        if (!pageReady || !::web.isInitialized) return
+        web.evaluateJavascript(Insets.js(safeInsets), null)
     }
 
     override fun onDestroy() {

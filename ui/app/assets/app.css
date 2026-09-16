@@ -508,7 +508,7 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
     box-shadow: none; }
   .sidebar.open { position: fixed; margin-left: 0; transform: none; box-shadow: 20px 0 60px rgba(0,0,0,.4); }
   .topbar { display: flex; position: fixed; left: 0; right: 0; top: 0; }
-  .main { padding: calc(62px + env(safe-area-inset-top, 0px)) 16px calc(var(--player-h) + 74px); }
+  .main { padding: calc(62px + var(--safe-top)) 16px calc(var(--player-h) + 74px); }
   .player { grid-template-columns: minmax(0, 1fr) auto; padding: 0 10px; gap: 6px; }
   .center { order: 2; min-width: 0; }
   .seek-row { display: none; }
@@ -562,20 +562,20 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .otab { padding: 8px 16px; }
 
   /* 歌词全屏：安全区 + 字号节奏 + 移动端 CD 与歌词纵向堆叠 */
-  .lf-head { padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; }
+  .lf-head { padding: calc(var(--safe-top) + 10px) 16px 10px; }
   .lf-stage { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   .lf-disc-wrap { padding: 10px 0 6px; }
   .lf-disc { width: min(220px, 42vh); height: min(220px, 42vh); }
-  .lf-body { padding: 8vh 18px calc(24vh + env(safe-area-inset-bottom, 0px)); }
+  .lf-body { padding: 8vh 18px calc(24vh + var(--safe-bottom)); }
   .lf-body p { font-size: 15px; line-height: 2.3; }
   .lf-body p.on { font-size: 18px; }
 
   /* 播放器底栏：点击信息区展开歌词（交互在 JS 绑定），触控目标 ≥40px。
      2026-09-15 主人反馈：底栏贴死屏幕下沿、两行挤在一起不好看 —— 改成离底浮起的圆角胶囊，
      下边距吃掉安全区再留 10px 呼吸，进度线依旧贴胶囊顶边（e2e 有断言）。 */
-  :root { --player-lift: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+  :root { --player-lift: calc(var(--safe-bottom) + 10px); }
   .player { bottom: var(--player-lift); height: var(--player-h);
-    left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px));
+    left: max(8px, var(--safe-left)); right: max(8px, var(--safe-right));
     padding: 0 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 22px;
     overflow: hidden; box-shadow: 0 18px 44px rgba(2,5,12,.55), inset 0 1px 0 rgba(255,255,255,.06); }
   .np { flex: 1; cursor: pointer; }
@@ -668,7 +668,7 @@ img.ph {
    压住底栏 z-index 40 —— 桌面端进全屏就只剩 CD + 歌词，一个传输键都点不到。
    现在默认全宽显示，尺寸走下面这一档；>900px 的桌面档在「桌面端底栏」段里再放大。 */
 .lf-ctrls { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px;
-  padding: 8px 18px calc(env(safe-area-inset-bottom, 0px) + 14px);
+  padding: 8px 18px calc(var(--safe-bottom) + 14px);
   background: linear-gradient(0deg, rgba(8,10,16,.85), transparent); }
 .lf-ctrls .lf-seek { width: 100%; max-width: none; }
 .lf-btns { display: flex; align-items: center; justify-content: center; gap: 18px; }
@@ -1035,6 +1035,14 @@ img.ph {
   --radius: clamp(12px, .5vw + 9px, 16px);
   --topbar-h: 56px;                               /* 移动端顶栏内容高度（不含安全区） */
   --tap: 40px;                                    /* 最小触控目标 */
+  /* 安全区默认取自浏览器/WebView 的 env()；安卓壳会用内联样式覆写这四个变量。
+     为什么必须留这个口子：Chromium 直到 M144 才在所有 WebView 里上报 env(safe-area-inset-*)，
+     更老的 WebView（含 M136 之前的全部）恒为 0 —— 而手机的刘海/手势条是真实存在的。
+     壳读 WindowInsets 后用 CSS px 注入；桌面/移动浏览器没有注入时行为与从前完全一致。 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
 
 /* —— 2. 平台级修正 —— */
@@ -1128,14 +1136,14 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 /* —— 6. 移动端：结构、安全区、触控目标 —— */
 @media (max-width: 900px) {
   /* 顶栏高度确定化 + 刘海安全区（PWA 独立窗口下状态栏不再压住按钮） */
-  .topbar { height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
-    padding: env(safe-area-inset-top, 0px) 12px 0; align-items: center;
+  .topbar { height: calc(var(--topbar-h) + var(--safe-top));
+    padding: var(--safe-top) 12px 0; align-items: center;
     background: linear-gradient(180deg, rgba(15,18,27,.97), rgba(15,18,27,.86));
     border-bottom-color: rgba(255,255,255,.05); }
   .topbar .tb-btn { width: 40px; height: 40px; }
   .topbar #top-title { font-size: 16px; }
   /* 内容起始位置由顶栏高度令牌推导，改顶栏高度不会串位 */
-  .main { padding: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 14px) var(--pad-x)
+  .main { padding: calc(var(--topbar-h) + var(--safe-top) + 14px) var(--pad-x)
                    calc(var(--player-h) + var(--player-lift) + 68px); }
   /* 抽屉在手机上更宽（好点），退场位移与之等宽 */
   .sidebar { width: min(78vw, 300px); margin-left: calc(-1 * min(78vw, 300px)); }
@@ -1236,11 +1244,11 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   :root { --player-h: 58px; --topbar-h: 48px; }
   .topbar .tb-btn { width: 36px; height: 36px; }
   .topbar #top-title { font-size: 15px; }
-  .main { padding-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 10px); }
+  .main { padding-top: calc(var(--topbar-h) + var(--safe-top) + 10px); }
   .hero { flex-direction: row; align-items: flex-end; text-align: left; gap: 20px; }
   .hero .cover { width: min(120px, 26vh); height: min(120px, 26vh); }
   .lf-disc { width: min(180px, 46vh); height: min(180px, 46vh); }
-  .lf-body { padding: 4vh 18px calc(18vh + env(safe-area-inset-bottom, 0px)); }
+  .lf-body { padding: 4vh 18px calc(18vh + var(--safe-bottom)); }
   .queue { max-height: 74vh; max-height: 74dvh; }
   /* 矮窗口里页头别吃掉半个屏：实测 844x390 下页头占 200px，列表只剩 1 行 */
   .page-head { margin-bottom: 10px; }
@@ -1257,14 +1265,14 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
 
 /* —— 9. 横屏刘海安全区（左右） —— */
 @media (orientation: landscape) {
-  .topbar { padding-left: max(12px, env(safe-area-inset-left, 0px));
-            padding-right: max(12px, env(safe-area-inset-right, 0px)); }
-  .main, .player { padding-left: max(var(--pad-x), env(safe-area-inset-left, 0px));
-                   padding-right: max(var(--pad-x), env(safe-area-inset-right, 0px)); }
+  .topbar { padding-left: max(12px, var(--safe-left));
+            padding-right: max(12px, var(--safe-right)); }
+  .main, .player { padding-left: max(var(--pad-x), var(--safe-left));
+                   padding-right: max(var(--pad-x), var(--safe-right)); }
 }
 @media (orientation: landscape) and (max-width: 900px) {
-  .player { padding-left: max(10px, env(safe-area-inset-left, 0px));
-            padding-right: max(10px, env(safe-area-inset-right, 0px)); }
+  .player { padding-left: max(10px, var(--safe-left));
+            padding-right: max(10px, var(--safe-right)); }
 }
 
 /* —— 9.8 桌面端（>900px）底栏 / 全屏控制条：加高一档、按钮放大放宽 —— */
