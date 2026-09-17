@@ -65,6 +65,10 @@ android {
     lint {
         abortOnError = false                 // 先能出包；lint 报告单独看（见 android/README.md）
         checkReleaseBuilds = false
+        // 声明了「车机媒体应用」之后，lint 会来提醒「你还没接车机语音搜索」。
+        // 语音搜索（「播放某某」）是有意不做的功能（见 android/README.md 第 5、7 节），
+        // 这里显式关掉这两条提醒，好让「lint 有 Error」永远等于「真出问题了」。
+        disable += setOf("MissingIntentFilterForMediaSearch", "MissingOnPlayFromSearch")
     }
 
     testOptions {
@@ -81,4 +85,7 @@ dependencies {
     implementation("androidx.media:media:1.7.0")
 
     testImplementation("junit:junit:4.13.2")
+    // 单测跑在 JVM 上：android.jar 里的 org.json 只是桩（返回默认值），
+    // 不额外给一份真实现的话，CarLibrary 的 JSON 解析在单测里会「静默解析出空曲库」。
+    testImplementation("org.json:json:20240303")
 }

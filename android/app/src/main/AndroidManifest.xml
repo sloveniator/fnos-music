@@ -67,5 +67,23 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
+
+        <!-- 车机（Android Auto / Android Automotive）：车机不认我们的 Web 界面，
+             只认 MediaBrowserService。这里提供的是「可浏览的曲库 + 把点播转给 Web 播放器」，
+             出声的仍然是 WebView 里的那一个播放器。
+             必须 exported：车机侧（Google Play 服务所在进程）要跨进程连过来。 -->
+        <service
+            android:name=".CarMediaService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <!-- 声明本应用在车机上提供「媒体」能力。缺这一条，Android Auto 不会把它列进
+             车机的媒体列表（见 res/xml/automotive_app_desc.xml）。 -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
     </application>
 </manifest>

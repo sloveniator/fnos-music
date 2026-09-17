@@ -58,6 +58,22 @@ object BridgeScript {
     } catch (e) {}
   })();
 
+  // ---- 登录令牌 → 原生（车机拉曲库要用，见 WebSession.kt） ----
+  // 轮询而不是拦 localStorage.setItem：令牌有三种写入路径（登录/切换账号/刷新），
+  // 拦 setItem 只能盖住前两种；轮询 2 秒一次的开销可以忽略，且只在与上次不同才推。
+  function pushToken() {
+    try {
+      var t = localStorage.getItem('gusi-web-token') || '';
+      if (t === lastToken) return;
+      lastToken = t;
+      if (window.GusiBridge && window.GusiBridge.setToken) window.GusiBridge.setToken(t);
+    } catch (e) {}
+  }
+
+  var lastToken = null;
+  pushToken();
+  setInterval(pushToken, 2000);
+
   function txt(id) {
     var e = document.getElementById(id);
     return e ? (e.textContent || '') : '';
@@ -66,6 +82,11 @@ object BridgeScript {
   function state() {
     var p = window.__player;
     if (!p || !p.audio) return null;
+    // 还没放过任何曲目：底栏那两行显示的是占位符「—」，不是一首歌。
+    // 这时候必须什么都不报 —— 壳那边只能靠「title 为空」判断没在放歌，
+    // 而「—」不是空字符串，报上去就会在通知栏挂一个标题是「—」的空壳通知
+    // （C5 的端到端验证抓到的：`tools/e2e-car.py` 断言「还没放东西时不乱推状态」）。
+    if (!p.cur) return null;
     var a = p.audio;
     var img = document.getElementById('np-cover');
     return {
@@ -111,6 +132,14 @@ object BridgeScript {
       else if (cmd === 'seek' && p.audio && isFinite(p.audio.duration)) {
         var v = Number(arg) || 0;
         p.audio.currentTime = Math.max(0, Math.min(p.audio.duration, v));
+      }
+      // 车机点歌：整个队列 + 从第几首开始（arg 是壳拼好的对象字面量 {i, list}）。
+      // 队列里放的是服务端原样返回的曲目对象，与页面自己点一首歌时喂给 play() 的是同一种东西。
+      else if (cmd === 'playlist' && arg && arg.list && arg.list.length) {
+        var n = arg.list.length;
+        var i = Number(arg.i);
+        if (!isFinite(i)) i = 0;
+        p.play(arg.list, Math.max(0, Math.min(n - 1, Math.floor(i))));
       }
     } catch (e) {}
     setTimeout(function () { push(true); }, 120);

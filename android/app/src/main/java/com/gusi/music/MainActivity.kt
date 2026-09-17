@@ -144,7 +144,9 @@ class MainActivity : AppCompatActivity() {
                     // 注意：回调在 WebView 的 JS 线程上
                     runOnUiThread { onPlaybackState(json) }
                 },
-                resolveLocal = { url -> LocalPlayback.localUrlFor(url) }
+                resolveLocal = { url -> LocalPlayback.localUrlFor(url) },
+                // 登录令牌给车机侧取曲库用；变化时才推（登出会推空串）
+                onToken = { WebSession.update(it) }
             ),
             BRIDGE_NAME
         )

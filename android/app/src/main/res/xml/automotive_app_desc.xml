@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  声明本应用在车机上提供「媒体」能力（Android 与 Android Automotive OS 都读这份）。
+
+  没有它，Android Auto 根本不会把本应用列进车机的媒体列表；有了它，车机会连到
+  CarMediaService（MediaBrowserServiceCompat）来浏览曲库。
+-->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

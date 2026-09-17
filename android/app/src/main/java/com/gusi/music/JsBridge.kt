@@ -8,7 +8,8 @@ import android.webkit.JavascriptInterface
 /** Web → 原生：把播放状态推过来。方法运行在 WebView 的 JS 线程，不是主线程。 */
 class JsBridge(
     private val onState: (String) -> Unit,
-    private val resolveLocal: (String) -> String? = { null }
+    private val resolveLocal: (String) -> String? = { null },
+    private val onToken: (String) -> Unit = { WebSession.update(it) }
 ) {
 
     @JavascriptInterface
@@ -17,6 +18,19 @@ class JsBridge(
             onState(json)
         } catch (t: Throwable) {
             Log.w(TAG, "setState 处理失败", t)
+        }
+    }
+
+    /**
+     * Web 端 localStorage 里的登录令牌（变化时才推，登出推空串）。
+     * 车机（[CarMediaService]）要拿它去服务端取曲库 —— 见 [WebSession]。
+     */
+    @JavascriptInterface
+    fun setToken(token: String) {
+        try {
+            onToken(token)
+        } catch (t: Throwable) {
+            Log.w(TAG, "setToken 处理失败", t)
         }
     }
 

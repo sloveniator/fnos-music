@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -112,6 +113,24 @@ class PlaybackService : Service() {
 
                 override fun onSeekTo(pos: Long) {
                     BridgeHolder.send("seek", (pos / 1000.0).toString())
+                }
+
+                /**
+                 * 车机点播（Android Auto / Automotive）：系统把曲库里那一项的 mediaId
+                 * 送到这里。走的是与手机上点一首歌**完全相同**的那条路 ——
+                 * [CarSource] 把 mediaId 翻成「队列 + 起始下标」，再送进 Web 播放器出声，
+                 * 所以通知栏、续播记忆、离线本地文件替换全都照旧生效。
+                 */
+                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    if (mediaId.isNullOrEmpty()) return
+                    CarSource.planAsync(this@PlaybackService, mediaId) { plan ->
+                        if (plan == null) {
+                            Log.w(TAG, "车机点播解析不出播放计划：$mediaId")
+                        } else {
+                            Log.i(TAG, "车机点播 $mediaId → 共 ${plan.count} 首，从第 ${plan.index + 1} 首开始")
+                            BridgeHolder.send("playlist", plan.jsArg)
+                        }
+                    }
                 }
 
                 override fun onFastForward() = seekBy(Transport.SEEK_STEP_MS)
@@ -266,7 +285,10 @@ class PlaybackService : Service() {
             PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
             PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
             PlaybackStateCompat.ACTION_SEEK_TO or
-            PlaybackStateCompat.ACTION_STOP
+            PlaybackStateCompat.ACTION_STOP or
+            // 车机「选中某一项就放」：没有这一位，车机只给播放/暂停，点曲目不会送到
+            // onPlayFromMediaId（Android Auto 的默认要求位之一）
+            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID
         if (durationMs > 0) {
             a = a or PlaybackStateCompat.ACTION_FAST_FORWARD or PlaybackStateCompat.ACTION_REWIND
         }
@@ -568,6 +590,15 @@ class PlaybackService : Service() {
         fun setBaseUrl(base: String) {
             lastBaseUrl = base
         }
+
+        /**
+         * 当前 MediaSession 的 token。车机（[CarMediaService]）必须把它挂到自己的
+         * MediaBrowserService 上，否则车机拿不到播放状态、方向盘按键也没处走。
+         *
+         * 服务还没起来（尚未播放过）时返回 null：此时车机仍能浏览曲库，
+         * 只是「点第一首之前」系统侧还没有播放会话 —— 与 README 里记的限制一致。
+         */
+        fun sessionToken(): MediaSessionCompat.Token? = instance?.session?.sessionToken
 
         fun start(context: Context) {
             try {

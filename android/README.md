@@ -22,14 +22,22 @@
    以及 `player.audio`（`paused` / `currentTime` / `duration`）。
 2. `#np-name` / `#np-singer` / `#np-cover` —— 底栏正在播放的曲目信息（壳读 `textContent` 与 `src`）。
 3. `window.__gusiCmd(cmd, arg)` 与 `window.__gusiEscape()` —— 壳注入的入口；
-   前者接受 `toggle|play|pause|next|prev|seek`，后者返回是否有浮层被关掉。
+   前者接受 `toggle|play|pause|next|prev|seek|playlist`（`playlist` 是车机点播：
+   `arg` 形如 `{i, list}`，`list` 是**服务端原样返回**的曲目对象数组），
+   后者返回是否有浮层被关掉。
 4. `--safe-top` / `--safe-bottom` / `--safe-left` / `--safe-right` —— 壳内联写到
    `<html>` 上的安全区（CSS px）。Web 端 `app.css` 的 `:root` 里默认取
    `env(safe-area-inset-*)`，**被壳覆写后以壳为准**，所以新写的布局请用
    `var(--safe-*)` 而不是直接写 `env()`。
+5. `localStorage['gusi-web-token']` —— 登录令牌。壳轮询它并推给原生（`GusiBridge.setToken`），
+   车机取曲库时带 `X-Web-Token`；登出会推空串。
 
-> 这四样一旦改名/删掉，App 不会崩，只会「通知栏不动了 / 返回键行为不对了 / 顶栏被时钟压住」——
-> 属于静默失效，改 Web 端底栏和安全区时请留心。
+> 这五样一旦改名/删掉，App 不会崩，只会「通知栏不动了 / 返回键行为不对了 / 顶栏被时钟压住 /
+> 车机曲库空着」—— 属于静默失效，改 Web 端底栏、安全区和登录态时请留心。
+>
+> 另外：底栏 `#np-name` / `#np-singer` 在**没放过任何曲目**时是占位符「—」。
+> 壳只能靠「title 为空」判断「没在放歌」，占位符不是空字符串 —— 所以壳侧的 `state()`
+> 会等 `window.__player.cur` 有值才上报，否则通知栏会挂一个标题是「—」的空壳通知。
 
 ### 数据流
 
@@ -66,8 +74,12 @@ android/
 │   ├── LocalPlayback.kt     # 把命中本地文件的曲目接进播放链路
 │   ├── AudioSniff.kt        # 音频嗅探（识别 Web 端给的曲目、避开广告/提示音）
 │   ├── DownloadHelper.kt    # DownloadManager 接管下载，解析 filename*=UTF-8'' 中文名
-│   └── CookieStore.kt       # 拉封面时复用 WebView 的 cookie
-├── app/src/test/java/com/gusi/music/*.kt   # 75 个纯逻辑单测（见第 3 节）
+│   ├── CookieStore.kt       # 拉封面时复用 WebView 的 cookie
+│   ├── CarLibrary.kt        # 车机曲库树与播放计划（纯逻辑，可单测）
+│   ├── CarSource.kt         # 车机取数层：带登录令牌取 /web/api/*、内存缓存、失败退化
+│   ├── CarMediaService.kt   # 车机浏览入口（MediaBrowserServiceCompat 协议翻译）
+│   └── WebSession.kt        # WebView localStorage 里的登录令牌（车机取曲库要用）
+├── app/src/test/java/com/gusi/music/*.kt   # 104 个纯逻辑单测（见第 3 节）
 └── tools/make-icons.py      # 从 packaging/assets 生成各密度启动图（幂等）
 ```
 
@@ -78,16 +90,27 @@ android/
 
 ```sh
 sh tools/build-android.sh            # 等价于：单测 + debug + release（release 无密钥时出未签名包）
-sh tools/build-android.sh test       # 只跑单测（75 个纯逻辑用例，秒级）
+sh tools/build-android.sh test       # 只跑单测（104 个纯逻辑用例，秒级）
 sh tools/build-android.sh lint       # lint 报告 → app/build/reports/lint-results-debug.html
 sh tools/build-android.sh debug      # 只出 debug 包（可直接装手机，debug 密钥签名）
 python3 tools/e2e-safe-area.py       # 安全区注入 → Web 布局让开（真实 Chromium，18 项断言）
+python3 tools/e2e-car.py             # 车机桥接（真实 Chromium，15 项断言，见第 5 节）
 ```
+
+单测跑在 JVM 上，而 android.jar 里的 `org.json` 只是返回默认值的桩 —— 所以
+`app/build.gradle.kts` 额外给测试配了一份真的 `org.json`，否则 `CarLibrary` 的 JSON
+解析在单测里会「静默解析出空曲库」，测试全绿却什么都没验证。
 
 `tools/e2e-safe-area.py` 补的是「壳注入安全区」这一层：容器里装不了真机，但把与
 `Insets.js` 逐字符相同的脚本注入真实 Chromium，就能量出顶栏是否让开状态栏、底栏是否
 抬离手势条、横屏刘海左右是否留白，以及**注入 0 时与不注入完全一致**（防止与 `env()` 双算）。
 它需要实例在 20059 跑着，并且要 `GS_ADMIN_PASSWORD`（清临时账号用）。
+
+`tools/e2e-car.py` 补的是「车机桥接」这一层，注入的脚本是**直接从 `BridgeScript.kt` 里抠出来的**
+（不是另抄一份），所以它挂了就等于壳里那份挂了。它验四件事：登录令牌会推给原生、
+`__gusiCmd('playlist', {i, list})` 能带着后端原样返回的队列从正确的下标开始放（越界会夹住、
+空队列不假装在播）、点播后原生确实收到播放状态、全程无 JS 报错。
+它抓出过一个真 bug：底栏占位符「—」被当成曲名推给原生，通知栏会挂一个标题是「—」的空壳。
 
 产物：
 
@@ -136,7 +159,50 @@ EOF
 每次要发新包，把 `app/build.gradle.kts` 里的 `versionCode` +1（否则系统认为「没变化」，
 同包名装不上去），`versionName` 同步改。debug 变体自动带 `-debug` 后缀、包名 `.debug`，可与正式版共存。
 
-## 5. 真机自测清单
+## 5. 车机（Android Auto / Android Automotive）
+
+车机不认我们的 Web 界面 —— 它只认 `MediaBrowserService`：车机连上来要一棵可浏览的树，
+用户点某一项，我们**转手让手机上的 Web 播放器去放**。出声的始终是同一个播放器，
+所以通知栏/锁屏（C2）、续播记忆（C3）、离线本地文件替换（C1）全都照旧生效，
+不会冒出第二套播放状态。
+
+| 文件 | 干什么 |
+|---|---|
+| `CarLibrary.kt` | 纯逻辑：服务端曲目/专辑 JSON → 车机要的树 + 「点某一项从第几首放起」 |
+| `CarSource.kt` | 取数层：带登录令牌取 `/web/api/*`、内存缓存、失败退化；IO 走单独线程 |
+| `CarMediaService.kt` | 浏览：`MediaBrowserServiceCompat` 的协议翻译（根 / 全部歌曲 / 专辑 / 专辑内曲目） |
+| `WebSession.kt` + `BridgeScript` 里的 `pushToken()` | 令牌从 WebView 的 localStorage 推给原生，车机取曲库时带 `X-Web-Token` |
+| `PlaybackService.sessionToken()` | 把自己的 `MediaSession` 交给浏览服务（车机据此拿到播放状态、上报点播） |
+| `PlaybackService.onPlayFromMediaId` | 点播入口：`CarSource` 出计划 → `__gusiCmd('playlist', {i, list})` 送进 WebView |
+| `res/xml/automotive_app_desc.xml` | 声明本应用在车机上提供「媒体」能力 |
+
+清单里缺一条车机就不列我们：
+
+```xml
+<service android:name=".CarMediaService" android:exported="true">
+    <intent-filter><action android:name="android.media.browse.MediaBrowserService" /></intent-filter>
+</service>
+<meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+```
+
+**没上架 Google Play 的包（就是我们）还要在手机上手动开一次开关**，否则车机的媒体列表里
+根本没有这个应用（这是 Google 的现行策略，且会随 Android Auto 版本变动）：
+
+1. 设置 → 应用 → Android Auto → 应用内「附加设置」→ 最下面「版本和权限信息」连点 10 次 → 确认；
+2. 右上角三点 → 开发者设置 → 最下面打开「未知来源」；
+3. 回到 Android Auto 设置 → 「自定义启动器（Customize launcher）」→ 勾上「古四音乐」。
+
+已知限制（都**不打算**在近期改，写在 `CarMediaService` 的类注释里）：
+
+- **不带封面**：车机拿 `MediaDescription` 里的图片 Uri 自己去取图，而封面接口要登录 cookie，车机侧没有；
+- **单页 200 首**（服务端单页上限）：不做翻页、不做搜索；
+- **不支持车机语音**（「播放某某」）：那要另接 `onPlayFromSearch`；
+- **点播时 WebView 不在**（进程刚被重建、页面还没起来）：指令无处可送，表现为「点了没反应」，
+  需要先在手机上打开一次应用；
+- **还没点过第一首歌之前**，车机侧没有播放会话（方向盘按键不响应）—— 播放会话是 Web 端
+  开始播放后才注册的。
+
+## 6. 真机自测清单
 
 **构建级证据不等于运行级证据。** 本项目的开发容器没有 `/dev/kvm`，跑不了模拟器，
 下面这些**从没在真机/模拟器上验证过**，第一次装到手机上请逐条走：
@@ -158,8 +224,15 @@ EOF
 - [ ] 横屏：顶栏/底栏左右不被刘海或挖孔压住
 - [ ] 深色：状态栏/导航栏图标是浅色；把系统切到浅色模式后**页面不变浅**、底栏不闪白
 - [ ] 键盘：点搜索框输入时，输入框与底栏整体抬起，不被键盘盖住
+- [ ] **车机**：按第 5 节开好「未知来源」并勾进启动器后，车机媒体列表里出现「古四音乐」
+- [ ] **车机**：能展开「全部歌曲 / 专辑 / 专辑内曲目」，标题与「歌手 · 专辑」副标题正确
+- [ ] **车机**：点一首歌 → 手机上出声，车机显示曲名，通知栏同时出现（同一份播放状态）
+- [ ] **车机**：方向盘上一首/下一首/播放暂停能驱动 Web 端播放器
+- [ ] **车机**：在专辑页点第 3 首，放完接第 4 首（队列＝这张专辑，不是全库）
+- [ ] **车机**：手机上先退出登录 → 车机曲库显示「请先在手机上打开古四音乐」而不是空白
+- [ ] **车机**：什么都不放就启动应用 → **通知栏不该出现标题是「—」的空壳通知**
 
-## 6. 已知 lint 警告（有意保留，不是漏改）
+## 7. 已知 lint 警告（有意保留，不是漏改）
 
 `lintDebug` 目前 **0 Error / 10 Warning**。剩下这些是刻意的：
 
@@ -167,6 +240,8 @@ EOF
 |---|---|
 | `WebViewClientOnReceivedSslError`、`AcceptsUserCertificates` | 自建 NAS 常用自签证书。壳不静默放行，而是弹框把选择权交给用户（`MainActivity.onReceivedSslError`） |
 | `InsecureBaseConfiguration` | 局域网明文 HTTP 是主场景，不可能有公网证书 |
+| `ExportedService`（`CarMediaService`） | 车机（Google Play 服务所在进程）必须能跨进程连上来，不导出门禁就进不来；它只读曲库、写不了任何东西 |
+| `MissingIntentFilterForMediaSearch`、`MissingOnPlayFromSearch` | 车机语音搜索（「播放某某」）有意不做（第 5 节）。在 `app/build.gradle.kts` 的 `lint {}` 里显式 disable，而不是让它常驻 —— 这样「lint 报 Error」永远等于「真出问题了」 |
 
 已修掉的（曾经是 23 个问题，含 7 个 Error）：`NewApi`（`NotificationChannel` 在 minSdk 24
 上没做版本守卫，Android 7 会崩）、`WakelockTimeout`（WakeLock 改成 10 分钟租期 + 播放中续租）、
@@ -175,7 +250,7 @@ EOF
 剩余两个**无法通过 lint 结论**的项，属于美术资源：`Overdraw`（壳的背景与主题背景重了一笔）、
 `IconLauncherShape`（启动图四角填满，Material 建议留白）。想改需要重画图标，功能无影响。
 
-## 7. 与 Web 端一起改的注意事项
+## 8. 与 Web 端一起改的注意事项
 
 - 壳依赖的 DOM/JS 契约见第 1 节，改底栏结构或播放器方法名时同步这三样。
 - **安全区一律写 `var(--safe-*)`，不要在 Web 端新写 `env(safe-area-inset-*)`。**
