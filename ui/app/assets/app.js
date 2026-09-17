@@ -4078,6 +4078,10 @@ kuwo.cn/playlist_detail/280301309</pre>
     page.hidden = !show
     if (show) {
       updateLfBg()
+      // 2026-09-17：歌词页关着的时候 syncLyric 不写 DOM（只记行号），所以打开
+      // 第一帧必须强制对齐一次 —— 否则屏幕上是上次关页那一刻的高亮，曲子早跑远了，
+      // 看着就是「歌词和播放进程没对齐」。force 同时让落点直接定位、不播动画。
+      syncLyric(player, true)
       // 保持 CD 播放态：playing 由 setPlayIcon 同步
     }
   }
@@ -4257,8 +4261,10 @@ kuwo.cn/playlist_detail/280301309</pre>
       document.querySelector('.np').addEventListener('click', (e) => {
         if (e.target.closest('#np-love')) return
         if (window.matchMedia('(max-width: 900px)').matches && this.cur) {
-          $('#lyric-full').hidden = false
-          updateLfBg()
+          // 走 togglePlayPage(true)：这里以前是手写 hidden=false + updateLfBg，
+          // 绕过了打开时的歌词强制对齐 —— 手机上点底栏进歌词页，第一眼往往就是
+          // 上一次关页时的旧高亮（2026-09-17「歌词和播放进程没对齐」的第二个来源）。
+          togglePlayPage(true)
         }
       })
       // 0016 歌词全屏控制条：与底栏控制共用同一状态
@@ -4671,6 +4677,21 @@ kuwo.cn/playlist_detail/280301309</pre>
   player.init()
 
   // ---------------- 歌词 ----------------
+  /**
+   * LRC 时间标签 → 秒（**必须与 audio.currentTime 同单位**）。
+   *
+   * 2026-09-17 主人：「歌词和播放进程没对齐」。
+   * 根因就在这一行：`分钟×60 + 秒` 算出来的是**秒**，却把小数部分
+   * `Number('0.'+m[3]) * 1000` 当**毫秒**往秒上加了。于是任何带小数的时间标签
+   * 都被放大上千倍 —— `[00:12.50]` 变成 512（本该 12.5 秒亮的句子排到 8 分半），
+   * 而 `[01:02.00]` 这种小数位为 0 的碰巧没事。更糟的是随后按这个假时间排序，
+   * 整篇歌词被**打乱**：原本 12.5s 的第一句排到了 62s 的第三句后面，
+   * 表现就是「高亮乱跳、和进度条对不上」。
+   *
+   * 现在统一按秒算：小数位补足三位当毫秒（`.5` / `.50` / `.500` 都是 500ms，
+   * `.005` 是 5ms），与服务端写内嵌歌词那份 parseLrc（server/src/downloads/tags.ts）
+   * 口径一致 —— 同一条 LRC 在界面、在内嵌标签里必须是同一个时间轴。
+   */
   function parseLrc(text) {
     const lines = []
     for (const raw of String(text || '').split(/\r?\n/)) {
@@ -4679,8 +4700,8 @@ kuwo.cn/playlist_detail/280301309</pre>
       const content = raw.replace(/\[[^\]]*\]/g, '').trim()
       if (!content) continue
       for (const m of times) {
-        const ms = Number(m[1]) * 60 + Number(m[2]) + (m[3] ? Number('0.' + m[3]) * 1000 : 0)
-        lines.push({ t: ms, text: content })
+        const frac = m[3] ? Number(m[3].padEnd(3, '0').slice(0, 3)) : 0   // 补足三位＝毫秒数
+        lines.push({ t: Number(m[1]) * 60 + Number(m[2]) + frac / 1000, text: content })
       }
     }
     return lines.sort((a, b) => a.t - b.t)
@@ -4750,7 +4771,28 @@ kuwo.cn/playlist_detail/280301309</pre>
     })
   }
 
-  function syncLyric(pl) {
+  /**
+   * 把当前行滚到歌词区正中。
+   *
+   * 不用 `scrollIntoView` 有两个原因：
+   *   ① 它会连带滚动所有可滚动祖先（页面也跟着走）；
+   *   ② `.lf-body` 上有 `scroll-behavior: smooth`，快歌 1~2 秒就换行，容器还在
+   *      上一段动画里就被下一行叫走 —— 视觉上就是「高亮在第 20 行，屏幕中间
+   *      还停在第 18 行」，也就是主人说的对不上。
+   * 所以自己算落点、自己给两种走法：相邻换行走平滑，跳转（拖进度条 / 刚打开
+   * 歌词页 / 上一行与当前行隔着好几行）**立即**落位 —— 平滑动画横跨半首歌毫无意义，
+   * 而且落位期间读到的位置是半路的（实测差 24px，「看着就是没对齐」）。
+   * 注意 behavior 只能写 'instant'：写 'auto' 等于「用 CSS 里那个值」，
+   * 而 .lf-body 上正是 `scroll-behavior: smooth`，等于没改。
+   */
+  function centerLyric(body, el, instant) {
+    const br = body.getBoundingClientRect()
+    const er = el.getBoundingClientRect()
+    const top = body.scrollTop + (er.top + er.height / 2) - (br.top + br.height / 2)
+    body.scrollTo({ top: Math.max(0, top), behavior: instant ? 'instant' : 'smooth' })
+  }
+
+  function syncLyric(pl, force) {
     if (!pl.lyric || !pl.lyric.length) return
     const t = pl.audio.currentTime
     let idx = -1
@@ -4758,13 +4800,19 @@ kuwo.cn/playlist_detail/280301309</pre>
       if (pl.lyric[i].t <= t + 0.2) idx = i
       else break
     }
-    if (idx === pl.lyricIdx) return
-    pl.lyricIdx = idx
+    const prev = pl.lyricIdx
     const body = $('#lf-body')
-    if ($('#lyric-full').hidden) return
-    body.querySelectorAll('p').forEach(p => p.classList.toggle('on', Number(p.dataset.i) === idx))
-    const on = body.querySelector('p[data-i="' + idx + '"]')
-    if (on) on.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    // 歌词页关着的时候不写 DOM，但要把行号记住；重新打开时靠 force 再对齐一次
+    if ($('#lyric-full').hidden) { pl.lyricIdx = idx; return }
+    if (idx === prev && !force) return
+    pl.lyricIdx = idx
+    // 只点亮主歌词行：翻译行（.tr）与主行共用一个 data-i，以前一起被点亮，
+    // 于是「当前行的译文」也被套上 20px/650 的当前行样式，比主行还显眼。
+    // 译文该有的样子是 `.lf-body p.on + p.tr` 那条规则（跟随主行变亮），不是抢主行的字号。
+    body.querySelectorAll('p:not(.tr)').forEach(p => p.classList.toggle('on', Number(p.dataset.i) === idx))
+    const on = body.querySelector('p:not(.tr)[data-i="' + idx + '"]')
+    // 隔行跳转（拖了进度条）或首次对齐：别播动画，直接落到那条
+    if (on) centerLyric(body, on, !!force || idx - prev > 1 || idx < prev)
   }
 
   // ---------------- 启动 ----------------

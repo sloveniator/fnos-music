@@ -3,7 +3,7 @@
    策略：静态外壳 network-first —— 局域网内足够快，且保证服务端升级后立即生效
         （旧版 cache-first 会让 /assets/app.js 永远停在首次缓存，升级看不见）
         离线/网络异常时回退缓存 */
-const CACHE = 'gusi-v22'
+const CACHE = 'gusi-v23'
 const SHELL = ['./', './index.html', './manifest.json', './assets/app.css', './assets/app.js', './assets/icon.png']
 
 self.addEventListener('install', (e) => {
