@@ -19,8 +19,8 @@ android {
         applicationId = "com.gusi.music"
         minSdk = 24
         targetSdk = 34
-        versionCode = 27        // 与服务端/安装包版本同号，便于分辨手机装的是哪一版
-        versionName = "1.0.27"
+        versionCode = 30        // 与服务端/安装包版本同号，便于分辨手机装的是哪一版
+        versionName = "1.0.30"
         resourceConfigurations += listOf("zh", "en")
     }
 

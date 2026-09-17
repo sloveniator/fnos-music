@@ -155,7 +155,7 @@ EOF
 密钥或口令丢了，已装机的版本就再也装不上新版本（只能卸载重装，用户数据与登录态一起没）。
 所以：`gusi-music.jks` 与 `keystore.properties` 要单独备份（NAS 之外再存一份，例如密码管理器 + 加密压缩包）。
 
-版本号规则：**已与服务端/安装包版本对齐 —— `versionCode 27` / `versionName 1.0.27`**。
+版本号规则：**已与服务端/安装包版本对齐 —— `versionCode 30` / `versionName 1.0.30`**。
 每次要发新包，把 `app/build.gradle.kts` 里的 `versionCode` +1（否则系统认为「没变化」，
 同包名装不上去），`versionName` 同步改。debug 变体自动带 `-debug` 后缀、包名 `.debug`，可与正式版共存。
 
@@ -234,7 +234,8 @@ EOF
 
 ## 7. 已知 lint 警告（有意保留，不是漏改）
 
-`lintDebug` 目前 **0 Error / 10 Warning**。剩下这些是刻意的：
+`lintDebug` 目前 **0 Error / 11 Warning**（lint 按「规则 × 命中处」分别计数，所以资源类规则会各记多条）。
+剩下这些是刻意的：
 
 | 警告 | 为什么保留 |
 |---|---|
@@ -247,8 +248,10 @@ EOF
 上没做版本守卫，Android 7 会崩）、`WakelockTimeout`（WakeLock 改成 10 分钟租期 + 播放中续租）、
 `ObsoleteSdkInt`、`UnusedResources`、`Autofill`、`MonochromeLauncherIcon`。
 
-剩余两个**无法通过 lint 结论**的项，属于美术资源：`Overdraw`（壳的背景与主题背景重了一笔）、
-`IconLauncherShape`（启动图四角填满，Material 建议留白）。想改需要重画图标，功能无影响。
+剩余两个**无法通过 lint 结论**的项属于美术资源，占 11 条里的 7 条：`Overdraw` 2 条
+（`activity_main.xml`、`activity_setup.xml` 各一，壳的背景与主题背景重了一笔）、
+`IconLauncherShape` 5 条（5 个 mipmap 密度，启动图四角填满，Material 建议留白）。
+想改需要重画图标，功能无影响。
 
 ## 8. 与 Web 端一起改的注意事项
 
