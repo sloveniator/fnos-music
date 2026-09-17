@@ -79,9 +79,21 @@
     })
     // 401 只在「这次确实带着 token」时才当会话过期：登录页没有 token，
     // 那里的 401 是业务错误（用户名或密码错误），得把服务端文案原样透出去
-    if (res.status === 401 && token && !opt.skipAuth) { logout(); throw new Error('登录已过期') }
+    if (res.status === 401 && token && !opt.skipAuth) {
+      logout()
+      const e = new Error('登录已过期')
+      e.auth = true
+      e.status = 401
+      throw e
+    }
     const data = await res.json().catch(() => ({}))
-    if (!res.ok || data.code === -1) throw new Error(data.msg || data.message || ('HTTP ' + res.status))
+    if (!res.ok || data.code === -1) {
+      // 错误上带 status：调用方要能分清「服务端明确拒绝（401/403…）」和
+      // 「这次根本没连上（fetch 直接抛，没有 status）」—— 冷启动重试靠这个判断
+      const e = new Error(data.msg || data.message || ('HTTP ' + res.status))
+      e.status = res.status
+      throw e
+    }
     return data.data
   }
   const mediaUrl = (kind, id) => BASE + '/web/media/' + kind + '/' + encodeURIComponent(id) + '?k=' + encodeURIComponent(token)
@@ -4070,6 +4082,57 @@ kuwo.cn/playlist_detail/280301309</pre>
     }
   }
 
+  /**
+   * 把一条「进度轴」做成真能拖的轴（触摸 / 鼠标 / 触控笔统一走 pointer 事件）。
+   *
+   * 2026-09-17 主人：「安卓 app 全屏播放，进度条无法滑动」。
+   * 根因不是样式而是事件 —— 那条轴以前**只挂了 click**：点一下能跳，按住拖完全没反应。
+   * 而且触摸下更糟：手指按下后浏览器会把手势判给页面滚动/平移，只发两个 pointermove
+   * 就补一个 pointercancel，所以连「拖到哪算哪」的错觉都没有（实测事件计数
+   * pointerdown:1 / pointermove:2 / pointercancel:1）。要拖得动就必须在 pointerdown 里
+   * preventDefault + setPointerCapture，把这条轴的手势从滚动手里「扣」下来
+   * （窄屏顶边那条 #np-seek 一直好使，用的就是这个办法）。
+   *
+   *   opt.ready()    → 现在能不能拖（时长还没拿到时拖了也没意义）
+   *   opt.preview(r) → 拖动中的跟手反馈：只画界面，不写 currentTime
+   *                    （在线流反复写 currentTime 会重连，所以松手才真跳）
+   *   opt.commit(r)  → 松手落点
+   *   opt.end()      → 收尾（撤掉拖动中的临时样式）
+   */
+  function bindSeekAxis(axis, opt) {
+    if (!axis) return
+    const ratioAt = (e) => {
+      const r = axis.getBoundingClientRect()
+      return Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1)))
+    }
+    let dragging = false
+    const finish = (e) => {
+      if (!dragging) return
+      dragging = false
+      try { axis.releasePointerCapture(e.pointerId) } catch {}
+      if (opt.end) opt.end()
+      opt.commit(ratioAt(e))
+    }
+    axis.addEventListener('pointerdown', (e) => {
+      if (!opt.ready()) return
+      dragging = true
+      opt.preview(ratioAt(e))
+      try { axis.setPointerCapture(e.pointerId) } catch {}
+      e.preventDefault()          // 不 preventDefault 就会被当成滚动手势（见上文）
+    })
+    axis.addEventListener('pointermove', (e) => { if (dragging) opt.preview(ratioAt(e)) })
+    axis.addEventListener('pointerup', finish)
+    // pointercancel：手势被浏览器抢走（该元素没写 touch-action: none 时就会这样，
+    // 实测「pointerdown:1 → pointermove:2 → pointercancel:1」）。只收尾、**不落点** ——
+    // cancel 带回来的坐标不可信，照它 seek 会当场跳到 0%。
+    axis.addEventListener('pointercancel', () => {
+      if (!dragging) return
+      dragging = false
+      if (opt.end) opt.end()
+    })
+    axis.addEventListener('dragstart', (e) => e.preventDefault())
+  }
+
   const player = {
     audio: null, queue: [], index: -1, mode: localStorage.getItem('gusi-mode') || 'order',
     cur: null, lyric: null, lyricIdx: -1,
@@ -4140,55 +4203,49 @@ kuwo.cn/playlist_detail/280301309</pre>
       $('#vol').oninput = (e) => setVolume(e.target.value / 100)
       $('#vol-ico').onclick = toggleMute
       const seek = $('#seek')
-      const seekTo = (e) => {
-        const r = seek.getBoundingClientRect()
-        const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
-        if (this.audio.duration) this.audio.currentTime = ratio * this.audio.duration
+      // 三条进度轴共用一套拖动语义（bindSeekAxis 在上面）：
+      //   ① #seek   桌面底栏那条 ② #np-seek 窄屏贴顶边那条 16px 命中区
+      //   ③ #lf-seek 歌词全屏的主进度轴 —— 2026-09-17 本轮修的就是它
+      const seekTo = (ratio) => {
+        const d = this.audio.duration
+        if (d) this.audio.currentTime = ratio * d
       }
-      seek.addEventListener('click', seekTo)
-      seek.addEventListener('dragstart', e => e.preventDefault())
-      // 2026-09-17 主人：「播放导航缩小时，歌曲进度条用不了」。
-      // 窄屏底栏（≤900px）没有 seek 轴，只有贴顶边那条 2.5px 进度线 —— 以前它纯粹是反馈，
-      // 点不动也拖不动，等于底栏里没有进度入口。现在把这条线本身做成可拖的轴：
-      // 按住即定位预览、拖动跟手（拖动期间 tick 不回写，免得和手指打架）、松手才落 currentTime。
-      // 命中区是覆盖在线上的一层透明条（#np-seek，宽高见 CSS），所以线上看到的宽度百分比
-      // 与命中区的比例天然同源，不用担心 padding 偏移。
+      const paint = (sel, ratio, curSel) => {
+        const fill = $(sel)
+        if (fill) fill.style.width = (ratio * 100) + '%'
+        const cur = curSel && $(curSel)
+        const d = this.audio.duration
+        if (cur && d) cur.textContent = fmtDur(ratio * d)
+      }
+      // 拖动中 tick 不回写（否则每 250ms 把手指按到的位置拉回播放进度）
+      const setDragging = (on) => { this._seeking = !!on }
+      // ① 桌面底栏
+      bindSeekAxis(seek, {
+        ready: () => !!this.audio.duration,
+        preview: (r) => { setDragging(true); paint('#seek-fill', r, '#t-cur') },
+        end: () => setDragging(false),
+        commit: seekTo,
+      })
+      // ② 窄屏底栏贴顶边那条线：命中区是覆盖在线上的一层透明条（#np-seek，宽高见 CSS），
+      //    所以线上看到的宽度百分比与命中区的比例天然同源，不用担心 padding 偏移。
+      //    2026-09-17 上一轮修的（主人：「播放导航缩小时，歌曲进度条用不了」）：
+      //    这条线以前纯粹是反馈，点不动也拖不动 —— 现在按住即定位、拖动跟手、松手才落。
       const npSeek = document.getElementById('np-seek')
       if (npSeek) {
-        const npRatioAt = (e) => {
-          const r = npSeek.getBoundingClientRect()
-          return Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1)))
-        }
-        const npPaint = (ratio) => {
-          const bar = document.getElementById('np-progress')
-          if (bar) bar.style.width = (ratio * 100) + '%'
-        }
-        let npDragging = false
-        const npEnd = (e) => {
-          if (!npDragging) return
-          npDragging = false
-          this._seeking = false
-          const pl = document.getElementById('player')
-          if (pl) pl.classList.remove('seeking')
-          try { npSeek.releasePointerCapture(e.pointerId) } catch {}
-          // 拖动中只预览；松手才真正 seek（拖动时反复写 currentTime 会让部分在线流重连）
-          const d = this.audio.duration
-          if (d) this.audio.currentTime = npRatioAt(e) * d
-        }
-        npSeek.addEventListener('pointerdown', (e) => {
-          if (!this.audio.duration) return
-          npDragging = true
-          this._seeking = true
-          const pl = document.getElementById('player')
-          if (pl) pl.classList.add('seeking')
-          npPaint(npRatioAt(e))
-          try { npSeek.setPointerCapture(e.pointerId) } catch {}
-          e.preventDefault()
+        const pl = document.getElementById('player')
+        bindSeekAxis(npSeek, {
+          ready: () => !!this.audio.duration,
+          preview: (r) => {
+            setDragging(true)
+            if (pl) pl.classList.add('seeking')
+            paint('#np-progress', r)
+          },
+          end: () => {
+            setDragging(false)
+            if (pl) pl.classList.remove('seeking')
+          },
+          commit: seekTo,
         })
-        npSeek.addEventListener('pointermove', (e) => { if (npDragging) npPaint(npRatioAt(e)) })
-        npSeek.addEventListener('pointerup', npEnd)
-        npSeek.addEventListener('pointercancel', npEnd)
-        npSeek.addEventListener('dragstart', e => e.preventDefault())
       }
       if ('mediaSession' in navigator) {
         navigator.mediaSession.setActionHandler('play', () => this.toggle())
@@ -4205,14 +4262,23 @@ kuwo.cn/playlist_detail/280301309</pre>
         }
       })
       // 0016 歌词全屏控制条：与底栏控制共用同一状态
-      const lfSeek = $('#lf-seek')
-      const lfSeekTo = (e) => {
-        const r = lfSeek.getBoundingClientRect()
-        const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
-        if (this.audio.duration) this.audio.currentTime = ratio * this.audio.duration
+      // ③ 歌词全屏的主进度轴。以前只挂 click（点一下能跳、按住拖没反应，
+      //    触摸下还会被浏览器当成滚动手势补一个 pointercancel →「进度条无法滑动」）。
+      //    现在与另外两条走同一套 pointer 拖动；拖动中把线加粗到 7px 做反馈，
+      //    命中区仍是 29px（手指位置不会跳），松手复原。
+      const lfAxis = $('#lf-seek')
+      if (lfAxis) {
+        const lfThick = (on) => {
+          lfAxis.style.padding = on ? '11px 0' : ''
+          lfAxis.style.height = on ? '29px' : ''
+        }
+        bindSeekAxis(lfAxis, {
+          ready: () => !!this.audio.duration,
+          preview: (r) => { setDragging(true); lfThick(true); paint('#lf-seek-fill', r, '#lf-t-cur') },
+          end: () => { setDragging(false); lfThick(false) },
+          commit: seekTo,
+        })
       }
-      lfSeek.addEventListener('click', lfSeekTo)
-      lfSeek.addEventListener('dragstart', e => e.preventDefault())
       $('#lf-mode').onclick = () => $('#btn-mode').click()
       $('#lf-prev').onclick = () => this.prev()
       $('#lf-next').onclick = () => this.next(false)
@@ -4481,18 +4547,24 @@ kuwo.cn/playlist_detail/280301309</pre>
     tick() {
       const d = this.audio.duration || 0
       const c = this.audio.currentTime || 0
-      $('#t-cur').textContent = fmtDur(c)
+      // 拖动任意一条进度轴期间，tick 不回写被拖的轴与时间标签：每 250ms 把手指
+      // 按到的位置拉回播放进度，手指就永远拖不动（松手后下一拍自动恢复正常）。
+      const dragging = !!this._seeking
+      if (!dragging) {
+        $('#t-cur').textContent = fmtDur(c)
+        $('#seek-fill').style.width = (d ? (c / d * 100) : 0) + '%'
+      }
       $('#t-dur').textContent = fmtDur(d)
-      $('#seek-fill').style.width = (d ? (c / d * 100) : 0) + '%'
       // v3：移动端底栏没有 seek 轴，用顶栏进度线给反馈（同源百分比）
-      // 2026-09-17：这条线现在同时是底栏的进度轴（#np-seek 命中区拖动中），
-      // 手指按住期间 tick 不回写，否则时间每 250ms 会把手拖到的位置拉回去。
+      // 2026-09-17：这条线现在同时是底栏的进度轴（#np-seek 命中区拖动中）
       const npBar = document.getElementById('np-progress')
-      if (npBar && !this._seeking) npBar.style.width = (d ? (c / d * 100) : 0) + '%'
+      if (npBar && !dragging) npBar.style.width = (d ? (c / d * 100) : 0) + '%'
       const lfFill = document.getElementById('lf-seek-fill')
       if (lfFill && !document.getElementById('lyric-full').hidden) {
-        lfFill.style.width = (d ? (c / d * 100) : 0) + '%'
-        document.getElementById('lf-t-cur').textContent = fmtDur(c)
+        if (!dragging) {
+          lfFill.style.width = (d ? (c / d * 100) : 0) + '%'
+          document.getElementById('lf-t-cur').textContent = fmtDur(c)
+        }
         document.getElementById('lf-t-dur').textContent = fmtDur(d)
       }
       if ('mediaSession' in navigator && d) {
@@ -4696,19 +4768,52 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
 
   // ---------------- 启动 ----------------
+  /**
+   * 冷启动「连不上服务器」的界面。
+   *
+   * 2026-09-17 主人：「每次关闭后台再打开，还要输入账号密码」。
+   * 旧写法把「/me 抛错」一律当成没登录（`catch { showLogin() }`），而冷启动那一两秒里
+   * 请求失败太常见了（Wi‑Fi 刚醒、服务端在忙、安卓壳刚把 WebView 拉起来），
+   * 于是每次打开都被踢到登录页 —— 看着就是「又要重新输账号密码」。
+   * 现在只有服务端明确回 401（会话真的没了）才回登录页；连不上就给这个界面，
+   * **不清 token**：网络一恢复点「重试」就进去了。
+   */
+  function showOffline(msg) {
+    $('#login').hidden = true
+    $('#shell').hidden = true
+    $('#net-err').hidden = false
+    $('#net-err-detail').textContent = msg || '请检查手机与 NAS 是否在同一网络'
+  }
+  $('#net-retry').onclick = () => { $('#net-err').hidden = true; boot() }
+  // 兜底出口：万一这个 token 在服务端已经不认了（但没回 401），别把人锁在这屏
+  $('#net-login').onclick = () => { $('#net-err').hidden = true; showLogin() }
+
   async function boot() {
     // PWA：Service Worker 注册（外部脚本，不受 CSP script-src 限制；失败静默）
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {})
     }
     if (!token) return showLogin()
-    try {
-      const d = await api('/me')
-      me = { name: d.name }
-    } catch {
-      return showLogin()
+    // 冷启动重试：只有 401 才算「会话过期」（api() 已经顺手清掉 token），
+    // 其它错（fetch 直接抛的网络错误、5xx、超时）退避重试，重试完还不行就
+    // 给「连不上 + 重试」界面，而不是登录页。理由见 showOffline 的注释。
+    const waits = [0, 400, 1000, 2200]
+    for (let i = 0; i < waits.length; i++) {
+      if (waits[i]) await new Promise((r) => setTimeout(r, waits[i]))
+      try {
+        const d = await api('/me')
+        me = { name: d.name }
+        $('#net-err').hidden = true
+        return enterApp()
+      } catch (e) {
+        if (e && e.auth) return showLogin()
+        if (i === waits.length - 1) {
+          // 服务端明确回了个错（5xx…）就照实说；fetch 直接抛（网络层）时它给的
+          // 是「Failed to fetch」这种英文，不如换成主人自己能动手查的一句
+          return showOffline(e && e.status ? e.message : '看下手机和 NAS 是不是同一个网络、fnOS 里这个应用还在不在运行')
+        }
+      }
     }
-    enterApp()
   }
   bindGlobalKeys()
   boot()

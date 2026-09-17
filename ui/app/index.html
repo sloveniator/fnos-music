@@ -42,6 +42,20 @@
     </form>
   </div>
 
+  <!-- 冷启动连不上服务器（≠ 未登录）：给重试，不把人踢去登录页。
+       2026-09-17 主人：安卓 app「每次关闭后台再打开，还要输入账号密码」——
+       旧逻辑把「/me 请求失败」和「会话过期」混为一谈，网络一抖就跳登录页。 -->
+  <div id="net-err" class="login" hidden>
+    <div class="login-card">
+      <img src="assets/icon.png" alt="" class="login-logo">
+      <h1>连不上服务器</h1>
+      <p class="login-sub">登录状态还在，网络恢复后点「重试」即可</p>
+      <p id="net-err-detail" class="login-err"></p>
+      <button type="button" class="primary" id="net-retry">重 试</button>
+      <p class="login-switch"><button type="button" id="net-login">改用其它账号登录</button></p>
+    </div>
+  </div>
+
   <!-- 应用壳 -->
   <div id="shell" class="shell" hidden>
     <aside id="sidebar" class="sidebar">
