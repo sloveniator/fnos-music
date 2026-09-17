@@ -511,7 +511,18 @@ h2.page { font-size: 24px; font-weight: 750; letter-spacing: .3px; margin-bottom
   .main { padding: calc(62px + var(--safe-top)) 16px calc(var(--player-h) + 74px); }
   .player { grid-template-columns: minmax(0, 1fr) auto; padding: 0 10px; gap: 6px; }
   .center { order: 2; min-width: 0; }
-  .seek-row { display: none; }
+  /* 2026-09-17 主人：「播放导航缩小时，歌曲进度条用不了」。
+  这里只该藏底栏那一条：#lf-seek 也带 .seek-row 类（歌词全屏的主控台进度轴）
+     —— 原来的无前缀选择器把它一起藏了，手机上进全屏只剩 CD + 歌词 + 传输键，进度条根本不显示。 */
+  #player .seek-row { display: none; }
+  /* 同上：手指不是鼠标——全屏进度轴只有 5px 高，看得见也点不中。
+     命中区撑到 29px（上下各 12px padding），线自己还是 5px：
+     background-clip: content-box 让底槽只画在内容区，子元素 fill 的 height:100% 也只占内容区，
+     所以视觉与桌内垂直对位置都不变。 */
+  /* 注意：.seek 本身 height:5px 且全局 box-sizing:border-box，
+     所以仅写 padding 会把内容区压成 0，fill 的 height:100% 也跟着变 0（进度条会没有颜色填充）。
+     所以高度必须显式给到 12+5+12 = 29px，内容区才是 5px 的线。 */
+  #lf-seek { height: 29px; padding: 12px 0; background-clip: content-box; }
   .right { display: none; }
   .np { order: 1; min-width: 0; }
   .ctrls { gap: 2px; flex-shrink: 0; }
@@ -1062,6 +1073,19 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   border-radius: 0 2px 2px 0; background: linear-gradient(90deg, var(--accent), var(--accent2));
   box-shadow: 0 0 8px rgba(79,140,255,.55); transition: width .2s linear; display: none; }
 @media (max-width: 900px) { .np-progress { display: block; } }
+
+/* 2026-09-17 主人：「播放导航缩小时，歌曲进度条用不了」——
+   窄屏底栏（≤900px）里没有 seek 轴（.seek-row 是藏着的），顶边那条 2.5px 进度线原先只是反馈、点不动。
+   现在在同一条线上加一层透明命中区：按住即定位、拖动跟手、松手才落 currentTime。
+   视觉零变化（线仍是 2.5px 贴顶边）；只有拖动中才把线加粗到 4px 并点亮圆点。
+   命中区只占胶囊顶部 16px，不抢下方信息区「点开播放页」的手势。 */
+.np-seek { position: absolute; left: 0; right: 0; top: 0; height: 16px; display: none;
+  cursor: pointer; touch-action: none; }
+@media (max-width: 900px) { .np-seek { display: block; } }
+#player.seeking .np-progress { height: 4px; }
+#player.seeking .np-progress::after { content: ''; position: absolute; right: -6px; top: 50%;
+  width: 13px; height: 13px; border-radius: 50%; background: #fff; transform: translateY(-50%);
+  box-shadow: 0 0 10px rgba(79,140,255,.8); }
 
 /* —— 3.5 底栏按钮禁止被 flex 挤压（实测 390px 下收藏/下载只剩 19px 宽）—— */
 #player .np .icon-btn, #player .ctrls .icon-btn, #player .right .icon-btn { flex-shrink: 0; }

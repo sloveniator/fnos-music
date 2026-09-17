@@ -404,20 +404,23 @@ const build = async (userName: string): Promise<ForYou> => {
   let dailyLocal = pickLocal(all, broad, { limit: 12, seed: dailySeed, perSingerMax: 2, exclude: justPlayed, novelty })
   // 曲库小时「跳过最近听过」会把候选掏空，此时放宽（宁可重复听，也不要空推荐）
   if (dailyLocal.length < 8) dailyLocal = pickLocal(all, broad, { limit: 12, seed: dailySeed, perSingerMax: 2, novelty })
-  const dailySingers = topSingers(broad.pub, 3)
+  // 在线补歌的目标是「整份推荐约 20 首」：本地曲库空/小时在线多补，本地充足时只补缺口。
+  // 之前固定 limit 8 + 3 位歌手 × 3 首，遇到「没有本地曲库」的账户（在线听歌为主）
+  // 今日推荐/猜你喜欢就只有 8 首，看着像没做功能。
+  const dailySingers = topSingers(broad.pub, 5)
   const dailyOnline = cold || !dailySingers.length
     ? []
-    : await pickOnline(broad.pub, { singers: dailySingers, limit: 8, exclude: usedOnline, perSingerMax: 3, seed: dailySeed })
+    : await pickOnline(broad.pub, { singers: dailySingers, limit: Math.max(8, 20 - dailyLocal.length), exclude: usedOnline, perSingerMax: 4, seed: dailySeed })
 
   // ---- 猜你喜欢：只看最近在听的窗口，偏向头部歌手的其他作品 ----
   const guessSeed = hash(day + ':' + userName + ':guess')
   const heardAll = new Set(playedAll.map((t) => t.id))
   let guessLocal = pickLocal(all, recent, { limit: 6, seed: guessSeed, perSingerMax: 1, exclude: heardAll, novelty })
   if (guessLocal.length < 4) guessLocal = pickLocal(all, recent, { limit: 6, seed: guessSeed, perSingerMax: 2, novelty })
-  const guessSingers = topSingers(recent.pub, 2)
+  const guessSingers = topSingers(recent.pub, 3)
   const guessOnline = cold || !guessSingers.length
     ? []
-    : await pickOnline(recent.pub, { singers: guessSingers, limit: 10, exclude: usedOnline, perSingerMax: 4, seed: guessSeed })
+    : await pickOnline(recent.pub, { singers: guessSingers, limit: Math.max(10, 14 - guessLocal.length), exclude: usedOnline, perSingerMax: 4, seed: guessSeed })
 
   const dailyTracks = interleave(dailyLocal.map(stripLocal), dailyOnline)
   const guessTracks = interleave(guessLocal.map(stripLocal), guessOnline)

@@ -4117,6 +4117,49 @@ kuwo.cn/playlist_detail/280301309</pre>
       }
       seek.addEventListener('click', seekTo)
       seek.addEventListener('dragstart', e => e.preventDefault())
+      // 2026-09-17 主人：「播放导航缩小时，歌曲进度条用不了」。
+      // 窄屏底栏（≤900px）没有 seek 轴，只有贴顶边那条 2.5px 进度线 —— 以前它纯粹是反馈，
+      // 点不动也拖不动，等于底栏里没有进度入口。现在把这条线本身做成可拖的轴：
+      // 按住即定位预览、拖动跟手（拖动期间 tick 不回写，免得和手指打架）、松手才落 currentTime。
+      // 命中区是覆盖在线上的一层透明条（#np-seek，宽高见 CSS），所以线上看到的宽度百分比
+      // 与命中区的比例天然同源，不用担心 padding 偏移。
+      const npSeek = document.getElementById('np-seek')
+      if (npSeek) {
+        const npRatioAt = (e) => {
+          const r = npSeek.getBoundingClientRect()
+          return Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1)))
+        }
+        const npPaint = (ratio) => {
+          const bar = document.getElementById('np-progress')
+          if (bar) bar.style.width = (ratio * 100) + '%'
+        }
+        let npDragging = false
+        const npEnd = (e) => {
+          if (!npDragging) return
+          npDragging = false
+          this._seeking = false
+          const pl = document.getElementById('player')
+          if (pl) pl.classList.remove('seeking')
+          try { npSeek.releasePointerCapture(e.pointerId) } catch {}
+          // 拖动中只预览；松手才真正 seek（拖动时反复写 currentTime 会让部分在线流重连）
+          const d = this.audio.duration
+          if (d) this.audio.currentTime = npRatioAt(e) * d
+        }
+        npSeek.addEventListener('pointerdown', (e) => {
+          if (!this.audio.duration) return
+          npDragging = true
+          this._seeking = true
+          const pl = document.getElementById('player')
+          if (pl) pl.classList.add('seeking')
+          npPaint(npRatioAt(e))
+          try { npSeek.setPointerCapture(e.pointerId) } catch {}
+          e.preventDefault()
+        })
+        npSeek.addEventListener('pointermove', (e) => { if (npDragging) npPaint(npRatioAt(e)) })
+        npSeek.addEventListener('pointerup', npEnd)
+        npSeek.addEventListener('pointercancel', npEnd)
+        npSeek.addEventListener('dragstart', e => e.preventDefault())
+      }
       if ('mediaSession' in navigator) {
         navigator.mediaSession.setActionHandler('play', () => this.toggle())
         navigator.mediaSession.setActionHandler('pause', () => this.toggle())
@@ -4412,8 +4455,10 @@ kuwo.cn/playlist_detail/280301309</pre>
       $('#t-dur').textContent = fmtDur(d)
       $('#seek-fill').style.width = (d ? (c / d * 100) : 0) + '%'
       // v3：移动端底栏没有 seek 轴，用顶栏进度线给反馈（同源百分比）
+      // 2026-09-17：这条线现在同时是底栏的进度轴（#np-seek 命中区拖动中），
+      // 手指按住期间 tick 不回写，否则时间每 250ms 会把手拖到的位置拉回去。
       const npBar = document.getElementById('np-progress')
-      if (npBar) npBar.style.width = (d ? (c / d * 100) : 0) + '%'
+      if (npBar && !this._seeking) npBar.style.width = (d ? (c / d * 100) : 0) + '%'
       const lfFill = document.getElementById('lf-seek-fill')
       if (lfFill && !document.getElementById('lyric-full').hidden) {
         lfFill.style.width = (d ? (c / d * 100) : 0) + '%'
