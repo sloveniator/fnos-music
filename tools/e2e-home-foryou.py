@@ -137,6 +137,19 @@ def main():
         [s['name'] for s in fy['profile']['singers'][:3]]))
     print('今日推荐: %s | 本地 %d + 在线 %d' % (fy['daily']['reason'], fy['daily']['localCount'], fy['daily']['onlineCount']))
     print('猜你喜欢: %s | 本地 %d + 在线 %d' % (fy['guess']['reason'], fy['guess']['localCount'], fy['guess']['onlineCount']))
+    # 1.0.33：每份推荐的目标量是 35 首（本地不够就用在线补），凑不满也不能超
+    check('推荐每份不超过 35 首（上限）',
+          len(fy['daily']['tracks']) <= 35 and len(fy['guess']['tracks']) <= 35,
+          'daily=%d guess=%d' % (len(fy['daily']['tracks']), len(fy['guess']['tracks'])))
+    check('推荐每份的条数与 localCount + onlineCount 自洽',
+          all(len(fy[k]['tracks']) == (fy[k]['localCount'] or 0) + (fy[k]['onlineCount'] or 0)
+              for k in ('daily', 'guess')),
+          'daily=%d/%d+%d guess=%d/%d+%d' % (
+              len(fy['daily']['tracks']), fy['daily']['localCount'] or 0, fy['daily']['onlineCount'] or 0,
+              len(fy['guess']['tracks']), fy['guess']['localCount'] or 0, fy['guess']['onlineCount'] or 0))
+    check('推荐里没有重复曲目（同卡片内）',
+          all(len(set((t.get('name') or '') + '|' + (t.get('singer') or '') for t in fy[k]['tracks']))
+              == len(fy[k]['tracks']) for k in ('daily', 'guess')))
 
     with sync_playwright() as pw:
         b = pw.chromium.launch(executable_path='/usr/bin/chromium', headless=True,
@@ -187,6 +200,10 @@ def main():
               ' / '.join(reasons))
         metas = page.eval_on_selector_all('.foryou-slot .fy-meta', 'els => els.map(e => e.textContent.trim())')
         check('卡片写明数量并提示可点开', all('点开看详情' in m for m in metas), ' | '.join(metas))
+        # 卡片上第一个数就是这一份的总量，且与接口一致（老版只写本地/在线分项）
+        want = [len(fy['daily']['tracks']), len(fy['guess']['tracks'])]
+        got = [int(m.split('首')[0].strip().replace('共 ', '')) for m in metas if '首' in m]
+        check('卡片数量 = 接口给的曲目数（35 首目标一眼可见）', got == want, 'card=%s api=%s' % (got, want))
         imgs = page.eval_on_selector_all('.foryou-slot .fy-card .fy-cov img',
                                          'els => els.map(e => ({ w: e.naturalWidth, n: e.naturalWidth > 0 }))')
         peers = page.eval_on_selector_all('.foryou-slot .fy-card',

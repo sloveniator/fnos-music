@@ -237,10 +237,24 @@
       if (d.sources && d.sources.length) onlineSourcesCache = d.sources
     } catch {}
   }
+  /**
+   * 管理后台入口的闸门：只有站长的账户看得到（主人 2026-09-17 要求）。
+   * 侧栏齿轮图标、设置页那一行、FM 提示条里的后台深链，全部按这个判断走 ——
+   * 其他账户连入口都不显示，省得点进去撞一堵「要口令」的墙。
+   * 后台本身仍有独立口令这道锁，这里管的是「不给别人顺手点进去的入口」。
+   */
+  const ADMIN_ACCOUNT = 'slceleto'
+  const isAdminAccount = () => String((me && me.name) || '').trim().toLowerCase() === ADMIN_ACCOUNT
+  /** 带 data-admin-entry 标记的元素默认隐藏，进应用时按账户决定是否放出来 */
+  function applyAdminEntry() {
+    const on = isAdminAccount()
+    document.querySelectorAll('[data-admin-entry]').forEach((e) => { e.hidden = !on })
+  }
   async function enterApp() {
     $('#login').hidden = true
     $('#shell').hidden = false
     $('#who').textContent = me.name
+    applyAdminEntry()
     await Promise.all([loadUserState(), refreshPlaylists()])
     route()
     // 打开网页/APP 自动开台（FM 电台）：等首屏渲染落地后再起播，不抢首屏
@@ -476,7 +490,9 @@
       tdCov.appendChild(coverImg(t, null, (t.singer || '') + (t.album || '') + (t.name || '')))
     }
     cells.cov = tdCov
-    const tdName = el('td')
+    // 歌名列带上列名（此前只有表头是 name-col，行里没类名）：
+    // 窄屏的「歌名最多两行 + 歌手省略号」密度规则要有个稳定的挂钩（见 app.css ≤560px）
+    const tdName = el('td', 'name-col')
     tdName.appendChild(el('div', null, t.name))
     if (opts.showSinger !== false) tdName.appendChild(el('div', 'sub', t.singer || '未知歌手'))
     cells.name = tdName
@@ -971,9 +987,12 @@
       const body = el('div', 'fy-body')
       body.appendChild(el('div', 'fy-name', mix.name))
       body.appendChild(el('div', 'fy-reason', mix.reason || ''))
-      const meta = []
-      if (mix.localCount) meta.push(mix.localCount + ' 首本地')
-      if (mix.onlineCount) meta.push(mix.onlineCount + ' 首在线')
+      // 卡片上先把「这一份多少首」摆出来（老版只写本地/在线两条分项，
+      // 凑不满时看不出总量目标，用户会以为功能没做）
+      const total = (mix.tracks || []).length
+      const meta = [total + ' 首' + (mix.onlineCount
+        ? '（本地 ' + (mix.localCount || 0) + ' + 在线 ' + mix.onlineCount + '）'
+        : '')]
       body.appendChild(el('div', 'fy-meta', (meta.join(' · ') || '—') + ' · 点开看详情'))
       card.appendChild(body)
       card.onclick = () => { location.hash = '#/mix/' + mix.id }
@@ -1007,7 +1026,9 @@
     const tdCov = el('td', 'cov')
     tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || '')))
     cells.cov = tdCov
-    const tdName = el('td')
+    // 歌名列带上列名（此前只有表头是 name-col，行里没类名）：
+    // 窄屏的「歌名最多两行 + 歌手省略号」密度规则要有个稳定的挂钩（见 app.css ≤560px）
+    const tdName = el('td', 'name-col')
     tdName.appendChild(el('div', null, t.name))
     tdName.appendChild(el('div', 'sub', (t.singer || '未知歌手') + ' · 在线'))
     cells.name = tdName
@@ -1763,33 +1784,33 @@ kuwo.cn/playlist_detail/280301309</pre>
     const n = selCtx.sel.size
     document.querySelectorAll('.dl-sel').forEach(b => {
       b.disabled = n === 0
-      const sp = b.querySelector('span')
-      if (sp) sp.textContent = '下载选中 (' + n + ')'
+      const sp = b.querySelector('.bn')
+      if (sp) sp.textContent = '(' + n + ')'
     })
     // 删除只对本地曲目有效（在线曲目属于音源，删不了），故单独计数
     const nLocal = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online).length
     document.querySelectorAll('.del-sel').forEach(b => {
       b.disabled = nLocal === 0
-      const sp = b.querySelector('span')
-      if (sp) sp.textContent = '删除选中 (' + nLocal + ')'
+      const sp = b.querySelector('.bn')
+      if (sp) sp.textContent = '(' + nLocal + ')'
     })
     // 加入歌单同样只认本地曲目，与删除共用一个计数
     document.querySelectorAll('.pl-sel').forEach(b => {
       b.disabled = nLocal === 0
-      const sp = b.querySelector('span')
-      if (sp) sp.textContent = '加入歌单 (' + nLocal + ')'
+      const sp = b.querySelector('.bn')
+      if (sp) sp.textContent = '(' + nLocal + ')'
     })
     // 分享也只认本地曲目（在线曲目没有可打包的文件）
     document.querySelectorAll('.share-sel').forEach(b => {
       b.disabled = nLocal === 0
-      const sp = b.querySelector('span')
-      if (sp) sp.textContent = '分享选中 (' + nLocal + ')'
+      const sp = b.querySelector('.bn')
+      if (sp) sp.textContent = '(' + nLocal + ')'
     })
     // 收藏同样只认本地曲目（本页的在线行不在列表里，无从勾选）
     document.querySelectorAll('.love-sel').forEach(b => {
       b.disabled = nLocal === 0
-      const sp = b.querySelector('span')
-      if (sp) sp.textContent = '喜欢选中 (' + nLocal + ')'
+      const sp = b.querySelector('.bn')
+      if (sp) sp.textContent = '(' + nLocal + ')'
     })
     const boxes = document.querySelectorAll('.row-sel')
     const hdr = document.querySelector('.all-sel')
@@ -1838,8 +1859,8 @@ kuwo.cn/playlist_detail/280301309</pre>
   })
   /** 「下载选中 (n)」按钮：读取当前列表的勾选项 */
   const selDlBtn = (cls) => {
-    const b = el('button', (cls || 'btn mini ghost') + ' dl-sel')
-    b.innerHTML = SVG.dl + '<span>下载选中 (0)</span>'
+    const b = el('button', (cls || 'btn mini ghost') + ' dl-sel batch-btn')
+    b.innerHTML = SVG.dl + '<span class="bl">下载选中</span><span class="bn">(0)</span>'
     b.disabled = true
     b.onclick = () => {
       const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)))
@@ -1850,8 +1871,8 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
   /** 「删除选中 (n)」按钮：只对本地曲目生效（在线曲目属于音源，删不了） */
   const selDelBtn = (cls) => {
-    const b = el('button', (cls || 'btn mini ghost') + ' del-sel')
-    b.innerHTML = SVG.trash + '<span>删除选中 (0)</span>'
+    const b = el('button', (cls || 'btn mini ghost') + ' del-sel batch-btn')
+    b.innerHTML = SVG.trash + '<span class="bl">删除选中</span><span class="bn">(0)</span>'
     b.disabled = true
     b.onclick = () => {
       const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online)
@@ -1862,16 +1883,16 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
   /** 「加入歌单 (n)」按钮：歌单目前只存曲库内曲目，故与删除共用「本地曲目」计数 */
   const selPlBtn = (cls) => {
-    const b = el('button', (cls || 'btn mini ghost') + ' pl-sel')
-    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.6"/><circle cx="16.6" cy="15.5" r="2.6"/></svg><span>加入歌单 (0)</span>'
+    const b = el('button', (cls || 'btn mini ghost') + ' pl-sel batch-btn')
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.6"/><circle cx="16.6" cy="15.5" r="2.6"/></svg><span class="bl">加入歌单</span><span class="bn">(0)</span>'
     b.disabled = true
     b.onclick = () => askAddToPlaylist(selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online))
     return b
   }
   /** 「喜欢选中 (n)」按钮：批量把本地曲目收进「我喜欢」（已在列表里的服务端会跳过） */
   const selLoveBtn = (cls) => {
-    const b = el('button', (cls || 'btn mini ghost') + ' love-sel')
-    b.innerHTML = SVG.heart + '<span>喜欢选中 (0)</span>'
+    const b = el('button', (cls || 'btn mini ghost') + ' love-sel batch-btn')
+    b.innerHTML = SVG.heart + '<span class="bl">喜欢选中</span><span class="bn">(0)</span>'
     b.disabled = true
     b.onclick = async () => {
       const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online && !t.missing && t.id)
@@ -1888,8 +1909,8 @@ kuwo.cn/playlist_detail/280301309</pre>
   }
   /** 「分享选中 (n)」按钮：只分享云盘曲目（在线曲目没有稳定文件，服务端会跳过） */
   const selShareBtn = (cls) => {
-    const b = el('button', (cls || 'btn mini ghost') + ' share-sel')
-    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 7l4-4 4 4"/><path d="M5 14v5.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V14"/></svg><span>分享选中 (0)</span>'
+    const b = el('button', (cls || 'btn mini ghost') + ' share-sel batch-btn')
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 7l4-4 4 4"/><path d="M5 14v5.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V14"/></svg><span class="bl">分享选中</span><span class="bn">(0)</span>'
     b.disabled = true
     b.onclick = () => {
       const items = selCtx.list.filter(t => selCtx.sel.has(selRid(t)) && !t.online && t.id && !t.missing)
@@ -2122,7 +2143,9 @@ kuwo.cn/playlist_detail/280301309</pre>
     im.alt = ''
     tdCov.appendChild(picImg(t.pic, null, (t.name || '') + (t.singer || '')))
     cells.cov = tdCov
-    const tdName = el('td')
+    // 歌名列带上列名（此前只有表头是 name-col，行里没类名）：
+    // 窄屏的「歌名最多两行 + 歌手省略号」密度规则要有个稳定的挂钩（见 app.css ≤560px）
+    const tdName = el('td', 'name-col')
     tdName.appendChild(el('div', null, t.name))
     tdName.appendChild(el('div', 'sub', t.singer || '未知歌手'))
     cells.name = tdName
@@ -3465,12 +3488,16 @@ kuwo.cn/playlist_detail/280301309</pre>
    */
   function fmWarnBar() {
     const w = el('div', 'fm-warn')
-    w.appendChild(el('span', 'fm-warn-tx', '⚠ 汽水音乐源未启用，FM 电台无法开台。'))
-    const a = el('a', 'btn', '去管理后台开启 →')
-    a.href = BASE + '/admin/#sources'
-    a.target = '_blank'
-    a.rel = 'noopener'
-    w.appendChild(a)
+    // 后台入口只对站长可见：别的账户给一句交代，不给点进去撞锁的深链
+    const admin = isAdminAccount()
+    w.appendChild(el('span', 'fm-warn-tx', '⚠ 汽水音乐源未启用，FM 电台无法开台。' + (admin ? '' : '请联系管理员开启。')))
+    if (admin) {
+      const a = el('a', 'btn', '去管理后台开启 →')
+      a.href = BASE + '/admin/#sources'
+      a.target = '_blank'
+      a.rel = 'noopener'
+      w.appendChild(a)
+    }
     return w
   }
 
@@ -3801,14 +3828,17 @@ kuwo.cn/playlist_detail/280301309</pre>
     const acctGrid = el('div', 'set-grid')
     acctGrid.appendChild(el('span', 'set-k', '当前用户'))
     acctGrid.appendChild(el('span', 'set-v', me ? me.name : '—'))
-    acctGrid.appendChild(el('span', 'set-k', '管理后台'))
-    const adminLink = el('a', 'btn')
-    adminLink.href = BASE + '/admin/'
-    adminLink.textContent = '打开管理后台 →'
-    adminLink.target = '_blank'
-    adminLink.rel = 'noopener'
-    acctGrid.appendChild(el('span', 'set-v', ''))
-    acctGrid.lastChild.appendChild(adminLink)
+    // 「管理后台」这一行只给站长看：别人的账户里连标签带按钮一起不生成
+    if (isAdminAccount()) {
+      acctGrid.appendChild(el('span', 'set-k', '管理后台'))
+      const adminLink = el('a', 'btn')
+      adminLink.href = BASE + '/admin/'
+      adminLink.textContent = '打开管理后台 →'
+      adminLink.target = '_blank'
+      adminLink.rel = 'noopener'
+      acctGrid.appendChild(el('span', 'set-v', ''))
+      acctGrid.lastChild.appendChild(adminLink)
+    }
     acctGrid.appendChild(el('span', 'set-k', '退出登录'))
     const logoutBtn = el('button', 'btn danger-btn')
     logoutBtn.textContent = '退出登录'

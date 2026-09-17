@@ -59,7 +59,8 @@
       <div class="side-foot">
         <span id="who"></span>
         <span class="side-links">
-          <a href="admin/" title="管理后台"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v3.4M12 18v3.4M2.6 12H6M18 12h3.4M5.2 5.2 7.6 7.6M16.4 16.4l2.4 2.4M18.8 5.2l-2.4 2.4M7.6 16.4l-2.4 2.4"/></svg></a>
+          <!-- 管理后台入口：默认藏起来，只有站长账户进应用后由 applyAdminEntry() 显示（见 app.js） -->
+          <a href="admin/" title="管理后台" data-admin-entry hidden><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v3.4M12 18v3.4M2.6 12H6M18 12h3.4M5.2 5.2 7.6 7.6M16.4 16.4l2.4 2.4M18.8 5.2l-2.4 2.4M7.6 16.4l-2.4 2.4"/></svg></a>
           <button id="logout" title="退出登录"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.2 6.8a8 8 0 1 0 11.6 0"/></svg></button>
         </span>
       </div>

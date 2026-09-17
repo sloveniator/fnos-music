@@ -20,6 +20,30 @@ import { onlineSearch, onlineSources } from '@/online'
  */
 
 const CACHE_TTL = 5 * 60 * 1000
+/** 一张推荐卡的目标首数（主人 2026-09-17：今日推荐与猜你喜欢都补到 35 首，按天轮换）。
+ *  35 首是「整份推荐」的目标：本地曲库够多就多给本地，不够则按画像去在线源补齐；
+ *  第三方搜不到那么多时有多少给多少，绝不为了凑数重复推同一首。 */
+const MIX_SIZE = 35
+/** 本地曲目在一张卡里的上限：本地全占满就没有「在线新歌」的位置了 */
+const DAILY_LOCAL_MAX = 20
+const GUESS_LOCAL_MAX = 14
+/** 单歌手在本地候选里的上限（越小越杂食；猜你喜欢更看头部歌手，故允许放宽到 2） */
+const DAILY_LOCAL_PER_SINGER = 2
+const GUESS_LOCAL_PER_SINGER = 1
+/** 在线补歌要找几位画像头部歌手：每位一次搜索、单歌手最多 4 首，
+ *  daily 需要 9 位才能凑够 35 首「零本地曲库」的账户（9 × 4 = 36） */
+const DAILY_ONLINE_SINGERS = 9
+const GUESS_ONLINE_SINGERS = 7
+/** 单歌手最多贡献几首在线歌 */
+const ONLINE_PER_SINGER = 4
+/** 每歌手取歌的硬上限：口味面很窄的账户（画像里只有两三位歌手）靠放宽上限凑到目标量，
+ *  但不超过这个数 —— 一份推荐里同一位歌手最多 8 首，再多就成个人专辑了 */
+const ONLINE_PER_SINGER_MAX = 8
+/** 每位歌手最多翻几页搜索结果：两份推荐共用同一个「不重复」排除集，
+ *  一天要从同几位歌手身上取最多 70 首，一页（20 条）根本不够 */
+const ONLINE_MAX_PAGES = 3
+/** 在线搜索的并发度：9 位歌手串行最坏要等 9 × 5s，并发 3 路把等待压到约 1/3 */
+const ONLINE_CONCURRENCY = 3
 /** 口味画像回看的播放条数（播放历史本身最多 100 条） */
 const HISTORY_WINDOW = 60
 /** 「最近在听」窗口：猜你喜欢只看这一段 */
@@ -302,41 +326,93 @@ const enabledOnlineIds = (): string[] => onlineSources().filter((s) => s.enabled
 /**
  * 按画像头部歌手去在线源找「你还没有的」歌。
  * kw/wy 优先（接口稳、覆盖好），拿到候选后按种子打散，保证当天结果稳定。
+ *
+ * 关键约束：候选按歌手**只抓一次**，两份推荐共用这个候选池。实测这条路线的源（kw）
+ * 对同一关键词的连续重复查询会直接返回空列表 —— 第二轮再打一遍等于没打，反而
+ * 把「今日推荐」撑到 35 首的同时把「猜你喜欢」饿死（当场实测 35 / 8）。
  */
 const pickOnline = async (
   prof: TasteProfile,
-  opts: { singers: string[], limit: number, exclude: Set<string>, perSingerMax: number, seed: number },
+  opts: {
+    singers: string[], limit: number, exclude: Set<string>, perSingerMax: number, seed: number,
+    pool?: Map<string, any[]>,
+  },
 ): Promise<MixRow[]> => {
   const enabled = enabledOnlineIds()
   const source = ONLINE_ORDER.find((s) => enabled.includes(s))
   if (!source) return []
   const out: MixRow[] = []
   const rand = prng(opts.seed ^ 0x9E3779B9)
-  for (const singer of opts.singers) {
-    if (out.length >= opts.limit) break
-    // 合并署名（'A、B'）整串搜不到东西：拆开后用最长的那个名字去搜，命中时任一名字对上即可
+  const pool = opts.pool ?? new Map<string, any[]>()
+  // 目标量摊到几位歌手头上：歌手多就按 4 首封顶，歌手少（画像窄）才放宽到 8 首。
+  // 这样「35 首」在口味面窄的账户上也尽量凑满，而不是固定 5 位 × 4 首 = 20 首封顶。
+  const perSinger = Math.min(
+    ONLINE_PER_SINGER_MAX,
+    Math.max(opts.perSingerMax, Math.ceil(opts.limit / Math.max(1, opts.singers.length))),
+  )
+
+  /**
+   * 取一位歌手的候选（走缓存）：过滤掉翻唱/合集（歌手对不上）与无效时长。
+   * 一页 20 条里常常只有几条能过校验，所以会往后翻页，直到够两份推荐分的量
+   * （每位最多 8 首 × 2 份）或翻满 ONLINE_MAX_PAGES 页。
+   */
+  const fetchSinger = async (singer: string): Promise<any[]> => {
+    const hit = pool.get(singer)
+    if (hit) return hit
     const tokens = singerTokens(singer).sort((a, b) => b.length - a.length)
     const query = tokens[0] || singer
-    const res: any = await withTimeout(onlineSearch(source, query, 1, 20), 5000)
-    const list: any[] = Array.isArray(res?.list) ? res.list : []
-    if (!list.length) continue
-    // 只保留「歌手对得上、时长正常」的候选：第三方搜索经常把翻唱/合集塞进来
-    const cands = list.filter((x) => x?.id && Number(x.intervalMs) > 0 && tokens.some((tk) => norm(x.singer).includes(norm(tk))))
-    for (let i = cands.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1))
-      const tmp = cands[i]
-      cands[i] = cands[j]
-      cands[j] = tmp
+    const ok = (x: any) => x?.id && Number(x.intervalMs) > 0 && tokens.some((tk) => norm(x.singer).includes(norm(tk)))
+    const got: any[] = []
+    for (let page = 1; page <= ONLINE_MAX_PAGES; page++) {
+      const res: any = await withTimeout(onlineSearch(source, query, page, 20), 5000)
+      const list: any[] = Array.isArray(res?.list) ? res.list : []
+      if (!list.length) break
+      got.push(...list.filter(ok))
+      if (got.length >= ONLINE_PER_SINGER_MAX * 2) break
     }
-    let n = 0
-    for (const x of cands) {
-      if (n >= opts.perSingerMax || out.length >= opts.limit) break
-      const key = trackKey(x.name, x.singer)
-      if (opts.exclude.has(key)) continue
-      opts.exclude.add(key)
-      out.push(toOnlineRow(x, source))
-      n++
+    pool.set(singer, got)
+    return got
+  }
+
+  /**
+   * 两轮收编：第一轮每位歌手按 4 首（保住「一份推荐里不出现个人专辑」的观感），
+   * 收完还凑不满目标量，第二轮才放宽到 8 首补差额。两轮都只从候选池里取，不碰网络。
+   */
+  // 每位歌手在**这一份推荐里**已经收了几首：两轮之间不清零，
+  // 否则第二轮又会多给同一位歌手 8 首（上限本来是「一份推荐里最多 8 首」）。
+  const taken = new Map<string, number>()
+  const passes = [perSinger, ONLINE_PER_SINGER_MAX]
+  for (const cap of passes) {
+    // 分批并发搜索，批内仍按歌手顺序收编：打散与去重都在收编时做，
+    // 所以「同一天同一账户」的结果与逐位串行完全一致（并发不影响确定性）。
+    for (let i = 0; i < opts.singers.length && out.length < opts.limit; i += ONLINE_CONCURRENCY) {
+      const batch = opts.singers.slice(i, i + ONLINE_CONCURRENCY)
+      const lists = await Promise.all(batch.map((s) => fetchSinger(s)))
+      for (let b = 0; b < lists.length; b++) {
+        const raw = lists[b]
+        const singer = batch[b]
+        if (out.length >= opts.limit || !raw.length) continue
+        if ((taken.get(singer) ?? 0) >= cap) continue
+        const cands = [...raw] // 别原地打乱：候选池还要给另一份推荐用
+        for (let k = cands.length - 1; k > 0; k--) {
+          const j = Math.floor(rand() * (k + 1))
+          const tmp = cands[k]
+          cands[k] = cands[j]
+          cands[j] = tmp
+        }
+        let n = taken.get(singer) ?? 0
+        for (const x of cands) {
+          if (n >= cap || out.length >= opts.limit) break
+          const key = trackKey(x.name, x.singer)
+          if (opts.exclude.has(key)) continue
+          opts.exclude.add(key)
+          out.push(toOnlineRow(x, source))
+          n++
+        }
+        taken.set(singer, n)
+      }
     }
+    if (out.length >= opts.limit) break
   }
   return out
 }
@@ -390,6 +466,8 @@ const build = async (userName: string): Promise<ForYou> => {
   const novelty = noveltyMap(all)
   const localKeys = new Set(all.map((t) => trackKey(t.name, t.singer)))
   // 两张卡片的在线候选共享一个排除集：同一首在线歌不在两个推荐里重复出现
+  // 也共享同一个歌手候选池：在线源对重复查询会返回空，一天只抓一次
+  const onlinePool = new Map<string, any[]>()
   const usedOnline = new Set(localKeys)
 
   const broad = await buildProfile(userName, false)
@@ -401,26 +479,26 @@ const build = async (userName: string): Promise<ForYou> => {
   // ---- 今日推荐：整体口味，每天一份，跳过最近刚听过的 ----
   const dailySeed = hash(day + ':' + userName + ':daily')
   const justPlayed = new Set(playedAll.slice(0, 6).map((t) => t.id))
-  let dailyLocal = pickLocal(all, broad, { limit: 12, seed: dailySeed, perSingerMax: 2, exclude: justPlayed, novelty })
+  let dailyLocal = pickLocal(all, broad, { limit: DAILY_LOCAL_MAX, seed: dailySeed, perSingerMax: DAILY_LOCAL_PER_SINGER, exclude: justPlayed, novelty })
   // 曲库小时「跳过最近听过」会把候选掏空，此时放宽（宁可重复听，也不要空推荐）
-  if (dailyLocal.length < 8) dailyLocal = pickLocal(all, broad, { limit: 12, seed: dailySeed, perSingerMax: 2, novelty })
-  // 在线补歌的目标是「整份推荐约 20 首」：本地曲库空/小时在线多补，本地充足时只补缺口。
-  // 之前固定 limit 8 + 3 位歌手 × 3 首，遇到「没有本地曲库」的账户（在线听歌为主）
-  // 今日推荐/猜你喜欢就只有 8 首，看着像没做功能。
-  const dailySingers = topSingers(broad.pub, 5)
+  if (dailyLocal.length < 8) dailyLocal = pickLocal(all, broad, { limit: DAILY_LOCAL_MAX, seed: dailySeed, perSingerMax: DAILY_LOCAL_PER_SINGER, novelty })
+  // 在线补歌的目标是「整份推荐 MIX_SIZE 首」：本地曲库空/小时在线多补，本地充足时只补缺口。
+  // 之前固定 limit 8 + 5 位歌手 × 4 首、整份只有 20 首，遇到「没有本地曲库」的账户
+  // （在线听歌为主）看着就像没做功能。
+  const dailySingers = topSingers(broad.pub, DAILY_ONLINE_SINGERS)
   const dailyOnline = cold || !dailySingers.length
     ? []
-    : await pickOnline(broad.pub, { singers: dailySingers, limit: Math.max(8, 20 - dailyLocal.length), exclude: usedOnline, perSingerMax: 4, seed: dailySeed })
+    : await pickOnline(broad.pub, { singers: dailySingers, limit: Math.max(8, MIX_SIZE - dailyLocal.length), exclude: usedOnline, perSingerMax: ONLINE_PER_SINGER, seed: dailySeed, pool: onlinePool })
 
   // ---- 猜你喜欢：只看最近在听的窗口，偏向头部歌手的其他作品 ----
   const guessSeed = hash(day + ':' + userName + ':guess')
   const heardAll = new Set(playedAll.map((t) => t.id))
-  let guessLocal = pickLocal(all, recent, { limit: 6, seed: guessSeed, perSingerMax: 1, exclude: heardAll, novelty })
-  if (guessLocal.length < 4) guessLocal = pickLocal(all, recent, { limit: 6, seed: guessSeed, perSingerMax: 2, novelty })
-  const guessSingers = topSingers(recent.pub, 3)
+  let guessLocal = pickLocal(all, recent, { limit: GUESS_LOCAL_MAX, seed: guessSeed, perSingerMax: GUESS_LOCAL_PER_SINGER, exclude: heardAll, novelty })
+  if (guessLocal.length < 4) guessLocal = pickLocal(all, recent, { limit: GUESS_LOCAL_MAX, seed: guessSeed, perSingerMax: 2, novelty })
+  const guessSingers = topSingers(recent.pub, GUESS_ONLINE_SINGERS)
   const guessOnline = cold || !guessSingers.length
     ? []
-    : await pickOnline(recent.pub, { singers: guessSingers, limit: Math.max(10, 14 - guessLocal.length), exclude: usedOnline, perSingerMax: 4, seed: guessSeed })
+    : await pickOnline(recent.pub, { singers: guessSingers, limit: Math.max(10, MIX_SIZE - guessLocal.length), exclude: usedOnline, perSingerMax: ONLINE_PER_SINGER, seed: guessSeed, pool: onlinePool })
 
   const dailyTracks = interleave(dailyLocal.map(stripLocal), dailyOnline)
   const guessTracks = interleave(guessLocal.map(stripLocal), guessOnline)

@@ -1585,3 +1585,35 @@ button, .icon-btn, .chip, .btn, .otab { -webkit-user-select: none; user-select: 
   .lf-head button { font-size: var(--m-fs-sm); padding: 6px 10px; }
   .lf-head span { font-size: var(--m-fs-xs); }
 }
+/* ============================================================================
+   ≤560px 再收一档 —— 主人 2026-09-17：「全部歌曲」的 UI 太占版面。
+   ① 页头按钮墙：7 个按钮原来铺 4 行、整整吃掉 184px（近 1/4 屏），第一首歌要滚到
+      337px 才露面 → 主操作各占半行，批量操作收成「图标 + 数量」的窄按钮、5 枚并排
+      一行；入口一个都没少（窄屏藏的是「下载选中」这几个字，不是按钮本身）。
+   ② 列表行：竖向留白 + 副标题字号各收一档，行高 55.7px → 约 46px，一屏从 7.4 行
+      到 11 行；图标命中区仍是 33px（本文件对触控入口的下限）。
+   ③ 长歌名最多两行、歌手名走省略号：否则长名字把行撑到三行，整页高矮不齐。
+   ============================================================================ */
+/* 批量按钮：标签与数量拆成两个 span 后，行内那个空格会丢 —— 补回来，
+   保持原来的「下载选中 (0)」词距（窄屏只显示数量，见下面的 560 密度层） */
+.page-head .btns .batch-btn .bn { margin-left: .3em; }
+
+@media (max-width: 560px) {
+  .page-head { margin-bottom: 12px; }
+  .page-head .btns { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+  .page-head .btns > .btn { flex: 1 1 calc(50% - 4px); }
+  .page-head .btns > .btn:only-child { flex: 1 1 100%; }
+  /* width:auto 必须有：上面那份 ≤560 的 `.btns .btn { width: 100% }` 还在，
+     而 flex-basis:auto 会拿它当基准 → 5 枚批量按钮会各占一整行 */
+  .page-head .btns > .batch-btn { flex: 0 1 auto; width: auto; min-width: 58px;
+    padding-left: 8px; padding-right: 8px; }
+  .page-head .btns > .batch-btn .bl { display: none; }
+  .page-head .btns > .batch-btn .bn { margin-left: 0; font-variant-numeric: tabular-nums; }
+
+  .tracks th { padding: 6px 10px; }
+  .tracks td { padding: clamp(5.5px, 1.7vw, 9px) 10px; }
+  .tracks .sub { font-size: var(--m-fs-xs); margin-top: 1px; }
+  .tracks td.name-col > div:first-child { display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; overflow: hidden; }
+  .tracks .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
